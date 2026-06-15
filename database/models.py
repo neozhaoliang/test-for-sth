@@ -450,3 +450,44 @@ class ZhihuCreator(Base):
     get_voteup_count = Column(Integer, default=0, comment='获赞数')
     add_ts = Column(BigInteger, comment='添加时间戳')
     last_modify_ts = Column(BigInteger, comment='最后修改时间戳')
+
+
+# ═══════════════════════════════════════════════════════════════
+# 搜狐视频 (tv.sohu.com)
+# ═══════════════════════════════════════════════════════════════
+
+class SohuVideo(Base):
+    __tablename__ = "sohu_video"
+    video_id = Column(String(128), primary_key=True, comment="视频ID (vid)")
+    video_name = Column(Text, comment="视频名称")
+    album_id = Column(String(64), comment="专辑ID")
+    album_name = Column(Text, comment="专辑名称")
+    category = Column(String(32), comment="分类ID")
+    category_name = Column(String(64), comment="分类名称")
+    episode = Column(String(32), comment="集数")
+    description = Column(Text, comment="视频简介")
+    cover_url = Column(Text, comment="封面图URL")
+    director = Column(String(128), comment="导演")
+    actors = Column(Text, comment="演员 (逗号分隔)")
+    area = Column(String(64), comment="地区")
+    year = Column(String(16), comment="年份")
+    duration = Column(String(32), comment="时长")
+    play_count = Column(String(32), comment="播放量")
+    score = Column(String(16), comment="评分")
+    video_url = Column(Text, comment="视频页面URL")
+    source_keyword = Column(String(256), comment="搜索关键词")
+    last_modify_ts = Column(BigInteger, comment="最后修改时间戳")
+
+
+class SohuVideoComment(Base):
+    __tablename__ = "sohu_video_comment"
+    comment_id = Column(String(64), primary_key=True, comment="评论ID")
+    video_id = Column(String(128), index=True, comment="视频ID")
+    content = Column(Text, comment="评论内容")
+    user_id = Column(String(64), comment="用户ID")
+    nickname = Column(String(128), comment="用户昵称")
+    avatar = Column(Text, comment="用户头像")
+    like_count = Column(String(32), comment="点赞数")
+    reply_count = Column(String(32), comment="回复数")
+    create_time = Column(String(32), comment="评论时间")
+    last_modify_ts = Column(BigInteger, comment="最后修改时间戳")
