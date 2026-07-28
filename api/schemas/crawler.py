@@ -33,6 +33,7 @@ class PlatformEnum(str, Enum):
     WEIBO = "wb"
     TIEBA = "tieba"
     ZHIHU = "zhihu"
+    SOHU = "sohu"
 
 
 class LoginTypeEnum(str, Enum):
@@ -47,6 +48,8 @@ class CrawlerTypeEnum(str, Enum):
     SEARCH = "search"
     DETAIL = "detail"
     CREATOR = "creator"
+    DOWNLOAD = "download"
+    CATEGORY = "category"  # 按分类浏览 (sohu)
 
 
 class SaveDataOptionEnum(str, Enum):
@@ -74,8 +77,12 @@ class CrawlerStartRequest(BaseModel):
     save_option: SaveDataOptionEnum = SaveDataOptionEnum.JSONL
     cookies: str = ""
     headless: bool = False
+    proxy: str = ""  # Proxy URL, e.g. http://user:pass@host:port
     max_notes_count: Optional[int] = Field(default=None, ge=1, le=MAX_API_LIMIT_COUNT)
     max_comments_count: Optional[int] = Field(default=None, ge=1, le=MAX_API_LIMIT_COUNT)
+    # ── Sohu 专用 ──
+    so_category: str = ""     # 分类: 电视剧/电影/综艺/动漫/纪录片/少儿/音乐/新闻/体育/短视频/教育
+    so_sort_type: str = ""    # 排序: latest/hottest
 
 
 class CrawlerStatusResponse(BaseModel):

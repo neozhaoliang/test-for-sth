@@ -20,6 +20,8 @@ import asyncio
 import subprocess
 import signal
 import os
+import sys
+import traceback
 from typing import Optional, List
 from datetime import datetime
 from pathlib import Path
@@ -112,12 +114,18 @@ class CrawlerManager:
 
             # Build command line arguments
             cmd = self._build_command(config)
+            env = self._build_env(config)
+
+            # Determine working directory
+            platform = self._get_value(config.platform)
+            cwd = str(self._project_root.parent / "playwright-fake") if platform == "sohu" else str(self._project_root)
 
             # Log start information
-            entry = self._create_log_entry(f"Starting crawler: {' '.join(cmd)}", "info")
+            entry = self._create_log_entry(f"V2-Starting crawler: {' '.join(cmd)}", "info")
             await self._push_log(entry)
 
             try:
+                await self._push_log(self._create_log_entry("[DEBUG] step1: about to Popen", "debug"))
                 # Start subprocess
                 self.process = subprocess.Popen(
                     cmd,
@@ -126,16 +134,18 @@ class CrawlerManager:
                     text=True,
                     encoding='utf-8',
                     bufsize=1,
-                    cwd=str(self._project_root),
-                    env={**os.environ, "PYTHONUNBUFFERED": "1"}
+                    cwd=cwd,
+                    env=env,
                 )
 
+                await self._push_log(self._create_log_entry("[DEBUG] step2: Popen ok, setting status", "debug"))
                 self.status = "running"
                 self.started_at = datetime.now()
                 self.current_config = config
 
+                await self._push_log(self._create_log_entry(f"[DEBUG] step3: platform type={type(config.platform).__name__}, crawler_type type={type(config.crawler_type).__name__}", "debug"))
                 entry = self._create_log_entry(
-                    f"Crawler started on platform: {config.platform.value}, type: {config.crawler_type.value}",
+                    f"Crawler started on platform: {self._get_value(config.platform)}, type: {self._get_value(config.crawler_type)}",
                     "success"
                 )
                 await self._push_log(entry)
@@ -146,7 +156,8 @@ class CrawlerManager:
                 return True
             except Exception as e:
                 self.status = "error"
-                entry = self._create_log_entry(f"Failed to start crawler: {str(e)}", "error")
+                tb = traceback.format_exc()
+                entry = self._create_log_entry(f"Failed to start crawler: {str(e)}\nTRACEBACK:\n{tb}", "error")
                 await self._push_log(entry)
                 return False
 
@@ -196,28 +207,47 @@ class CrawlerManager:
         """Get current status"""
         return {
             "status": self.status,
-            "platform": self.current_config.platform.value if self.current_config else None,
-            "crawler_type": self.current_config.crawler_type.value if self.current_config else None,
+            "platform": self._get_value(self.current_config.platform) if self.current_config else None,
+            "crawler_type": self._get_value(self.current_config.crawler_type) if self.current_config else None,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "error_message": None
         }
 
+    @staticmethod
+    def _get_value(field) -> str:
+        """Safely get string value from an enum or plain string field."""
+        return field.value if hasattr(field, 'value') else field
+
     def _build_command(self, config: CrawlerStartRequest) -> list:
         """Build main.py command line arguments"""
-        cmd = ["uv", "run", "python", "main.py"]
+        platform = self._get_value(config.platform)
+        login_type = self._get_value(config.login_type)
+        crawler_type = self._get_value(config.crawler_type)
+        save_option = self._get_value(config.save_option)
 
-        cmd.extend(["--platform", config.platform.value])
-        cmd.extend(["--lt", config.login_type.value])
-        cmd.extend(["--type", config.crawler_type.value])
-        cmd.extend(["--save_data_option", config.save_option.value])
+        # 🔥 Sohu 爬虫使用 playwright-fake 目录 (独立反检测代码库)
+        if platform == "sohu":
+            project_root = self._project_root.parent / "playwright-fake"
+        else:
+            project_root = self._project_root
+
+        cmd = [sys.executable, str(project_root / "main.py")]
+
+        cmd.extend(["--platform", platform])
+        cmd.extend(["--lt", login_type])
+        cmd.extend(["--type", crawler_type])
+        cmd.extend(["--save_data_option", save_option])
 
         # Pass different arguments based on crawler type
-        if config.crawler_type.value == "search" and config.keywords:
+        if crawler_type == "search" and config.keywords:
             cmd.extend(["--keywords", config.keywords])
-        elif config.crawler_type.value == "detail" and config.specified_ids:
+        elif crawler_type == "detail" and config.specified_ids:
             cmd.extend(["--specified_id", config.specified_ids])
-        elif config.crawler_type.value == "creator" and config.creator_ids:
+        elif crawler_type == "creator" and config.creator_ids:
             cmd.extend(["--creator_id", config.creator_ids])
+        elif crawler_type == "category":
+            # 🔥 Sohu 分类浏览 — 通过环境变量传 SO_CATEGORY / SO_SORT_TYPE
+            pass  # category fields handled via environment below
 
         if config.start_page != 1:
             cmd.extend(["--start", str(config.start_page)])
@@ -234,9 +264,28 @@ class CrawlerManager:
         if config.cookies:
             cmd.extend(["--cookies", config.cookies])
 
+        if config.proxy:
+            cmd.extend(["--enable_ip_proxy", "true"])
+            cmd.extend(["--ip_proxy_provider_name", "static"])
+            cmd.extend(["--static_proxy_url", config.proxy])
+
         cmd.extend(["--headless", "true" if config.headless else "false"])
 
         return cmd
+
+    def _build_env(self, config: CrawlerStartRequest) -> dict:
+        """Build environment variables for crawler process."""
+        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+
+        # Sohu 专用环境变量
+        platform = self._get_value(config.platform)
+        if platform == "sohu":
+            if config.so_category:
+                env["SO_CATEGORY"] = config.so_category
+            if config.so_sort_type:
+                env["SO_SORT_TYPE"] = config.so_sort_type
+
+        return env
 
     async def _read_output(self):
         """Asynchronously read process output"""
