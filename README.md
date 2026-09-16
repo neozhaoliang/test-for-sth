@@ -31,25 +31,39 @@
 
 ## 📖 项目简介
 
-一个功能强大的**多平台自媒体数据采集工具**，支持小红书、抖音、快手、B站、微博、贴吧、知乎等主流平台的公开信息抓取。
+一个基于 MediaCrawler 改造的**数据采集工具**，当前支持**雪球（xueqiu.com）**和 **B 站**的公开信息抓取。
+
+> 雪球平台：输入用户 ID，抓取该用户的**全部发帖**和**全部回复**。强制有头浏览器（配合阿里云 WAF 滑块人工验证），所有请求经由真实浏览器页面内 XHR 发出（无 HTTP 模式）。
 
 ### 🔧 技术原理
 
-- **核心技术**：基于 [Playwright](https://playwright.dev/) 浏览器自动化框架登录保存登录态
-- **无需JS逆向**：利用保留登录态的浏览器上下文环境，通过 JS 表达式获取签名参数
+- **核心技术**：基于 [Playwright](https://playwright.dev/) 浏览器自动化框架，支持 CDP 连接你自己的 Chrome（复用登录态，反检测最佳）
+- **无需JS逆向**：雪球接口请求经由浏览器页面内 XHR 发出，WAF 校验 token 由页面脚本自动附加
 - **优势特点**：无需逆向复杂的加密算法，大幅降低技术门槛
-
 
 ## ✨ 功能特性
 | 平台   | 关键词搜索 | 指定帖子ID爬取 | 二级评论 | 指定创作者主页 | 登录态缓存 | IP代理池 | 生成评论词云图 |
 | ------ | ---------- | -------------- | -------- | -------------- | ---------- | -------- | -------------- |
-| 小红书 | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
-| 抖音   | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
-| 快手   | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
+| 雪球   | ❌          | ❌              | ❌        | ✅ (用户全部发帖+回复) | ✅          | ✅        | ❌              |
 | B 站   | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
-| 微博   | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
-| 贴吧   | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
-| 知乎   | ✅          | ✅              | ✅        | ✅              | ✅          | ✅        | ✅              |
+
+### 🚀 雪球爬取快速开始
+
+```bash
+# 直接运行 (强制有头浏览器; 遇到 WAF 滑块请在浏览器窗口手动拖动一次)
+python main.py --platform xueqiu --type creator --creator_id 1263638109
+
+# 推荐: 连接你自己的 Chrome (复用雪球登录态, 大幅降低风控)
+#   1. 完全退出 Chrome 后, 用以下命令启动:
+#      "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome-crawler-profile"
+#   2. 在该 Chrome 窗口登录一次 xueqiu.com
+#   3. 再运行爬虫命令 (ENABLE_CDP_MODE 默认开启, 自动连接 9222 端口)
+
+# 数据输出: data/xueqiu/jsonl/creator_contents_*.jsonl    (发帖)
+#           data/xueqiu/jsonl/creator_comments_*.jsonl    (回复)
+#           data/xueqiu/jsonl/creator_creators_*.jsonl    (用户信息)
+# 断点续爬: data/xueqiu/resume/resume_<用户ID>.json (被风控中断后重跑自动续爬)
+```
 
 
 

@@ -317,15 +317,15 @@ class CDPBrowserManager:
         try:
             if config.CDP_CONNECT_EXISTING:
                 # For existing browser (e.g. chrome://inspect/#remote-debugging),
-                # Chrome exposes a WebSocket at /devtools/browser and may show a confirmation
-                # dialog to the user. Use ws:// with a longer timeout to wait for user confirmation.
-                ws_url = f"ws://localhost:{self.debug_port}/devtools/browser"
-                utils.logger.info(f"[CDPBrowserManager] Connecting to existing browser via CDP: {ws_url}")
+                # use the HTTP endpoint and let Playwright resolve the browser WebSocket
+                # (newer Chrome returns 404 for the legacy /devtools/browser ws path).
+                http_url = f"http://localhost:{self.debug_port}"
+                utils.logger.info(f"[CDPBrowserManager] Connecting to existing browser via CDP: {http_url}")
                 utils.logger.info(
                     "[CDPBrowserManager] Please check your browser for a confirmation dialog and accept it"
                 )
                 self.browser = await playwright.chromium.connect_over_cdp(
-                    ws_url, timeout=config.BROWSER_LAUNCH_TIMEOUT * 1000
+                    http_url, timeout=config.BROWSER_LAUNCH_TIMEOUT * 1000
                 )
             else:
                 # For launched browser, get WebSocket URL first

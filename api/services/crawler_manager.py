@@ -117,8 +117,7 @@ class CrawlerManager:
             env = self._build_env(config)
 
             # Determine working directory
-            platform = self._get_value(config.platform)
-            cwd = str(self._project_root.parent / "playwright-fake") if platform == "sohu" else str(self._project_root)
+            cwd = str(self._project_root)
 
             # Log start information
             entry = self._create_log_entry(f"V2-Starting crawler: {' '.join(cmd)}", "info")
@@ -225,11 +224,7 @@ class CrawlerManager:
         crawler_type = self._get_value(config.crawler_type)
         save_option = self._get_value(config.save_option)
 
-        # 🔥 Sohu 爬虫使用 playwright-fake 目录 (独立反检测代码库)
-        if platform == "sohu":
-            project_root = self._project_root.parent / "playwright-fake"
-        else:
-            project_root = self._project_root
+        project_root = self._project_root
 
         cmd = [sys.executable, str(project_root / "main.py")]
 
@@ -245,9 +240,6 @@ class CrawlerManager:
             cmd.extend(["--specified_id", config.specified_ids])
         elif crawler_type == "creator" and config.creator_ids:
             cmd.extend(["--creator_id", config.creator_ids])
-        elif crawler_type == "category":
-            # 🔥 Sohu 分类浏览 — 通过环境变量传 SO_CATEGORY / SO_SORT_TYPE
-            pass  # category fields handled via environment below
 
         if config.start_page != 1:
             cmd.extend(["--start", str(config.start_page)])
@@ -269,22 +261,11 @@ class CrawlerManager:
             cmd.extend(["--ip_proxy_provider_name", "static"])
             cmd.extend(["--static_proxy_url", config.proxy])
 
-        cmd.extend(["--headless", "true" if config.headless else "false"])
-
         return cmd
 
     def _build_env(self, config: CrawlerStartRequest) -> dict:
         """Build environment variables for crawler process."""
         env = {**os.environ, "PYTHONUNBUFFERED": "1"}
-
-        # Sohu 专用环境变量
-        platform = self._get_value(config.platform)
-        if platform == "sohu":
-            if config.so_category:
-                env["SO_CATEGORY"] = config.so_category
-            if config.so_sort_type:
-                env["SO_SORT_TYPE"] = config.so_sort_type
-
         return env
 
     async def _read_output(self):

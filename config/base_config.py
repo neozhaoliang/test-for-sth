@@ -18,7 +18,7 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 # Basic configuration
-PLATFORM = "xhs"  # Platform, xhs | dy | ks | bili | wb | tieba | zhihu
+PLATFORM = "xueqiu"  # Platform, xueqiu | bili
 
 # 是否使用海外版小红书 (rednote.com)
 # 开启后 API 走 webapi.rednote.com，cookie 域使用 .rednote.com
@@ -43,10 +43,8 @@ IP_PROXY_PROVIDER_NAME = "kuaidaili"  # kuaidaili | wandouhttp | static
 # Format: "http://your_home_domain:port" or "http://user:password@your_home_domain:port"
 STATIC_PROXY_URL = ""
 
-# Setting to True will not open the browser (headless browser)
-# Setting False will open a browser
-# If Xiaohongshu keeps scanning the code to log in but fails, open the browser and manually pass the sliding verification code.
-# If Douyin keeps prompting failure, open the browser and see if mobile phone number verification appears after scanning the QR code to log in. If it does, manually go through it and try again.
+# 强制有头浏览器: 始终显示浏览器窗口 (无头模式已移除)
+# 雪球有阿里云 WAF 滑块验证, 必须使用有头浏览器以便人工拖动验证
 HEADLESS = False
 
 # Whether to save login status
@@ -68,8 +66,7 @@ CDP_DEBUG_PORT = 9222
 # macOS 示例: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 CUSTOM_BROWSER_PATH = ""
 
-# 是否在 CDP 模式下启用无头模式
-# 注意：即使设置为 True，某些反检测功能在无头模式下可能无法正常工作
+# CDP 模式同样强制有头 (无头模式已移除)
 CDP_HEADLESS = False
 
 # 浏览器启动超时时间（秒）
@@ -133,18 +130,30 @@ STOP_WORDS_FILE = "./docs/hit_stopwords.txt"
 # Chinese font file path
 FONT_PATH = "./docs/STZHONGS.TTF"
 
-# Crawl interval
-CRAWLER_MAX_SLEEP_SEC = 2
+# Crawl interval (速率限制已移除, 设为 0 即请求间不等待)
+CRAWLER_MAX_SLEEP_SEC = 0
+
+# 增量更新模式: True 时只抓取上次抓取之后新增的发帖/回复 (配合 --update)
+XUEQIU_UPDATE_MODE = False
+
+# 抓取节流 (秒/页): 0 = 不限速 (可能频繁触发 WAF 风控, 进入等待-续爬循环);
+# 设 0.5-2 可匀速抓取, 触发风控的概率大幅降低, 总体反而更快
+XUEQIU_PACE_SEC = 0
+
+# 用户发现: 检索粉丝数 >= 该阈值的用户并抓取其帖子 (0 = 关闭)
+# 来源: 已爬帖子数据中的用户 + 主页 "用户推荐" 候选
+XUEQIU_DISCOVER_FANS = 0
+
+# 单次发现最多抓取的用户数 (0 = 不限)
+XUEQIU_DISCOVER_MAX_USERS = 0
+
+# 发现时排除的用户 ID (英文逗号分隔, 如官方媒体号)
+# 示例: 9485866208=雪球基金, 8152922548=今日话题, 5124430882=7X24快讯
+XUEQIU_DISCOVER_EXCLUDE_IDS = ""
 
 # 是否禁用 SSL 证书验证。仅在使用企业代理、Burp Suite、mitmproxy 等会注入自签名证书的中间人代理时设为 True。
 # 警告：禁用 SSL 验证将使所有流量暴露于中间人攻击风险，请勿在生产环境中开启。
 DISABLE_SSL_VERIFY = False
 
 from .bilibili_config import *
-from .xhs_config import *
-from .dy_config import *
-from .ks_config import *
-from .weibo_config import *
-from .tieba_config import *
-from .zhihu_config import *
-from .sohu_config import *
+from .xueqiu_config import *

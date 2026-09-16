@@ -34,17 +34,19 @@ class AsyncFileWriter:
         self.crawler_type = crawler_type
         self.wordcloud_generator = AsyncWordCloudGenerator() if config.ENABLE_GET_WORDCLOUD else None
 
-    def _get_file_path(self, file_type: str, item_type: str) -> str:
+    def _get_file_path(self, file_type: str, item_type: str, file_prefix: str = "") -> str:
         if config.SAVE_DATA_PATH:
             base_path = f"{config.SAVE_DATA_PATH}/{self.platform}/{file_type}"
         else:
             base_path = f"data/{self.platform}/{file_type}"
         pathlib.Path(base_path).mkdir(parents=True, exist_ok=True)
-        file_name = f"{self.crawler_type}_{item_type}_{utils.get_current_date()}.{file_type}"
+        # file_prefix 可选 (如用户 ID): 每个用户单独一个文件
+        prefix_part = f"{file_prefix}_" if file_prefix else ""
+        file_name = f"{self.crawler_type}_{prefix_part}{item_type}_{utils.get_current_date()}.{file_type}"
         return f"{base_path}/{file_name}"
 
-    async def write_to_csv(self, item: Dict, item_type: str):
-        file_path = self._get_file_path('csv', item_type)
+    async def write_to_csv(self, item: Dict, item_type: str, file_prefix: str = ""):
+        file_path = self._get_file_path('csv', item_type, file_prefix)
         async with self.lock:
             file_exists = os.path.exists(file_path)
             async with aiofiles.open(file_path, 'a', newline='', encoding='utf-8-sig') as f:
@@ -53,14 +55,14 @@ class AsyncFileWriter:
                     await writer.writeheader()
                 await writer.writerow(item)
 
-    async def write_to_jsonl(self, item: Dict, item_type: str):
-        file_path = self._get_file_path('jsonl', item_type)
+    async def write_to_jsonl(self, item: Dict, item_type: str, file_prefix: str = ""):
+        file_path = self._get_file_path('jsonl', item_type, file_prefix)
         async with self.lock:
             async with aiofiles.open(file_path, 'a', encoding='utf-8') as f:
                 await f.write(json.dumps(item, ensure_ascii=False) + '\n')
 
-    async def write_single_item_to_json(self, item: Dict, item_type: str):
-        file_path = self._get_file_path('json', item_type)
+    async def write_single_item_to_json(self, item: Dict, item_type: str, file_prefix: str = ""):
+        file_path = self._get_file_path('json', item_type, file_prefix)
         async with self.lock:
             existing_data = []
             if os.path.exists(file_path) and os.path.getsize(file_path) > 0:

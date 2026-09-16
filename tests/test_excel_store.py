@@ -212,16 +212,16 @@ class TestSingletonPattern:
 
     def test_get_instance_returns_same_instance(self):
         """Test that get_instance returns the same instance for same parameters"""
-        instance1 = ExcelStoreBase.get_instance("xhs", "search")
-        instance2 = ExcelStoreBase.get_instance("xhs", "search")
+        instance1 = ExcelStoreBase.get_instance("xueqiu", "search")
+        instance2 = ExcelStoreBase.get_instance("xueqiu", "search")
 
         assert instance1 is instance2
 
     def test_get_instance_different_params_returns_different_instances(self):
         """Test that different parameters return different instances"""
-        instance1 = ExcelStoreBase.get_instance("xhs", "search")
-        instance2 = ExcelStoreBase.get_instance("xhs", "detail")
-        instance3 = ExcelStoreBase.get_instance("douyin", "search")
+        instance1 = ExcelStoreBase.get_instance("xueqiu", "search")
+        instance2 = ExcelStoreBase.get_instance("xueqiu", "detail")
+        instance3 = ExcelStoreBase.get_instance("bili", "search")
 
         assert instance1 is not instance2
         assert instance1 is not instance3

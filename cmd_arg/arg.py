@@ -40,14 +40,8 @@ EnumT = TypeVar("EnumT", bound=Enum)
 class PlatformEnum(str, Enum):
     """Supported media platform enumeration"""
 
-    XHS = "xhs"
-    DOUYIN = "dy"
-    KUAISHOU = "ks"
+    XUEQIU = "xueqiu"
     BILIBILI = "bili"
-    WEIBO = "wb"
-    TIEBA = "tieba"
-    ZHIHU = "zhihu"
-    SOHU = "sohu"
 
 
 class LoginTypeEnum(str, Enum):
@@ -137,21 +131,6 @@ def _inject_init_db_default(args: Sequence[str]) -> list[str]:
     return normalized
 
 
-def _normalize_tieba_note_id(value: str) -> str:
-    """Accept a raw Tieba thread id or a /p/<id> URL."""
-    value = value.strip()
-    match = re.search(r"/p/(\d+)", value)
-    return match.group(1) if match else value
-
-
-def _normalize_tieba_creator_url(value: str) -> str:
-    """Accept a Tieba creator homepage URL or a portrait id."""
-    value = value.strip()
-    if value.startswith("http://") or value.startswith("https://"):
-        return value
-    return f"https://tieba.baidu.com/home/main?id={value}"
-
-
 async def parse_cmd(argv: Optional[Sequence[str]] = None):
     """Parse command line arguments using Typer."""
 
@@ -163,10 +142,10 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             PlatformEnum,
             typer.Option(
                 "--platform",
-                help="Media platform selection (xhs=XiaoHongShu | dy=Douyin | ks=Kuaishou | bili=Bilibili | wb=Weibo | tieba=Baidu Tieba | zhihu=Zhihu)",
+                help="Media platform selection (xueqiu=Xueqiu | bili=Bilibili)",
                 rich_help_panel="Basic Configuration",
             ),
-        ] = _coerce_enum(PlatformEnum, config.PLATFORM, PlatformEnum.XHS),
+        ] = _coerce_enum(PlatformEnum, config.PLATFORM, PlatformEnum.XUEQIU),
         lt: Annotated[
             LoginTypeEnum,
             typer.Option(
@@ -217,15 +196,6 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
                 show_default=True,
             ),
         ] = str(config.ENABLE_GET_SUB_COMMENTS),
-        headless: Annotated[
-            str,
-            typer.Option(
-                "--headless",
-                help="Whether to enable headless mode (applies to both Playwright and CDP), supports yes/true/t/y/1 or no/false/f/n/0",
-                rich_help_panel="Runtime Configuration",
-                show_default=True,
-            ),
-        ] = str(config.HEADLESS),
         save_data_option: Annotated[
             SaveDataOptionEnum,
             typer.Option(
@@ -292,6 +262,39 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
                 rich_help_panel="Performance Configuration",
             ),
         ] = config.MAX_CONCURRENCY_NUM,
+        update: Annotated[
+            str,
+            typer.Option(
+                "--update",
+                help="Incremental update mode: only crawl posts/replies newer than the last crawl (creator mode), supports yes/true/t/y/1 or no/false/f/n/0",
+                rich_help_panel="Basic Configuration",
+                show_default=True,
+            ),
+        ] = str(config.XUEQIU_UPDATE_MODE),
+        pace: Annotated[
+            float,
+            typer.Option(
+                "--pace",
+                help="Crawl throttle in seconds per page (0 = no throttle, may trigger WAF rate-limit cycles; 0.5-2 = steady crawl)",
+                rich_help_panel="Performance Configuration",
+            ),
+        ] = config.XUEQIU_PACE_SEC,
+        discover_fans: Annotated[
+            int,
+            typer.Option(
+                "--discover_fans",
+                help="Discover and crawl users with followers >= N (0 = disabled). Sources: crawled post data + profile recommendations",
+                rich_help_panel="Basic Configuration",
+            ),
+        ] = config.XUEQIU_DISCOVER_FANS,
+        discover_max_users: Annotated[
+            int,
+            typer.Option(
+                "--discover_max_users",
+                help="Max number of newly discovered users to crawl per run (0 = no limit)",
+                rich_help_panel="Basic Configuration",
+            ),
+        ] = config.XUEQIU_DISCOVER_MAX_USERS,
         save_data_path: Annotated[
             str,
             typer.Option(
@@ -338,7 +341,7 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
 
         enable_comment = _to_bool(get_comment)
         enable_sub_comment = _to_bool(get_sub_comment)
-        enable_headless = _to_bool(headless)
+        enable_update = _to_bool(update)
         enable_ip_proxy_value = _to_bool(enable_ip_proxy)
         init_db_value = init_db.value if init_db else None
 
@@ -354,8 +357,10 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
         config.KEYWORDS = keywords
         config.ENABLE_GET_COMMENTS = enable_comment
         config.ENABLE_GET_SUB_COMMENTS = enable_sub_comment
-        config.HEADLESS = enable_headless
-        config.CDP_HEADLESS = enable_headless
+        config.XUEQIU_UPDATE_MODE = enable_update
+        config.XUEQIU_PACE_SEC = pace
+        config.XUEQIU_DISCOVER_FANS = discover_fans
+        config.XUEQIU_DISCOVER_MAX_USERS = discover_max_users
         config.SAVE_DATA_OPTION = save_data_option.value
         config.COOKIES = cookies
         config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES = max_comments_count_singlenotes
@@ -369,36 +374,14 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
 
         # Set platform-specific ID lists for detail/creator mode
         if specified_id_list:
-            if platform == PlatformEnum.XHS:
-                config.XHS_SPECIFIED_NOTE_URL_LIST = specified_id_list
-            elif platform == PlatformEnum.BILIBILI:
+            if platform == PlatformEnum.BILIBILI:
                 config.BILI_SPECIFIED_ID_LIST = specified_id_list
-            elif platform == PlatformEnum.DOUYIN:
-                config.DY_SPECIFIED_ID_LIST = specified_id_list
-            elif platform == PlatformEnum.WEIBO:
-                config.WEIBO_SPECIFIED_ID_LIST = specified_id_list
-            elif platform == PlatformEnum.KUAISHOU:
-                config.KS_SPECIFIED_ID_LIST = specified_id_list
-            elif platform == PlatformEnum.TIEBA:
-                config.TIEBA_SPECIFIED_ID_LIST = [
-                    _normalize_tieba_note_id(item) for item in specified_id_list
-                ]
 
         if creator_id_list:
-            if platform == PlatformEnum.XHS:
-                config.XHS_CREATOR_ID_LIST = creator_id_list
+            if platform == PlatformEnum.XUEQIU:
+                config.XUEQIU_CREATOR_ID_LIST = creator_id_list
             elif platform == PlatformEnum.BILIBILI:
                 config.BILI_CREATOR_ID_LIST = creator_id_list
-            elif platform == PlatformEnum.DOUYIN:
-                config.DY_CREATOR_ID_LIST = creator_id_list
-            elif platform == PlatformEnum.WEIBO:
-                config.WEIBO_CREATOR_ID_LIST = creator_id_list
-            elif platform == PlatformEnum.KUAISHOU:
-                config.KS_CREATOR_ID_LIST = creator_id_list
-            elif platform == PlatformEnum.TIEBA:
-                config.TIEBA_CREATOR_URL_LIST = [
-                    _normalize_tieba_creator_url(item) for item in creator_id_list
-                ]
 
         return SimpleNamespace(
             platform=config.PLATFORM,
@@ -408,7 +391,10 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             keywords=config.KEYWORDS,
             get_comment=config.ENABLE_GET_COMMENTS,
             get_sub_comment=config.ENABLE_GET_SUB_COMMENTS,
-            headless=config.HEADLESS,
+            update=config.XUEQIU_UPDATE_MODE,
+            pace=config.XUEQIU_PACE_SEC,
+            discover_fans=config.XUEQIU_DISCOVER_FANS,
+            discover_max_users=config.XUEQIU_DISCOVER_MAX_USERS,
             save_data_option=config.SAVE_DATA_OPTION,
             init_db=init_db_value,
             cookies=config.COOKIES,
