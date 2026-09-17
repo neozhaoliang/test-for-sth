@@ -56,10 +56,8 @@ def _get_client() -> AsyncAnthropic:
     return _client
 
 
-async def call_json(prompt: str, max_tokens: int = 1024) -> Optional[Dict[str, Any]]:
-    """
-    调用 LLM，要求其返回 JSON，解析失败或调用异常时返回 None（调用方需自行跳过该条）。
-    """
+async def _call_llm_raw(prompt: str, max_tokens: int) -> Optional[str]:
+    """调用 LLM 并返回原始文本，调用异常时返回 None。"""
     client = _get_client()
     try:
         response = await client.messages.create(
@@ -71,10 +69,19 @@ async def call_json(prompt: str, max_tokens: int = 1024) -> Optional[Dict[str, A
             block.text for block in response.content if getattr(block, "type", "") == "text"
         )
     except Exception as e:
-        utils.logger.error(f"[llm_client.call_json] LLM call failed: {e}")
+        utils.logger.error(f"[llm_client._call_llm_raw] LLM call failed: {e}")
+        return None
+    return raw_text.strip()
+
+
+async def call_json(prompt: str, max_tokens: int = 1024) -> Optional[Dict[str, Any]]:
+    """
+    调用 LLM，要求其返回 JSON，解析失败或调用异常时返回 None（调用方需自行跳过该条）。
+    """
+    raw_text = await _call_llm_raw(prompt, max_tokens)
+    if raw_text is None:
         return None
 
-    raw_text = raw_text.strip()
     if raw_text.startswith("```"):
         raw_text = raw_text.strip("`")
         if raw_text.startswith("json"):
@@ -86,3 +93,8 @@ async def call_json(prompt: str, max_tokens: int = 1024) -> Optional[Dict[str, A
     except json.JSONDecodeError:
         utils.logger.warning(f"[llm_client.call_json] Failed to parse LLM response as JSON: {raw_text[:200]}")
         return None
+
+
+async def call_text(prompt: str, max_tokens: int = 2048) -> Optional[str]:
+    """调用 LLM 生成自由格式文本 (不解析 JSON)，调用异常时返回 None。"""
+    return await _call_llm_raw(prompt, max_tokens)
