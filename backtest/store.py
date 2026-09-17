@@ -31,7 +31,7 @@ _writer = AsyncFileWriter(platform="xueqiu", crawler_type="backtest")
 def build_record(prediction: ClassifiedPrediction, result: VerifyResult) -> XueqiuPredictionRecord:
     post = prediction["post"]
     return XueqiuPredictionRecord(
-        user_id=str(post.get("user_id", "")),
+        user_id=str(post.get("user_id") or ""),
         user_nickname=post.get("user_nickname", ""),
         status_id=str(post.get("status_id", "")),
         status_url=post.get("status_url", ""),
@@ -47,7 +47,6 @@ def build_record(prediction: ClassifiedPrediction, result: VerifyResult) -> Xueq
         price_change_pct=result["price_change_pct"],
         verdict=result["verdict"],
     )
-
 
 async def store_record(record: XueqiuPredictionRecord) -> None:
     await _writer.write_to_jsonl(

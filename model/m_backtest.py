@@ -22,7 +22,8 @@ from pydantic import BaseModel, Field
 
 class XueqiuPredictionRecord(BaseModel):
     """
-    雪球用户预测回测记录 — 已验证为准确 (verdict=correct) 的个股预测
+    雪球用户预测回测记录 — 每条构成有效预测且完成验证的记录 (correct/incorrect/inconclusive 均落盘，
+    用于统计用户命中率时既需要分子也需要分母)
     """
     user_id: str = Field(default="", description="预测者用户 ID")
     user_nickname: str = Field(default="", description="预测者昵称")
@@ -40,4 +41,4 @@ class XueqiuPredictionRecord(BaseModel):
     verified_at: int = Field(default=0, description="验证时使用的最新价格日期 (Unix 秒)")
     actual_trend: str = Field(default="", description="验证得到的实际走势: bullish|bearish|neutral")
     price_change_pct: float = Field(default=0.0, description="验证窗口内的涨跌幅 (%)")
-    verdict: str = Field(default="correct", description="验证结论，本记录只落盘 correct")
+    verdict: str = Field(default="", description="验证结论: correct|incorrect|inconclusive")

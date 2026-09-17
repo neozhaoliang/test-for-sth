@@ -28,6 +28,7 @@ import numpy as np
 
 from backtest import price_source
 from backtest.classify import ClassifiedPrediction
+from tools.time_util import get_date_str_from_unix_time
 
 MIN_TRADING_DAYS = 10  # 验证窗口内至少需要这么多交易日的数据才判定，否则视为数据不足
 FLAT_THRESHOLD_PCT = 5.0  # 涨跌幅在此阈值内视为走势平盘 (neutral)
@@ -47,8 +48,9 @@ class VerifyResult(TypedDict):
     verified_at: int  # Unix 秒
 
 
-def _ms_to_date(created_at_ms: int) -> date:
-    return datetime.utcfromtimestamp(created_at_ms / 1000).date()
+def _ms_to_date(created_at_raw: int) -> date:
+    """兼容毫秒/秒两种时间戳单位 (不同抓取批次可能不一致)。"""
+    return datetime.strptime(get_date_str_from_unix_time(created_at_raw), "%Y-%m-%d").date()
 
 
 def _judge_trend(closes: np.ndarray) -> Tuple[str, float]:
@@ -66,11 +68,11 @@ async def verify_prediction(prediction: ClassifiedPrediction) -> Optional[Verify
     数据不足时返回 verdict=inconclusive；调用方对 inconclusive 应跳过存储。
     """
     post = prediction["post"]
-    created_at_ms = int(post.get("created_at") or 0)
-    if not created_at_ms:
+    created_at_raw = int(post.get("created_at") or 0)
+    if not created_at_raw:
         return None
 
-    predicted_date = _ms_to_date(created_at_ms)
+    predicted_date = _ms_to_date(created_at_raw)
     start = predicted_date + timedelta(days=1)  # 严格晚于发帖日，满足"发表在前验证在后"
     df = await price_source.get_price_history(prediction["stock_code"], start=start)
 

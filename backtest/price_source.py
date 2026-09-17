@@ -22,6 +22,7 @@ A股历史日线价格数据源，基于 akshare，本地 CSV 缓存避免重复
 
 import asyncio
 import pathlib
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Optional
 
@@ -31,7 +32,9 @@ import pandas as pd
 import config
 from tools.utils import utils
 
-_CACHE_LOCK = asyncio.Lock()
+# 按股票代码分别加锁，不同股票的缓存读写/网络请求可以并发，
+# 同一股票的并发请求仍序列化以避免缓存文件读写竞态。
+_CACHE_LOCKS: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 def _cache_dir() -> pathlib.Path:
@@ -61,11 +64,13 @@ def _fetch_from_akshare(code: str, start_date: str, end_date: str) -> pd.DataFra
     df = df[["date", "close"]].copy()
     df["date"] = pd.to_datetime(df["date"]).dt.date.astype(str)
     return df
-    if df is None or df.empty:
-        return pd.DataFrame(columns=["date", "close"])
-    df = df.rename(columns={"日期": "date", "收盘": "close"})[["date", "close"]]
-    df["date"] = pd.to_datetime(df["date"]).dt.date.astype(str)
-    return df
+
+
+def _write_cache_atomic(path: pathlib.Path, df: pd.DataFrame) -> None:
+    """临时文件写入后原子性 rename，避免写入过程中崩溃产生半写/损坏的缓存文件。"""
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+    df.to_csv(tmp_path, index=False)
+    tmp_path.replace(path)
 
 
 async def get_price_history(code: str, start: date, end: Optional[date] = None) -> pd.DataFrame:
@@ -76,13 +81,16 @@ async def get_price_history(code: str, start: date, end: Optional[date] = None) 
     end = end or date.today()
     path = _cache_path(code)
 
-    async with _CACHE_LOCK:
+    async with _CACHE_LOCKS[code]:
         cached = pd.DataFrame(columns=["date", "close"])
         if path.exists():
             try:
                 cached = pd.read_csv(path, dtype={"date": str})
+                cached = cached.dropna(subset=["date"])
+                cached = cached[cached["date"].str.match(r"^\d{4}-\d{2}-\d{2}$", na=False)]
             except Exception as e:
                 utils.logger.warning(f"[price_source] Failed to read cache for {code}: {e}")
+                cached = pd.DataFrame(columns=["date", "close"])
 
         need_fetch = True
         fetch_start = start
@@ -108,7 +116,7 @@ async def get_price_history(code: str, start: date, end: Optional[date] = None) 
             if not fresh.empty:
                 merged = fresh if cached.empty else pd.concat([cached, fresh], ignore_index=True)
                 merged = merged.drop_duplicates(subset="date").sort_values("date")
-                merged.to_csv(path, index=False)
+                await asyncio.to_thread(_write_cache_atomic, path, merged)
                 cached = merged
 
     if cached.empty:

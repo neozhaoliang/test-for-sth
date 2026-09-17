@@ -72,16 +72,40 @@ def _load_posts(path: str, since: Optional[str]) -> List[Dict[str, Any]]:
 
 async def _process_one(extracted, semaphore: asyncio.Semaphore, stats: Dict[str, int]) -> None:
     async with semaphore:
-        predictions = await classify_post(extracted)
+        try:
+            predictions = await classify_post(extracted)
+        except Exception as e:
+            utils.logger.error(
+                f"[backtest_run] classify_post failed for status_id="
+                f"{extracted['post'].get('status_id')}: {e}"
+            )
+            stats["errors"] += 1
+            return
         stats["predictions_found"] += len(predictions)
 
         for prediction in predictions:
-            result = await verify_prediction(prediction)
-            if result is None or result["verdict"] != "correct":
+            try:
+                result = await verify_prediction(prediction)
+            except Exception as e:
+                utils.logger.error(
+                    f"[backtest_run] verify_prediction failed for status_id="
+                    f"{prediction['post'].get('status_id')} stock_code={prediction['stock_code']}: {e}"
+                )
+                stats["errors"] += 1
                 continue
+
+            if result is None:
+                continue
+            if result["verdict"] == "inconclusive":
+                stats["inconclusive"] += 1
+                continue
+
             record = build_record(prediction, result)
             await store_record(record)
-            stats["verified_correct"] += 1
+            if result["verdict"] == "correct":
+                stats["verified_correct"] += 1
+            else:
+                stats["verified_incorrect"] += 1
 
 
 async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> None:
@@ -100,7 +124,13 @@ async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> No
         f"[backtest_run] {len(posts)} posts loaded, {len(extracted_posts)} contain stock mentions"
     )
 
-    stats = {"predictions_found": 0, "verified_correct": 0}
+    stats = {
+        "predictions_found": 0,
+        "verified_correct": 0,
+        "verified_incorrect": 0,
+        "inconclusive": 0,
+        "errors": 0,
+    }
     semaphore = asyncio.Semaphore(_CONCURRENCY)
     tasks = [_process_one(ep, semaphore, stats) for ep in extracted_posts]
 
@@ -112,12 +142,17 @@ async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> No
             utils.logger.info(
                 f"[backtest_run] Progress: {processed}/{len(tasks)} posts, "
                 f"predictions_found={stats['predictions_found']}, "
-                f"verified_correct={stats['verified_correct']}"
+                f"correct={stats['verified_correct']}, incorrect={stats['verified_incorrect']}, "
+                f"inconclusive={stats['inconclusive']}, errors={stats['errors']}"
             )
 
+    total_verified = stats["verified_correct"] + stats["verified_incorrect"]
+    hit_rate = (stats["verified_correct"] / total_verified * 100) if total_verified else 0.0
     utils.logger.info(
         f"[backtest_run] Done. predictions_found={stats['predictions_found']}, "
-        f"verified_correct={stats['verified_correct']}"
+        f"correct={stats['verified_correct']}, incorrect={stats['verified_incorrect']}, "
+        f"inconclusive={stats['inconclusive']}, errors={stats['errors']}, "
+        f"hit_rate={hit_rate:.1f}% (of {total_verified} conclusive predictions)"
     )
 
 
