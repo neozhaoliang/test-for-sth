@@ -42,3 +42,26 @@ class XueqiuPredictionRecord(BaseModel):
     actual_trend: str = Field(default="", description="验证得到的实际走势: bullish|bearish|neutral")
     price_change_pct: float = Field(default=0.0, description="验证窗口内的涨跌幅 (%)")
     verdict: str = Field(default="", description="验证结论: correct|incorrect|inconclusive")
+
+
+class StockCredibilityScore(BaseModel):
+    """用户在单个股票上的可信度评分"""
+    stock_code: str = Field(default="", description="股票代码")
+    stock_name: str = Field(default="", description="股票名称")
+    correct: int = Field(default=0, description="验证为 correct 的预测数")
+    incorrect: int = Field(default=0, description="验证为 incorrect 的预测数")
+    hit_rate: float = Field(default=0.0, description="原始命中率 correct/(correct+incorrect)")
+    wilson_score: float = Field(default=0.0, description="Wilson 区间下界，样本量越少越保守")
+
+
+class UserCredibilityScore(BaseModel):
+    """用户整体可信度评分，含按股票细分"""
+    user_id: str = Field(default="", description="用户 ID")
+    user_nickname: str = Field(default="", description="用户昵称")
+    total_predictions: int = Field(default=0, description="全部有效预测数 (含 inconclusive)")
+    correct: int = Field(default=0, description="验证为 correct 的预测数")
+    incorrect: int = Field(default=0, description="验证为 incorrect 的预测数")
+    inconclusive: int = Field(default=0, description="数据不足无法判定的预测数")
+    hit_rate: float = Field(default=0.0, description="原始命中率 correct/(correct+incorrect)")
+    wilson_score: float = Field(default=0.0, description="整体 Wilson 区间下界，用于排序")
+    by_stock: list[StockCredibilityScore] = Field(default_factory=list, description="按股票代码细分的评分")
