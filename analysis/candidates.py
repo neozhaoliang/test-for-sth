@@ -20,7 +20,7 @@
 根据历史可信度评分，筛选某只股票的高可信度候选用户。
 """
 
-from typing import List
+from typing import Dict, List
 
 from backtest.score import score_all_users
 from model.m_backtest import StockCredibilityScore, UserCredibilityScore
@@ -42,3 +42,24 @@ def find_candidates(stock_code: str, min_wilson: float = 0.0, limit: int = 5) ->
     users = [u for u in users if _stock_score_for(u, stock_code).wilson_score >= min_wilson]
     users.sort(key=lambda u: _stock_score_for(u, stock_code).wilson_score, reverse=True)
     return users[:limit]
+
+
+def list_supported_stocks() -> List[Dict]:
+    """
+    列出所有拥有历史验证记录的股票 (即分析报告能给出候选用户参考的股票)，
+    按验证记录总数降序排列。
+    """
+    totals: Dict[str, Dict] = {}
+    for user in score_all_users():
+        for stock in user.by_stock:
+            entry = totals.setdefault(
+                stock.stock_code,
+                {"stock_code": stock.stock_code, "stock_name": stock.stock_name, "record_count": 0},
+            )
+            if not entry["stock_name"] and stock.stock_name:
+                entry["stock_name"] = stock.stock_name
+            entry["record_count"] += stock.correct + stock.incorrect
+
+    stocks = list(totals.values())
+    stocks.sort(key=lambda s: s["record_count"], reverse=True)
+    return stocks

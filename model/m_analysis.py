@@ -29,8 +29,16 @@ class CandidateOpinion(BaseModel):
     hit_rate: float = Field(default=0.0, description="该用户在此股票上的历史命中率")
     correct: int = Field(default=0, description="该股票上验证为 correct 的预测数")
     incorrect: int = Field(default=0, description="该股票上验证为 incorrect 的预测数")
+    credibility_note: str = Field(default="", description="可信度的人话解释，样本不足时会提示参考价值有限")
     historical_thesis: List[str] = Field(default_factory=list, description="该用户对此股票的历史预测理由摘录")
     latest_posts: List[str] = Field(default_factory=list, description="实时抓取到的该用户最新发言摘录")
+
+
+class StructuredSummary(BaseModel):
+    """LLM 生成的结构化分析摘要"""
+    stance: str = Field(default="", description="综合倾向: bullish|bearish|neutral")
+    thesis_summary: str = Field(default="", description="关键论据摘要")
+    risk_notes: str = Field(default="", description="风险提示/需要注意的不确定性")
 
 
 class AnalysisReport(BaseModel):
@@ -39,5 +47,6 @@ class AnalysisReport(BaseModel):
     stock_name: str = Field(default="", description="股票名称")
     realtime_quote: Optional[dict] = Field(default=None, description="实时行情快照 (最新价/涨跌幅/成交量等)")
     candidates: List[CandidateOpinion] = Field(default_factory=list, description="候选高可信度用户列表")
-    llm_summary: str = Field(default="", description="LLM 生成的综合分析文本")
+    summary: StructuredSummary = Field(default_factory=StructuredSummary, description="LLM 生成的结构化分析摘要")
+    prompt_version: str = Field(default="", description="生成本报告所用的 prompt 版本号")
     generated_at: int = Field(default=0, description="报告生成时间 (Unix 秒)")
