@@ -58,6 +58,7 @@ class CrawlerTypeEnum(str, Enum):
     SEARCH = "search"
     DETAIL = "detail"
     CREATOR = "creator"
+    OPUS = "opus"
 
 
 class SaveDataOptionEnum(str, Enum):
@@ -158,7 +159,7 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
             CrawlerTypeEnum,
             typer.Option(
                 "--type",
-                help="Crawler type (search=Search | detail=Detail | creator=Creator)",
+                help="Crawler type (search=Search | detail=Detail | creator=Creator | opus=Opus/专栏图文, Bilibili only)",
                 rich_help_panel="Basic Configuration",
             ),
         ] = _coerce_enum(CrawlerTypeEnum, config.CRAWLER_TYPE, CrawlerTypeEnum.SEARCH),

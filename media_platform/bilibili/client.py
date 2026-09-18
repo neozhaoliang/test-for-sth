@@ -578,3 +578,55 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
             await asyncio.sleep(crawl_interval)
             result.extend(dynamics_list)
         return result
+
+    async def get_creator_opus_list(self, creator_id: int, page: int, offset: str = "") -> Dict:
+        """
+        get creator opus (专栏图文) list page
+        :param creator_id: Creator ID
+        :param page: page number, starting from 1
+        :param offset: cursor returned by the previous page, empty for the first page
+        :return:
+        """
+        uri = "/x/polymer/web-dynamic/v1/opus/feed/space"
+        post_data = {
+            "host_mid": creator_id,
+            "page": page,
+            "offset": offset,
+            "type": "all",
+        }
+        return await self.get(uri, post_data)
+
+    async def get_creator_all_opus(
+        self,
+        creator_info: Dict,
+        crawl_interval: float = 1.0,
+        callback: Optional[Callable] = None,
+        max_count: int = 50,
+    ) -> List:
+        """
+        get creator all opus (专栏图文)
+        :param creator_info:
+        :param crawl_interval:
+        :param callback:
+        :param max_count: Maximum number of opus items to crawl for a creator
+
+        :return: List of creator opus items
+        """
+        creator_id = creator_info["id"]
+        result = []
+        page = 1
+        offset = ""
+        has_more = True
+        while has_more and len(result) < max_count:
+            opus_res = await self.get_creator_opus_list(creator_id, page, offset)
+            opus_list: List[Dict] = opus_res["items"]
+            has_more = opus_res["has_more"]
+            offset = opus_res["offset"]
+            page += 1
+            if len(result) + len(opus_list) > max_count:
+                opus_list = opus_list[:max_count - len(result)]
+            if callback:
+                await callback(creator_info, opus_list)
+            await asyncio.sleep(crawl_interval)
+            result.extend(opus_list)
+        return result

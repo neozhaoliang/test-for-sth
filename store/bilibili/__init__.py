@@ -22,7 +22,7 @@
 # @Time    : 2024/1/14 19:34
 # @Desc    :
 
-from typing import List
+from typing import List, Optional
 
 import config
 from var import source_keyword_var
@@ -231,3 +231,24 @@ async def update_bilibili_creator_dynamic(creator_info: Dict, dynamic_info: Dict
     }
 
     await BiliStoreFactory.create_store().store_dynamic(dynamic_item=save_dynamic_item)
+
+
+async def update_bilibili_creator_opus(creator_info: Dict, opus_item: Dict, detail: Optional[Dict]):
+    stat: Dict = opus_item.get("stat") or {}
+    detail = detail or {}
+    save_opus_item = {
+        "opus_id": opus_item.get("opus_id"),
+        "user_id": creator_info["id"],
+        "title": detail.get("title", ""),
+        "author": detail.get("author", ""),
+        "pub_time": detail.get("pub_time", ""),
+        "preview_content": opus_item.get("content", ""),
+        "content": detail.get("content", ""),
+        "jump_url": opus_item.get("jump_url", ""),
+        "view_count": stat.get("view", ""),
+        "like_count": stat.get("like", ""),
+        "last_modify_ts": utils.get_current_timestamp(),
+    }
+
+    utils.logger.info(f"[store.bilibili.update_bilibili_creator_opus] Bilibili opus id: {save_opus_item.get('opus_id')}, title: {save_opus_item.get('title')}")
+    await BiliStoreFactory.create_store().store_opus(opus_item=save_opus_item)

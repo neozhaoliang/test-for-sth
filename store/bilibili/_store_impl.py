@@ -120,6 +120,20 @@ class BiliCsvStoreImplement(AbstractStore):
             item_type="dynamics"
         )
 
+    async def store_opus(self, opus_item: Dict):
+        """
+        creator opus (专栏图文) CSV storage implementation
+        Args:
+            opus_item: creator's opus item dict
+
+        Returns:
+
+        """
+        await self.file_writer.write_to_csv(
+            item=opus_item,
+            item_type="opus"
+        )
+
 
 class BiliDbStoreImplement(AbstractStore):
     async def store_content(self, content_item: Dict):
@@ -336,6 +350,20 @@ class BiliJsonStoreImplement(AbstractStore):
             item_type="dynamics"
         )
 
+    async def store_opus(self, opus_item: Dict):
+        """
+        creator opus (专栏图文) JSON storage implementation
+        Args:
+            opus_item: creator's opus item dict
+
+        Returns:
+
+        """
+        await self.file_writer.write_single_item_to_json(
+            item=opus_item,
+            item_type="opus"
+        )
+
 
 
 class BiliJsonlStoreImplement(AbstractStore):
@@ -373,6 +401,12 @@ class BiliJsonlStoreImplement(AbstractStore):
         await self.file_writer.write_to_jsonl(
             item=dynamic_item,
             item_type="dynamics"
+        )
+
+    async def store_opus(self, opus_item: Dict):
+        await self.file_writer.write_to_jsonl(
+            item=opus_item,
+            item_type="opus"
         )
 
 

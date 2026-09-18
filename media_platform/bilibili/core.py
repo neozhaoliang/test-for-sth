@@ -129,6 +129,15 @@ class BilibiliCrawler(AbstractCrawler):
                             continue
                 else:
                     await self.get_all_creator_details(config.BILI_CREATOR_ID_LIST)
+            elif config.CRAWLER_TYPE == "opus":
+                for creator_url in config.BILI_CREATOR_ID_LIST:
+                    try:
+                        creator_info = parse_creator_info_from_url(creator_url)
+                        utils.logger.info(f"[BilibiliCrawler.start] Parsed creator ID: {creator_info.creator_id} from {creator_url}")
+                        await self.get_opus(int(creator_info.creator_id))
+                    except ValueError as e:
+                        utils.logger.error(f"[BilibiliCrawler.start] Failed to parse creator URL: {e}")
+                        continue
             else:
                 pass
             utils.logger.info("[BilibiliCrawler.start] Bilibili Crawler finished ...")
@@ -724,3 +733,64 @@ class BilibiliCrawler(AbstractCrawler):
                 utils.logger.error(f"[BilibiliCrawler.get_dynamics] get creator_id: {creator_id} dynamics error: {ex}")
             except Exception as e:
                 utils.logger.error(f"[BilibiliCrawler.get_dynamics] may be been blocked, err:{e}")
+
+    async def get_opus(self, creator_id: int):
+        """
+        get all opus (专栏图文) for a creator, including full article body scraped from each opus detail page
+        :param creator_id:
+        :return:
+        """
+        creator_info: Dict = {"id": creator_id}
+        try:
+            utils.logger.info(f"[BilibiliCrawler.get_opus] begin get creator_id: {creator_id} opus list ...")
+            opus_list = await self.bili_client.get_creator_all_opus(
+                creator_info=creator_info,
+                crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
+                max_count=config.CRAWLER_MAX_OPUS_COUNT_SINGLENOTES,
+            )
+        except DataFetchError as ex:
+            utils.logger.error(f"[BilibiliCrawler.get_opus] get creator_id: {creator_id} opus list error: {ex}")
+            return
+        except Exception as e:
+            utils.logger.error(f"[BilibiliCrawler.get_opus] may be been blocked, err:{e}")
+            return
+
+        for opus_item in opus_list:
+            opus_id = opus_item.get("opus_id")
+            if not opus_id:
+                continue
+            detail = await self._fetch_opus_detail(str(opus_id))
+            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+            await bilibili_store.update_bilibili_creator_opus(
+                creator_info=creator_info,
+                opus_item=opus_item,
+                detail=detail,
+            )
+
+    async def _fetch_opus_detail(self, opus_id: str) -> Optional[Dict]:
+        """
+        open a single opus detail page with Playwright and scrape the full article body,
+        since the opus feed API only returns a truncated preview
+        :param opus_id:
+        :return: dict with title/pub_time/author/content, or None on failure
+        """
+        try:
+            await self.context_page.goto(f"https://www.bilibili.com/opus/{opus_id}", wait_until="networkidle")
+            detail = await self.context_page.evaluate(
+                """() => {
+                    const pick = (sel) => {
+                        const el = document.querySelector(sel);
+                        return el ? el.innerText.trim() : "";
+                    };
+                    return {
+                        title: pick(".opus-module-title__text"),
+                        pub_time: pick(".opus-module-author__pub__text"),
+                        author: pick(".opus-module-author__name"),
+                        content: pick(".opus-module-content"),
+                    };
+                }"""
+            )
+            return detail
+        except Exception as e:
+            utils.logger.error(f"[BilibiliCrawler._fetch_opus_detail] failed to scrape opus_id: {opus_id}, err:{e}")
+            return None

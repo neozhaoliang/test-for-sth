@@ -65,3 +65,6 @@ CRAWLER_MAX_CONTACTS_COUNT_SINGLENOTES = 100
 
 # Maximum number of crawled dynamics for a single video/post
 CRAWLER_MAX_DYNAMICS_COUNT_SINGLENOTES = 50
+
+# Maximum number of crawled opus (专栏图文) items for a single creator
+CRAWLER_MAX_OPUS_COUNT_SINGLENOTES = 50
