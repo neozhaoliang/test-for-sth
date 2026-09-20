@@ -74,3 +74,17 @@ async def get_realtime_quote(stock_code: str) -> Optional[Dict]:
         "volume": float(row["成交量"]),
         "timestamp": str(row["时间戳"]),
     }
+
+
+async def get_stock_name(stock_code: str) -> Optional[str]:
+    """根据股票代码查询名称 (全市场快照表)，拉取失败或找不到该代码时返回 None。"""
+    df = await _get_spot_df()
+    if df is None:
+        return None
+
+    code = _normalize_code(stock_code)
+    matched = df[df["代码"].str.lower() == code]
+    if matched.empty:
+        return None
+
+    return str(matched.iloc[0]["名称"])

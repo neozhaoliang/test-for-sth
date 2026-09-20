@@ -24,18 +24,21 @@ import time
 from typing import Dict, List
 
 from analysis.candidates import find_candidates
-from analysis.realtime_price import get_realtime_quote
+from analysis.knowledge_base import find_relevant_entries
+from analysis.realtime_price import get_realtime_quote, get_stock_name
 from analysis.session import AnalysisBrowserSession
 from backtest.llm_client import call_json
 from backtest.score import load_records
-from model.m_analysis import AnalysisReport, CandidateOpinion, StructuredSummary
+from model.m_analysis import AnalysisReport, CandidateOpinion, KnowledgeExcerpt, StructuredSummary
 from tools.utils import utils
 
 _MAX_LATEST_POSTS = 5
 _MAX_HISTORICAL_THESIS = 5
 _MIN_CORROBORATING_RECORDS = 2  # 历史验证记录 < 该值时提示"参考价值有限"
+_MAX_KNOWLEDGE_EXCERPTS = 3
+_KNOWLEDGE_EXCERPT_LEN = 500
 
-_PROMPT_VERSION = "v3-lynch-opinionated"
+_PROMPT_VERSION = "v4-knowledge-base"
 
 _VALID_STANCES = {"bullish", "bearish", "neutral"}
 _VALID_LYNCH_CATEGORIES = {
@@ -49,6 +52,9 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 
 历史验证过的高可信度用户观点 (每人历史命中率越高、验证样本越多，参考价值越大):
 {candidates_block}
+
+知识库背景资料 (未经历史命中率验证，仅作为行业/宏观/公司背景参考，不代表已验证的预测):
+{knowledge_block}
 
 注意: "最新发言"是该用户最近发布的原创帖，不一定直接提到 {stock_code}，可能是对相关行业、关联股票或大盘的最新看法，仅作为判断其当前情绪/立场的背景参考。如果上述历史观点摘录中提到的股票代码/名称与 {stock_code} 不一致，以 {stock_code} 为准继续分析，不要就此提出疑问或中断输出——不确定的地方直接写入 risk_notes。
 
@@ -99,7 +105,21 @@ async def _latest_relevant_posts(session: AnalysisBrowserSession, user_id: str) 
     return texts
 
 
-def _build_prompt(stock_code: str, quote: Dict, candidates: List[CandidateOpinion]) -> str:
+def _load_knowledge_excerpts(stock_code: str, stock_name: str) -> List[KnowledgeExcerpt]:
+    keywords = [k for k in (stock_name, stock_code) if k]
+    entries = find_relevant_entries(keywords, limit=_MAX_KNOWLEDGE_EXCERPTS)
+    return [
+        KnowledgeExcerpt(source=e.source, title=e.title, excerpt=e.content[:_KNOWLEDGE_EXCERPT_LEN])
+        for e in entries
+    ]
+
+
+def _build_prompt(
+    stock_code: str,
+    quote: Dict,
+    candidates: List[CandidateOpinion],
+    knowledge_excerpts: List[KnowledgeExcerpt],
+) -> str:
     if quote:
         quote_line = (
             f"最新价 {quote.get('latest_price')}, "
@@ -121,16 +141,31 @@ def _build_prompt(stock_code: str, quote: Dict, candidates: List[CandidateOpinio
                 candidate_lines.append(f"    · {t[:200]}")
         else:
             candidate_lines.append("  (未能获取到最新发言)")
+    if not candidate_lines:
+        candidate_lines.append("(暂无)")
+
+    knowledge_lines = []
+    for k in knowledge_excerpts:
+        knowledge_lines.append(f"- 《{k.title}》 ({k.source})")
+        knowledge_lines.append(f"    {k.excerpt}")
+    if not knowledge_lines:
+        knowledge_lines.append("(暂无相关背景资料)")
 
     return _PROMPT_TEMPLATE.format(
         stock_code=stock_code,
         quote_line=quote_line,
         candidates_block="\n".join(candidate_lines),
+        knowledge_block="\n".join(knowledge_lines),
     )
 
 
-async def _generate_summary(stock_code: str, quote: Dict, candidates: List[CandidateOpinion]) -> StructuredSummary:
-    prompt = _build_prompt(stock_code, quote, candidates)
+async def _generate_summary(
+    stock_code: str,
+    quote: Dict,
+    candidates: List[CandidateOpinion],
+    knowledge_excerpts: List[KnowledgeExcerpt],
+) -> StructuredSummary:
+    prompt = _build_prompt(stock_code, quote, candidates, knowledge_excerpts)
     parsed = await call_json(prompt, max_tokens=1024)
     if not parsed or not isinstance(parsed, dict) or parsed.get("stance") not in _VALID_STANCES:
         return StructuredSummary(
@@ -154,22 +189,6 @@ async def _generate_summary(stock_code: str, quote: Dict, candidates: List[Candi
 
 async def generate_report(stock_code: str) -> AnalysisReport:
     candidate_scores = find_candidates(stock_code)
-    if not candidate_scores:
-        return AnalysisReport(
-            stock_code=stock_code,
-            stock_name="",
-            realtime_quote=None,
-            candidates=[],
-            summary=StructuredSummary(
-                lynch_category="",
-                stance="",
-                thesis_summary="",
-                invalidation_condition="",
-                risk_notes="暂无历史验证记录，无法生成可信度参考。",
-            ),
-            prompt_version=_PROMPT_VERSION,
-            generated_at=int(time.time()),
-        )
 
     stock_name = ""
     for user in candidate_scores:
@@ -179,6 +198,25 @@ async def generate_report(stock_code: str) -> AnalysisReport:
                 break
         if stock_name:
             break
+
+    quote = await get_realtime_quote(stock_code)
+    if not stock_name:
+        stock_name = await get_stock_name(stock_code) or ""
+
+    knowledge_excerpts = _load_knowledge_excerpts(stock_code, stock_name)
+
+    if not candidate_scores:
+        summary = await _generate_summary(stock_code, quote, [], knowledge_excerpts)
+        return AnalysisReport(
+            stock_code=stock_code,
+            stock_name=stock_name,
+            realtime_quote=quote,
+            candidates=[],
+            knowledge_excerpts=knowledge_excerpts,
+            summary=summary,
+            prompt_version=_PROMPT_VERSION,
+            generated_at=int(time.time()),
+        )
 
     session = AnalysisBrowserSession()
     started = await session.start()
@@ -207,15 +245,14 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         if started:
             await session.close()
 
-    quote = await get_realtime_quote(stock_code)
-
-    summary = await _generate_summary(stock_code, quote, candidates)
+    summary = await _generate_summary(stock_code, quote, candidates, knowledge_excerpts)
 
     return AnalysisReport(
         stock_code=stock_code,
         stock_name=stock_name,
         realtime_quote=quote,
         candidates=candidates,
+        knowledge_excerpts=knowledge_excerpts,
         summary=summary,
         prompt_version=_PROMPT_VERSION,
         generated_at=int(time.time()),

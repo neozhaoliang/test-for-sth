@@ -34,6 +34,13 @@ class CandidateOpinion(BaseModel):
     latest_posts: List[str] = Field(default_factory=list, description="实时抓取到的该用户最新发言摘录")
 
 
+class KnowledgeExcerpt(BaseModel):
+    """知识库背景资料摘录 (非可信度验证类观点，始终加载作为背景参考)"""
+    source: str = Field(default="", description="知识库来源标识，如 bili_laomujiang")
+    title: str = Field(default="", description="资料标题")
+    excerpt: str = Field(default="", description="正文摘录")
+
+
 class StructuredSummary(BaseModel):
     """LLM 生成的结构化分析摘要"""
     lynch_category: str = Field(
@@ -52,6 +59,7 @@ class AnalysisReport(BaseModel):
     stock_name: str = Field(default="", description="股票名称")
     realtime_quote: Optional[dict] = Field(default=None, description="实时行情快照 (最新价/涨跌幅/成交量等)")
     candidates: List[CandidateOpinion] = Field(default_factory=list, description="候选高可信度用户列表")
+    knowledge_excerpts: List[KnowledgeExcerpt] = Field(default_factory=list, description="知识库背景资料摘录")
     summary: StructuredSummary = Field(default_factory=StructuredSummary, description="LLM 生成的结构化分析摘要")
     prompt_version: str = Field(default="", description="生成本报告所用的 prompt 版本号")
     generated_at: int = Field(default=0, description="报告生成时间 (Unix 秒)")
