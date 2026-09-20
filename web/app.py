@@ -229,10 +229,6 @@ _INDEX_HTML = """<!DOCTYPE html>
   .risk-block { margin: 12px 0; padding: 10px 12px; background: #fff6e5; border-left: 4px solid #e0a020; border-radius: 4px; }
   .credibility-note { color: #555; }
   .prompt-version { color: #aaa; font-size: 12px; }
-  .knowledge-entry { border: 1px solid #e5ddc8; background: #fbf8f0; border-radius: 6px; padding: 10px 12px; margin: 8px 0; }
-  .knowledge-entry .knowledge-title { font-weight: bold; }
-  .knowledge-entry .knowledge-source { color: #999; font-size: 12px; margin-left: 6px; }
-  .knowledge-entry p { margin: 6px 0 0; color: #555; font-size: 13px; }
   .disclaimer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #eee; color: #999; font-size: 12px; }
   .supported-stocks { margin: 12px 0; }
   .supported-stocks p { margin: 0 0 6px; color: #666; font-size: 13px; }
@@ -419,17 +415,6 @@ function renderResult(report) {
       html += '<p>(未能获取到最新发言)</p>';
     }
     html += '</div>';
-  }
-
-  if (report.knowledge_excerpts && report.knowledge_excerpts.length) {
-    html += '<h3>知识库背景资料 (' + report.knowledge_excerpts.length + ')</h3>';
-    for (const k of report.knowledge_excerpts) {
-      html += '<div class="knowledge-entry">';
-      html += '<span class="knowledge-title">' + escapeHtml(k.title) + '</span>';
-      html += '<span class="knowledge-source">' + escapeHtml(k.source) + '</span>';
-      html += '<p>' + escapeHtml(k.distilled) + '</p>';
-      html += '</div>';
-    }
   }
 
   el.innerHTML = html;
