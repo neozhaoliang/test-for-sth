@@ -25,7 +25,9 @@
 """
 
 import asyncio
+import sys
 import uuid
+from pathlib import Path
 from typing import Dict, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -40,6 +42,12 @@ from tools.utils import utils
 app = FastAPI(title="股票投资助手")
 
 _tasks: Dict[str, Dict] = {}
+
+_PROJECT_ROOT = Path(__file__).parent.parent
+_CRAWL_LOG_TAIL_LINES = 200
+
+_crawl_tasks: Dict[str, Dict] = {}
+_crawl_lock = asyncio.Lock()
 
 
 @app.on_event("startup")
@@ -92,6 +100,102 @@ async def get_supported_stocks() -> Dict:
     return {"stocks": list_supported_stocks()}
 
 
+class CrawlXueqiuRequest(BaseModel):
+    user_id: str
+    incremental: bool = True
+
+
+class CrawlBiliOpusRequest(BaseModel):
+    creator_id: str
+
+
+class CrawlTaskResponse(BaseModel):
+    task_id: str
+
+
+def _crawl_task_is_running() -> bool:
+    return any(t["status"] == "running" for t in _crawl_tasks.values())
+
+
+async def _run_crawler_subprocess(task_id: str, cmd: list) -> None:
+    _crawl_tasks[task_id]["status"] = "running"
+    log_lines: list = _crawl_tasks[task_id]["log_lines"]
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=str(_PROJECT_ROOT),
+        )
+        _crawl_tasks[task_id]["process"] = process
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+            log_lines.append(line.decode("utf-8", errors="replace").rstrip())
+            if len(log_lines) > _CRAWL_LOG_TAIL_LINES:
+                del log_lines[: len(log_lines) - _CRAWL_LOG_TAIL_LINES]
+        returncode = await process.wait()
+        _crawl_tasks[task_id]["status"] = "done" if returncode == 0 else "failed"
+    except Exception as e:
+        utils.logger.error(f"[web.app] 抓取任务 {task_id} 失败: {e}")
+        log_lines.append(f"启动/运行抓取进程失败: {e}")
+        _crawl_tasks[task_id]["status"] = "failed"
+
+
+async def _start_crawl_task(cmd: list) -> str:
+    async with _crawl_lock:
+        if _crawl_task_is_running():
+            raise HTTPException(status_code=400, detail="已有抓取任务在运行，请稍候")
+        task_id = str(uuid.uuid4())
+        _crawl_tasks[task_id] = {"status": "pending", "log_lines": [], "process": None}
+        asyncio.create_task(_run_crawler_subprocess(task_id, cmd))
+        return task_id
+
+
+@app.post("/api/crawl/xueqiu", response_model=CrawlTaskResponse)
+async def crawl_xueqiu(req: CrawlXueqiuRequest) -> CrawlTaskResponse:
+    user_id = req.user_id.strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id 不能为空")
+
+    cmd = [
+        sys.executable, "main.py",
+        "--platform", "xueqiu",
+        "--lt", "qrcode",
+        "--type", "creator",
+        "--creator_id", user_id,
+        "--update", "true" if req.incremental else "false",
+    ]
+    task_id = await _start_crawl_task(cmd)
+    return CrawlTaskResponse(task_id=task_id)
+
+
+@app.post("/api/crawl/bili_opus", response_model=CrawlTaskResponse)
+async def crawl_bili_opus(req: CrawlBiliOpusRequest) -> CrawlTaskResponse:
+    creator_id = req.creator_id.strip()
+    if not creator_id:
+        raise HTTPException(status_code=400, detail="creator_id 不能为空")
+
+    cmd = [
+        sys.executable, "main.py",
+        "--platform", "bili",
+        "--lt", "qrcode",
+        "--type", "opus",
+        "--creator_id", creator_id,
+    ]
+    task_id = await _start_crawl_task(cmd)
+    return CrawlTaskResponse(task_id=task_id)
+
+
+@app.get("/api/crawl/tasks/{task_id}")
+async def get_crawl_task(task_id: str) -> Dict:
+    task = _crawl_tasks.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task_id 不存在")
+    return {"status": task["status"], "log_tail": "\n".join(task["log_lines"])}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
     return _INDEX_HTML
@@ -135,6 +239,13 @@ _INDEX_HTML = """<!DOCTYPE html>
   .stock-chip { display: inline-block; padding: 4px 10px; margin: 0 6px 6px 0; border: 1px solid #ccc; border-radius: 14px; font-size: 13px; cursor: pointer; background: #f7f7f7; }
   .stock-chip:hover { background: #eaf1fd; border-color: #1a73e8; }
   .stock-chip .record-count { color: #999; margin-left: 4px; }
+  .crawl-section { margin: 24px 0; padding: 16px; border: 1px solid #e0e0e0; border-radius: 6px; background: #fafafa; }
+  .crawl-section h3 { margin: 0 0 10px; font-size: 15px; }
+  .crawl-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+  .crawl-row input { flex: 1; max-width: 320px; }
+  .crawl-hint { color: #999; font-size: 12px; margin: 2px 0 8px; }
+  .crawl-log { max-height: 160px; overflow-y: auto; font-size: 12px; }
+  .crawl-status { font-size: 13px; margin: 4px 0; color: #555; }
 </style>
 </head>
 <body>
@@ -152,6 +263,26 @@ _INDEX_HTML = """<!DOCTYPE html>
 </div>
 <div id="status"></div>
 <div id="result"></div>
+
+<div class="crawl-section">
+  <h3>数据抓取</h3>
+
+  <p class="crawl-hint">抓取/更新雪球用户的全部发帖与回复 (公开数据，无需登录)</p>
+  <div class="crawl-row">
+    <input id="xueqiuUserId" placeholder="雪球用户 ID 或主页 URL，如 1263638109" />
+    <button id="crawlXueqiuBtn">抓取/更新</button>
+  </div>
+
+  <p class="crawl-hint">抓取/更新 B 站专栏作者的全部图文 (需要登录，首次抓取请留意弹出的浏览器窗口扫码)</p>
+  <div class="crawl-row">
+    <input id="biliCreatorId" placeholder="B站 UID 或空间 URL" />
+    <button id="crawlBiliBtn">抓取/更新</button>
+  </div>
+
+  <div class="crawl-status" id="crawlStatus"></div>
+  <pre class="crawl-log" id="crawlLog" style="display:none;"></pre>
+</div>
+
 <p class="disclaimer">以上内容基于历史数据与 AI 生成，仅供参考，不构成投资建议。</p>
 
 <script>
@@ -305,7 +436,64 @@ function renderResult(report) {
 }
 
 document.getElementById('submitBtn').addEventListener('click', submitAnalysis);
+document.getElementById('crawlXueqiuBtn').addEventListener('click', () => submitCrawl('xueqiu'));
+document.getElementById('crawlBiliBtn').addEventListener('click', () => submitCrawl('bili'));
 loadSupportedStocks();
+
+let crawlPollTimer = null;
+
+async function submitCrawl(platform) {
+  const statusEl = document.getElementById('crawlStatus');
+  const logEl = document.getElementById('crawlLog');
+  let url, body;
+
+  if (platform === 'xueqiu') {
+    const userId = document.getElementById('xueqiuUserId').value.trim();
+    if (!userId) return;
+    url = '/api/crawl/xueqiu';
+    body = { user_id: userId };
+  } else {
+    const creatorId = document.getElementById('biliCreatorId').value.trim();
+    if (!creatorId) return;
+    url = '/api/crawl/bili_opus';
+    body = { creator_id: creatorId };
+  }
+
+  if (crawlPollTimer) clearInterval(crawlPollTimer);
+  statusEl.textContent = '提交中...';
+  logEl.style.display = 'none';
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    statusEl.textContent = '提交失败: ' + (err.detail || res.status);
+    return;
+  }
+  const { task_id } = await res.json();
+  statusEl.textContent = '任务已提交, 状态: pending';
+  logEl.style.display = 'block';
+  crawlPollTimer = setInterval(() => pollCrawlTask(task_id), 2000);
+}
+
+async function pollCrawlTask(taskId) {
+  const res = await fetch('/api/crawl/tasks/' + taskId);
+  if (!res.ok) return;
+  const data = await res.json();
+  const statusEl = document.getElementById('crawlStatus');
+  const logEl = document.getElementById('crawlLog');
+
+  statusEl.textContent = '状态: ' + data.status;
+  logEl.textContent = data.log_tail || '';
+  logEl.scrollTop = logEl.scrollHeight;
+
+  if (data.status === 'done' || data.status === 'failed') {
+    clearInterval(crawlPollTimer);
+  }
+}
 </script>
 </body>
 </html>
