@@ -35,24 +35,37 @@ _MAX_LATEST_POSTS = 5
 _MAX_HISTORICAL_THESIS = 5
 _MIN_CORROBORATING_RECORDS = 2  # 历史验证记录 < 该值时提示"参考价值有限"
 
-_PROMPT_VERSION = "v2-structured"
+_PROMPT_VERSION = "v3-lynch-opinionated"
 
 _VALID_STANCES = {"bullish", "bearish", "neutral"}
+_VALID_LYNCH_CATEGORIES = {
+    "fast_grower", "stalwart", "cyclical", "turnaround", "asset_play", "slow_grower", "unclear",
+}
 
-_PROMPT_TEMPLATE = """请基于以下信息，对股票 {stock_code} 的走势给出综合分析（不构成投资建议）。
+_PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类似彼得林奇: 会先判断这是哪一类机会，再给出一个明确、可被证伪的结论。禁止给"多空都有可能""需持续观察"这类模糊结论——你必须选边站，哪怕证据不完美。
 
+股票: {stock_code}
 当前行情: {quote_line}
 
 历史验证过的高可信度用户观点 (每人历史命中率越高、验证样本越多，参考价值越大):
 {candidates_block}
 
-注意: "最新发言"是该用户最近发布的原创帖，不一定直接提到 {stock_code}，可能是对相关行业、关联股票或大盘的最新看法，仅作为判断其当前情绪/立场的背景参考。
+注意: "最新发言"是该用户最近发布的原创帖，不一定直接提到 {stock_code}，可能是对相关行业、关联股票或大盘的最新看法，仅作为判断其当前情绪/立场的背景参考。如果上述历史观点摘录中提到的股票代码/名称与 {stock_code} 不一致，以 {stock_code} 为准继续分析，不要就此提出疑问或中断输出——不确定的地方直接写入 risk_notes。
 
-请综合以上历史可信度、历史观点逻辑、最新发言背景和当前行情，以 JSON 格式返回，不要输出任何其他文字:
+按以下步骤分析:
+1. 先判断这只股票当前更接近彼得林奇分类中的哪一类: fast_grower(高成长)、stalwart(大盘稳健股)、cyclical(周期股)、turnaround(困境反转)、asset_play(资产价值被低估)、slow_grower(低增长)。如果证据完全不足以判断，才选 unclear。
+2. 基于这个分类和上面的证据，给出一个明确倾向 (bullish/bearish/neutral)，neutral 仅在证据真正相互抵消、没有任何一方占优时才能选，不能用来逃避判断。
+3. 给出支撑这个判断的关键论据。
+4. 明确说明: 如果接下来出现什么具体情况/数据，会证明这个判断是错的 (invalidation_condition)。这一步是强制的，不能写"无法确定"之类的话。
+5. 列出其他需要注意的风险/不确定性。
+
+无论证据是否充分、是否有疑点，都必须直接输出下面的 JSON，不要输出任何其他文字，不要提出反问或要求澄清:
 {{
+  "lynch_category": "fast_grower|stalwart|cyclical|turnaround|asset_play|slow_grower|unclear",
   "stance": "bullish|bearish|neutral",
   "thesis_summary": "关键论据摘要，200字以内",
-  "risk_notes": "风险提示/不确定性，150字以内"
+  "invalidation_condition": "什么情况出现会证明这个判断错了，100字以内",
+  "risk_notes": "其他风险提示/不确定性，150字以内"
 }}"""
 
 
@@ -121,13 +134,20 @@ async def _generate_summary(stock_code: str, quote: Dict, candidates: List[Candi
     parsed = await call_json(prompt, max_tokens=1024)
     if not parsed or not isinstance(parsed, dict) or parsed.get("stance") not in _VALID_STANCES:
         return StructuredSummary(
+            lynch_category="",
             stance="",
             thesis_summary="",
+            invalidation_condition="",
             risk_notes="LLM 生成失败，请参考以上原始数据自行判断。",
         )
+    lynch_category = parsed.get("lynch_category", "")
+    if lynch_category not in _VALID_LYNCH_CATEGORIES:
+        lynch_category = "unclear"
     return StructuredSummary(
+        lynch_category=lynch_category,
         stance=parsed.get("stance", ""),
         thesis_summary=parsed.get("thesis_summary", "") or "",
+        invalidation_condition=parsed.get("invalidation_condition", "") or "",
         risk_notes=parsed.get("risk_notes", "") or "",
     )
 
@@ -141,8 +161,10 @@ async def generate_report(stock_code: str) -> AnalysisReport:
             realtime_quote=None,
             candidates=[],
             summary=StructuredSummary(
+                lynch_category="",
                 stance="",
                 thesis_summary="",
+                invalidation_condition="",
                 risk_notes="暂无历史验证记录，无法生成可信度参考。",
             ),
             prompt_version=_PROMPT_VERSION,

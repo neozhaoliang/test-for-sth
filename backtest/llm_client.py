@@ -91,8 +91,20 @@ async def call_json(prompt: str, max_tokens: int = 1024) -> Optional[Dict[str, A
     try:
         return json.loads(raw_text)
     except json.JSONDecodeError:
-        utils.logger.warning(f"[llm_client.call_json] Failed to parse LLM response as JSON: {raw_text[:200]}")
-        return None
+        pass
+
+    # 模型有时会在 JSON 前后夹带说明性文字，尝试截取最外层的 {...} 或 [...] 再解析一次
+    for open_ch, close_ch in (("{", "}"), ("[", "]")):
+        start = raw_text.find(open_ch)
+        end = raw_text.rfind(close_ch)
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(raw_text[start : end + 1])
+            except json.JSONDecodeError:
+                continue
+
+    utils.logger.warning(f"[llm_client.call_json] Failed to parse LLM response as JSON: {raw_text[:200]}")
+    return None
 
 
 async def call_text(prompt: str, max_tokens: int = 2048) -> Optional[str]:

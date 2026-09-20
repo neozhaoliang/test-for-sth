@@ -36,8 +36,13 @@ class CandidateOpinion(BaseModel):
 
 class StructuredSummary(BaseModel):
     """LLM 生成的结构化分析摘要"""
+    lynch_category: str = Field(
+        default="",
+        description="彼得林奇式分类: fast_grower|stalwart|cyclical|turnaround|asset_play|slow_grower|unclear",
+    )
     stance: str = Field(default="", description="综合倾向: bullish|bearish|neutral")
     thesis_summary: str = Field(default="", description="关键论据摘要")
+    invalidation_condition: str = Field(default="", description="如果出现什么情况，说明这个判断是错的")
     risk_notes: str = Field(default="", description="风险提示/需要注意的不确定性")
 
 

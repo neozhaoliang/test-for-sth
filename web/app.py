@@ -114,6 +114,8 @@ _INDEX_HTML = """<!DOCTYPE html>
   .stance-bearish { background: #2a9d3f; }
   .stance-neutral { background: #888; }
   .thesis-block { margin: 12px 0; }
+  .lynch-category { display: inline-block; padding: 3px 9px; margin-left: 6px; border-radius: 10px; font-size: 12px; background: #eef2f7; color: #444; border: 1px solid #dbe2ea; }
+  .invalidation-block { margin: 12px 0; padding: 10px 12px; background: #eef6ff; border-left: 4px solid #1a73e8; border-radius: 4px; }
   .risk-block { margin: 12px 0; padding: 10px 12px; background: #fff6e5; border-left: 4px solid #e0a020; border-radius: 4px; }
   .credibility-note { color: #555; }
   .prompt-version { color: #aaa; font-size: 12px; }
@@ -220,6 +222,19 @@ function stanceLabel(stance) {
   return '未知';
 }
 
+function lynchCategoryLabel(cat) {
+  const labels = {
+    fast_grower: '高成长股',
+    stalwart: '大盘稳健股',
+    cyclical: '周期股',
+    turnaround: '困境反转股',
+    asset_play: '资产价值低估',
+    slow_grower: '低增长股',
+    unclear: '类型不明确',
+  };
+  return labels[cat] || '';
+}
+
 function renderResult(report) {
   const el = document.getElementById('result');
   let html = '<h2>' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
@@ -233,12 +248,18 @@ function renderResult(report) {
   const stanceClass = 'stance-' + (summary.stance || 'neutral');
   html += '<h3>综合分析</h3>';
   html += '<p><span class="stance-badge ' + stanceClass + '">' + stanceLabel(summary.stance) + '</span>';
+  if (summary.lynch_category && lynchCategoryLabel(summary.lynch_category)) {
+    html += '<span class="lynch-category">' + escapeHtml(lynchCategoryLabel(summary.lynch_category)) + '</span>';
+  }
   if (report.prompt_version) {
     html += ' <span class="prompt-version">(prompt ' + escapeHtml(report.prompt_version) + ')</span>';
   }
   html += '</p>';
   if (summary.thesis_summary) {
     html += '<div class="thesis-block"><b>关键论据:</b> ' + escapeHtml(summary.thesis_summary) + '</div>';
+  }
+  if (summary.invalidation_condition) {
+    html += '<div class="invalidation-block"><b>如果这个判断错了，会是因为:</b> ' + escapeHtml(summary.invalidation_condition) + '</div>';
   }
   if (summary.risk_notes) {
     html += '<div class="risk-block"><b>风险提示:</b> ' + escapeHtml(summary.risk_notes) + '</div>';
