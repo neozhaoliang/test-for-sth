@@ -44,7 +44,7 @@ _tasks: Dict[str, Dict] = {}
 
 @app.on_event("startup")
 async def _preload_knowledge_base() -> None:
-    ensure_knowledge_base_loaded()
+    await ensure_knowledge_base_loaded()
 
 
 class AnalyzeRequest(BaseModel):
@@ -296,7 +296,7 @@ function renderResult(report) {
       html += '<div class="knowledge-entry">';
       html += '<span class="knowledge-title">' + escapeHtml(k.title) + '</span>';
       html += '<span class="knowledge-source">' + escapeHtml(k.source) + '</span>';
-      html += '<p>' + escapeHtml(k.excerpt) + '</p>';
+      html += '<p>' + escapeHtml(k.distilled) + '</p>';
       html += '</div>';
     }
   }

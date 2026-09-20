@@ -24,7 +24,7 @@ import time
 from typing import Dict, List
 
 from analysis.candidates import find_candidates
-from analysis.knowledge_base import find_relevant_entries
+from analysis.knowledge_base import ensure_loaded as ensure_knowledge_base_loaded
 from analysis.realtime_price import get_realtime_quote, get_stock_name
 from analysis.session import AnalysisBrowserSession
 from backtest.llm_client import call_json
@@ -35,8 +35,6 @@ from tools.utils import utils
 _MAX_LATEST_POSTS = 5
 _MAX_HISTORICAL_THESIS = 5
 _MIN_CORROBORATING_RECORDS = 2  # 历史验证记录 < 该值时提示"参考价值有限"
-_MAX_KNOWLEDGE_EXCERPTS = 3
-_KNOWLEDGE_EXCERPT_LEN = 500
 
 _PROMPT_VERSION = "v4-knowledge-base"
 
@@ -53,7 +51,7 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 历史验证过的高可信度用户观点 (每人历史命中率越高、验证样本越多，参考价值越大):
 {candidates_block}
 
-知识库背景资料 (未经历史命中率验证，仅作为行业/宏观/公司背景参考，不代表已验证的预测):
+知识库背景资料 (投资者专栏的长期观点，已去除闲聊，未针对本股票筛选，可能涉及投资哲学、筹码博弈、行情/宏观判断等，请自行判断哪些与当前分析相关):
 {knowledge_block}
 
 注意: "最新发言"是该用户最近发布的原创帖，不一定直接提到 {stock_code}，可能是对相关行业、关联股票或大盘的最新看法，仅作为判断其当前情绪/立场的背景参考。如果上述历史观点摘录中提到的股票代码/名称与 {stock_code} 不一致，以 {stock_code} 为准继续分析，不要就此提出疑问或中断输出——不确定的地方直接写入 risk_notes。
@@ -105,12 +103,13 @@ async def _latest_relevant_posts(session: AnalysisBrowserSession, user_id: str) 
     return texts
 
 
-def _load_knowledge_excerpts(stock_code: str, stock_name: str) -> List[KnowledgeExcerpt]:
-    keywords = [k for k in (stock_name, stock_code) if k]
-    entries = find_relevant_entries(keywords, limit=_MAX_KNOWLEDGE_EXCERPTS)
+async def _load_knowledge_excerpts() -> List[KnowledgeExcerpt]:
+    """知识库不按股票筛选，全量加载 (原文已在知识库加载阶段由 LLM 提炼为投资观点摘要)。"""
+    entries = await ensure_knowledge_base_loaded()
     return [
-        KnowledgeExcerpt(source=e.source, title=e.title, excerpt=e.content[:_KNOWLEDGE_EXCERPT_LEN])
+        KnowledgeExcerpt(source=e.source, title=e.title, distilled=e.distilled)
         for e in entries
+        if e.distilled
     ]
 
 
@@ -147,9 +146,9 @@ def _build_prompt(
     knowledge_lines = []
     for k in knowledge_excerpts:
         knowledge_lines.append(f"- 《{k.title}》 ({k.source})")
-        knowledge_lines.append(f"    {k.excerpt}")
+        knowledge_lines.append(f"    {k.distilled}")
     if not knowledge_lines:
-        knowledge_lines.append("(暂无相关背景资料)")
+        knowledge_lines.append("(暂无背景资料)")
 
     return _PROMPT_TEMPLATE.format(
         stock_code=stock_code,
@@ -166,7 +165,7 @@ async def _generate_summary(
     knowledge_excerpts: List[KnowledgeExcerpt],
 ) -> StructuredSummary:
     prompt = _build_prompt(stock_code, quote, candidates, knowledge_excerpts)
-    parsed = await call_json(prompt, max_tokens=1024)
+    parsed = await call_json(prompt, max_tokens=2048)
     if not parsed or not isinstance(parsed, dict) or parsed.get("stance") not in _VALID_STANCES:
         return StructuredSummary(
             lynch_category="",
@@ -203,7 +202,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
     if not stock_name:
         stock_name = await get_stock_name(stock_code) or ""
 
-    knowledge_excerpts = _load_knowledge_excerpts(stock_code, stock_name)
+    knowledge_excerpts = await _load_knowledge_excerpts()
 
     if not candidate_scores:
         summary = await _generate_summary(stock_code, quote, [], knowledge_excerpts)
