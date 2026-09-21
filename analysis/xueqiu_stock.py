@@ -19,38 +19,22 @@
 """
 雪球个股维度 (机构持仓 + 讨论热度)。
 
-雪球的个股接口裸 HTTP 会被要求登录 (stock.xueqiu.com/v5 返回 error_code 400016)，
-必须借道已经打开并登录的浏览器页面，用页面内 XHR 发出请求 (见 XueqiuClient._xhr_json)，
-才能带上 cookies 与阿里云 WAF 的校验 token。
+不再自行发起任何 API/XHR 请求——直接调用接口 (即使是页面内 XHR) 会被阿里云 WAF
+识别为爬虫行为。改为真实导航到个股页 (https://xueqiu.com/S/{sym})，让 SPA 按
+正常浏览行为自己加载报价、讨论等数据，被动收集页面渲染过程中发出的 JSON 响应
+再解析。我们只"看"页面自己取回来的数据，与真人浏览的请求特征完全一致。
 
 只喂聚合数字，不喂帖子原文——报告要的是"多少机构在什么价位持有""讨论热度处于什么量级"，
 把 UGC 原文塞进 prompt 正是本项目要避免的噪音来源。
 """
 
 import asyncio
+import random
 from typing import Any, Dict, List, Optional
 
 from tools.utils import utils
 
-_HOST = "https://stock.xueqiu.com"
 _TOTAL_BUDGET_S = 90  # 雪球是辅助维度，绝不能拖住报告主流程
-
-# 端点路径以运行期实际可用情况为准：不同时期雪球的 F10 路径有差异，
-# 逐个尝试并记录哪个真正返回了数据，全部失败时该维度降级为"暂缺"。
-_CANDIDATES: Dict[str, List[str]] = {
-    "org_holding": [
-        _HOST + "/v5/stock/f10/cn/org_holding.json?symbol={sym}&count=10",
-        _HOST + "/v5/stock/f10/cn/holders.json?symbol={sym}&count=10",
-        _HOST + "/v5/stock/f10/cn/main_holder.json?symbol={sym}&count=10",
-    ],
-    "quote_detail": [
-        _HOST + "/v5/stock/quote.json?symbol={sym}&extend=detail",
-    ],
-    "discussion": [
-        "https://xueqiu.com/query/v1/symbol/search/status.json"
-        "?count=10&comment=0&symbol={sym}&hl=0&source=all&sort=&page=1&q=",
-    ],
-}
 
 _QUOTE_KEYS = {
     "pe_ttm",
@@ -128,67 +112,95 @@ def _count_from(payload: Any) -> Optional[int]:
     return None
 
 
-async def _try_endpoints(client, stock_code: str) -> Dict[str, Any]:
-    sym = _symbol(stock_code)
-    out: Dict[str, Any] = {"available": [], "failed": []}
-
-    for name, urls in _CANDIDATES.items():
-        for url in urls:
-            target = url.format(sym=sym)
-            try:
-                payload = await client._xhr_json_with_retry(target, retries=2)
-            except Exception as e:
-                out["failed"].append(f"{name}:{type(e).__name__}")
-                continue
-            if not isinstance(payload, dict):
-                out["failed"].append(f"{name}:non-dict")
-                continue
-
-            if name == "org_holding":
-                records = _collect_records(payload, ("name", "org_name", "holder_name", "sh_name"))
-                if records:
-                    out["org_holding"] = records
-            elif name == "quote_detail":
-                numbers = _collect_numbers(payload, _QUOTE_KEYS)
-                if numbers:
-                    out["quote_detail"] = numbers
-            elif name == "discussion":
-                count = _count_from(payload)
-                if count is not None:
-                    out["discussion"] = {"post_count": count}
-
-            if name in out:
-                out["available"].append(name)
-                break
-
-    return out
+def _match_kind(url: str, sym: str) -> Optional[str]:
+    """按 URL 特征判断页面自己发出的响应属于哪个维度。"""
+    if "quote.json" in url and sym in url:
+        return "quote_detail"
+    if "search/status.json" in url and sym in url:
+        return "discussion"
+    if "/f10/" in url and sym in url:
+        return "org_holding"
+    return None
 
 
 async def get_xueqiu_stock_data(session, stock_code: str) -> Optional[Dict]:
     """
     雪球个股聚合数据 (机构持仓、讨论热度、行情扩展字段)。
+
+    真实导航到个股页并被动收集 SPA 自己发出的 JSON 响应 (不发起任何 API 请求)。
     仅在浏览器会话可用时调用；任何失败都返回 None，不影响报告其它维度。
     """
-    client = getattr(session, "xueqiu_client", None)
-    if client is None:
+    page = getattr(session, "context_page", None)
+    if page is None:
         return None
+    sym = _symbol(stock_code)
 
+    captured: List[Dict] = []
+
+    def _on_response(resp) -> None:
+        kind = _match_kind(resp.url, sym)
+        if kind:
+            captured.append({"kind": kind, "resp": resp})
+
+    page.on("response", _on_response)
     try:
-        data = await asyncio.wait_for(_try_endpoints(client, stock_code), timeout=_TOTAL_BUDGET_S)
-    except asyncio.TimeoutError:
-        utils.logger.warning(f"[xueqiu_stock] {stock_code} 雪球个股数据超时 ({_TOTAL_BUDGET_S}s)，跳过该维度")
-        return None
-    except Exception as e:
-        utils.logger.warning(f"[xueqiu_stock] {stock_code} 雪球个股数据失败: {e}")
-        return None
+        try:
+            ok = await asyncio.wait_for(
+                session._goto_with_waf(f"https://xueqiu.com/S/{sym}", what=f"雪球个股 {sym}"),
+                timeout=_TOTAL_BUDGET_S,
+            )
+        except asyncio.TimeoutError:
+            utils.logger.warning(f"[xueqiu_stock] {stock_code} 个股页导航超时 ({_TOTAL_BUDGET_S}s)，跳过该维度")
+            return None
+        if not ok:
+            return None
+        # 少量拟人滚动: 讨论等首屏之外的内容由滚动触发 SPA 自行加载
+        for _ in range(4):
+            try:
+                await page.evaluate("() => window.scrollBy(0, 500 + Math.random() * 400)")
+            except Exception:
+                break
+            await asyncio.sleep(1 + random.random())
+        await asyncio.sleep(2)  # 收尾等待, 让迟到的响应落地
+    finally:
+        try:
+            page.remove_listener("response", _on_response)
+        except Exception:
+            pass
 
-    if not data.get("available"):
+    out: Dict[str, Any] = {"available": [], "failed": []}
+    for item in captured:
+        try:
+            payload = await item["resp"].json()
+        except Exception:
+            out["failed"].append(f"{item['kind']}:json-fail")
+            continue
+        if not isinstance(payload, dict):
+            out["failed"].append(f"{item['kind']}:non-dict")
+            continue
+        if item["kind"] == "quote_detail":
+            numbers = _collect_numbers(payload, _QUOTE_KEYS)
+            if numbers:
+                out["quote_detail"] = numbers
+                out["available"].append("quote_detail")
+        elif item["kind"] == "discussion":
+            count = _count_from(payload)
+            if count is not None:
+                out["discussion"] = {"post_count": count}
+                out["available"].append("discussion")
+        elif item["kind"] == "org_holding":
+            records = _collect_records(payload, ("name", "org_name", "holder_name", "sh_name"))
+            if records:
+                out["org_holding"] = records
+                out["available"].append("org_holding")
+
+    if not out.get("available"):
         utils.logger.warning(
-            f"[xueqiu_stock] {stock_code} 雪球端点均不可用 (失败明细: {data.get('failed')})，该维度记为暂缺"
+            f"[xueqiu_stock] {stock_code} 个股页未捕获到任何数据 (页面可能未加载数据区或被 WAF 拦截)，该维度记为暂缺"
         )
         return None
 
-    utils.logger.info(f"[xueqiu_stock] {stock_code} 雪球可用端点: {data['available']}")
-    if data.get("failed"):
-        utils.logger.info(f"[xueqiu_stock] {stock_code} 未取到的端点: {data['failed']}")
-    return data
+    utils.logger.info(f"[xueqiu_stock] {stock_code} 可用维度: {out['available']}")
+    if out.get("failed"):
+        utils.logger.info(f"[xueqiu_stock] {stock_code} 未取到的维度: {out['failed']}")
+    return out

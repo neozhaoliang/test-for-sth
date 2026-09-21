@@ -19,19 +19,19 @@
 """
 轻量雪球浏览器会话，生命周期 = 一次分析任务。
 
-复用 media_platform/xueqiu/core.py 里 XueqiuCrawler 的 CDP 连接 + WAF 等待
-逻辑，但不依赖该类的其它状态 (断点续爬/发现等)，只用于拉取候选用户的最新发帖。
+CDP 连接与 WAF 等待逻辑与 media_platform/xueqiu/core.py 保持一致，但不依赖
+该类的其它状态 (断点续爬/发现等)。所有雪球数据都通过真实页面导航 + DOM 读取
+获取 (不发任何 API/XHR 请求)，避免被 WAF 识别为爬虫行为。
 """
 
 import asyncio
+import random
 import time
 from typing import Dict, List, Optional
 
 from playwright.async_api import BrowserContext, Page, Playwright, async_playwright
 
 import config
-from media_platform.xueqiu.client import XueqiuClient
-from media_platform.xueqiu.exception import CrawlInterruptedError, DataFetchError, WafChallengeError
 from tools.cdp_browser import CDPBrowserManager
 from tools.utils import utils
 from tools.waf_slider import is_waf_challenge, solve_waf_slider
@@ -42,6 +42,38 @@ _USER_AGENT = (
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
+# 时间线卡片 DOM 结构 (与 media_platform/xueqiu/core.py 2026-09 实测一致):
+#   article.timeline__item
+#     div.timeline__item__info > a.date-and-source   (href=/<uid>/<status_id>)
+#     div.timeline__item__content .content          (正文)
+#     blockquote.timeline__item__forward             (转发卡片才有: 被转发内容)
+_TIMELINE_ITEM_JS = """() => {
+    const out = [];
+    const seen = new Set();
+    for (const el of document.querySelectorAll('article.timeline__item')) {
+        const dateLink = el.querySelector('a.date-and-source');
+        const href = dateLink ? dateLink.getAttribute('href') : '';
+        const m = href ? href.match(/\\/(\\d+)\\/(\\d+)/) : null;
+        const sid = m ? m[2] : '';
+        if (!sid || seen.has(sid)) continue;
+        seen.add(sid);
+        const contentEl = el.querySelector('.timeline__item__content .content, .timeline__item__content');
+        const forwardEl = el.querySelector('blockquote.timeline__item__forward, .timeline__item__forward');
+        let text = contentEl ? contentEl.innerText.trim() : '';
+        if (forwardEl) {
+            const fwd = (forwardEl.innerText || '').trim();
+            text = text ? text + '\\n//转发:\\n' + fwd : fwd;
+        }
+        out.push({
+            id: sid,
+            status_type: forwardEl ? 'repost' : 'original',
+            description: text,
+            created_at: dateLink ? (dateLink.innerText || '').trim() : '',
+        });
+    }
+    return out;
+}"""
+
 
 class AnalysisBrowserSession:
     """一次分析任务共享的浏览器会话: 连接 CDP -> 等待 WAF -> 顺序拉取候选用户最新发帖。"""
@@ -50,7 +82,6 @@ class AnalysisBrowserSession:
         self._playwright_cm = None
         self.browser_context: Optional[BrowserContext] = None
         self.context_page: Optional[Page] = None
-        self.xueqiu_client: Optional[XueqiuClient] = None
         self.cdp_manager: Optional[CDPBrowserManager] = None
 
     async def start(self) -> bool:
@@ -80,7 +111,6 @@ class AnalysisBrowserSession:
         # 未登录时停在首页，给用户时间在弹出的浏览器里登录雪球 (超时后降级继续)
         await self._wait_for_xueqiu_login()
 
-        self.xueqiu_client = XueqiuClient(playwright_page=self.context_page)
         return True
 
     async def _is_xueqiu_logged_in(self) -> bool:
@@ -178,15 +208,78 @@ class AnalysisBrowserSession:
         return False
 
     async def get_latest_posts(self, user_id: str, page_size: int = 20) -> List[Dict]:
-        """获取该用户最新一页发帖，失败返回空列表 (不抛异常中断整体任务)。"""
-        if not self.xueqiu_client:
+        """
+        获取该用户最新发帖，失败返回空列表 (不抛异常中断整体任务)。
+
+        不走 user_timeline.json 接口 (直接调用会被 WAF 识别为爬虫行为):
+        改为真实页面导航到用户主页 + 拟人节奏滚动触发 SPA 懒加载，只读渲染后的
+        DOM。与真人浏览行为一致，加载数据的 XHR 由页面自身发起。
+        """
+        ok = await self._goto_with_waf(
+            f"{_INDEX_URL}/u/{user_id}", what=f"用户 {user_id} 主页"
+        )
+        if not ok:
             return []
+
+        # 等 SPA 渲染出时间线卡片
+        count = 0
+        for _ in range(20):
+            try:
+                count = await self.context_page.evaluate(
+                    "() => document.querySelectorAll('article.timeline__item').length"
+                )
+            except Exception:
+                count = 0
+            if count > 0:
+                break
+            await asyncio.sleep(1)
+
+        # 少量滚动触发懒加载 (拟人节奏: 步长与间隔都带抖动，不追求翻完整个历史)
+        rounds = 0
+        while count < page_size and rounds < 8:
+            try:
+                await self.context_page.evaluate(
+                    "() => window.scrollBy(0, 600 + Math.random() * 400)"
+                )
+            except Exception:
+                break
+            await asyncio.sleep(0.8 + random.random() * 1.2)
+            try:
+                new_count = await self.context_page.evaluate(
+                    "() => document.querySelectorAll('article.timeline__item').length"
+                )
+            except Exception:
+                break
+            if new_count == count:
+                # 高度不再增长 (到底或 SPA 停止懒加载)，再确认一次后退出
+                await asyncio.sleep(1.5)
+                try:
+                    new_count = await self.context_page.evaluate(
+                        "() => document.querySelectorAll('article.timeline__item').length"
+                    )
+                except Exception:
+                    break
+                if new_count == count:
+                    break
+            count = new_count
+            rounds += 1
+
+        posts = await self._extract_timeline_from_dom()
+        if posts:
+            utils.logger.info(
+                f"[AnalysisBrowserSession] 用户 {user_id} DOM 提取 {len(posts)} 条发帖"
+            )
+        else:
+            utils.logger.warning(f"[AnalysisBrowserSession] 用户 {user_id} 时间线 DOM 提取为空")
+        return posts[:page_size]
+
+    async def _extract_timeline_from_dom(self) -> List[Dict]:
+        """从当前页面 DOM 提取时间线帖子 (id/status_type/description/created_at)。"""
         try:
-            res = await self.xueqiu_client.get_user_posts(user_id, page=1, page_size=page_size)
-        except (WafChallengeError, DataFetchError, CrawlInterruptedError) as e:
-            utils.logger.warning(f"[AnalysisBrowserSession] 获取用户 {user_id} 最新发帖失败: {e}")
+            return await self.context_page.evaluate(_TIMELINE_ITEM_JS)
+        except Exception as e:
+            utils.logger.warning(f"[AnalysisBrowserSession] DOM 时间线提取失败: {e}")
             return []
-        return res.get("statuses") or []
 
     async def close(self) -> None:
         try:
