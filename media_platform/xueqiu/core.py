@@ -19,11 +19,9 @@
 
 import asyncio
 import glob
-import hashlib
 import json
 import os
 import pathlib
-import re
 import time
 from typing import Dict, List, Optional
 
@@ -49,7 +47,6 @@ from . import discover
 from .client import XueqiuClient
 from .exception import CrawlInterruptedError, DataFetchError, WafChallengeError
 from .help import (
-    extract_comments,
     extract_creator_from_user_obj,
     extract_status_list,
     normalize_user_id,
@@ -597,83 +594,103 @@ class XueqiuCrawler(AbstractCrawler):
 
     async def _crawl_user_replies(self, user_id: str) -> None:
         """
-        抓取用户的全部回复 (主页 "回复" tab, SPA 路由 #/comments)。
+        抓取用户的全部回复 (statuses/user/comments.json 接口, max_id 游标分页)。
 
-        策略:
-          1. 点击 a.tab-comments (Playwright 点击; 若被 WAF 遮罩拦截则 JS 点击兜底);
-          2. 滚动加载并解析 DOM 中 article.timeline__item 结构的回复列表。
+        改为直接调用接口而非模拟 DOM 滚动: 前端 SPA 在滚动若干轮后会自行停止
+        触发分页请求 (疑似前端状态提前判定"到底"), 但接口本身完整支持深度分页;
+        实测直接翻页可稳定拿到远超前端 DOM 停留数量的历史数据。
+        断点续爬与 WAF 中断重试逻辑对齐 _crawl_user_posts 的 get_all_user_posts 用法。
         """
         utils.logger.info(f"[XueqiuCrawler] 开始抓取用户 {user_id} 的回复 ...")
-        page = self.context_page
 
-        # 1. 切到 "回复" tab (a.tab-comments, SPA hash 路由 #/comments)
-        clicked = False
-        try:
-            loc = page.locator("a.tab-comments").first
-            if await loc.count() > 0:
-                try:
-                    await loc.click(timeout=5000)
-                    clicked = True
-                except Exception:
-                    # WAF 遮罩 (waf_nc_block) 会拦截 pointer 事件, JS 点击兜底
-                    utils.logger.warning("[XueqiuCrawler] 正常点击被拦截 (WAF 遮罩?), 改用 JS 点击")
-                    await page.evaluate(
-                        "() => { const a = document.querySelector('a.tab-comments'); a && a.click(); }"
-                    )
-                    clicked = True
-        except Exception as e:
-            utils.logger.warning(f"[XueqiuCrawler] 未找到 '回复' tab: {e}")
-
-        if not clicked:
-            utils.logger.warning("[XueqiuCrawler] 未找到 '回复' tab, 尝试 hash 路由直接访问")
-            await page.evaluate(
-                "() => { location.hash = '#/comments'; }"
-            )
-
-        # 等待回复列表渲染
-        for _ in range(15):
-            count = await page.evaluate("() => document.querySelectorAll('.timeline__item').length")
-            if count > 0:
-                break
-            await asyncio.sleep(1)
-
-        # 2. 滚动加载 + 解析回复列表
-        comments: List[XueqiuComment] = []
         seen_ids = self._load_stored_comment_ids(user_id)
         if seen_ids:
             utils.logger.info(f"[XueqiuCrawler] 已存在 {len(seen_ids)} 条历史回复, 将跳过重复项")
-        no_growth_rounds = 0
-        for _ in range(500):
-            page_comments = await self._extract_comments_from_dom(user_id)
-            new_items = [c for c in page_comments if c.comment_id and c.comment_id not in seen_ids]
-            if new_items:
-                for c in new_items:
-                    seen_ids.add(c.comment_id)
-                comments.extend(new_items)
-                await xueqiu_store.batch_update_xueqiu_comments(new_items)
-                utils.logger.info(f"[XueqiuCrawler] 已抓取 {len(comments)} 条回复")
-                no_growth_rounds = 0
-            else:
-                no_growth_rounds += 1
-                if no_growth_rounds >= 3:
-                    utils.logger.info(f"[XueqiuCrawler] 回复列表连续 {no_growth_rounds} 轮无新增, 结束, 共 {len(comments)} 条")
-                    break
 
-            # 滚动到底部加载更多
-            reached_bottom = await page.evaluate(
-                "() => { window.scrollTo(0, document.body.scrollHeight); "
-                "return document.body.scrollHeight; }"
+        resume_state = self._load_resume_state(user_id)
+        if resume_state.get("comments_done"):
+            utils.logger.info(
+                f"[XueqiuCrawler] 用户 {user_id} 回复此前已完整抓取, 跳过 "
+                f"(如需重新抓取, 删除 data/xueqiu/resume/resume_{user_id}.json)"
             )
-            await asyncio.sleep(1)
-            new_height = await page.evaluate("() => document.body.scrollHeight")
-            if new_height == reached_bottom:
-                # 再等一次, 确认无增量
-                await asyncio.sleep(2)
-                if await page.evaluate("() => document.body.scrollHeight") == reached_bottom:
-                    utils.logger.info(f"[XueqiuCrawler] 回复列表滚动到底, 共 {len(comments)} 条")
-                    break
+            return
+        start_max_id = resume_state.get("last_comment_max_id", -1)
+        if start_max_id != -1:
+            utils.logger.info(f"[XueqiuCrawler] 检测到断点记录, 从游标 {start_max_id} 继续回复抓取")
 
-        utils.logger.info(f"[XueqiuCrawler] 用户 {user_id} 回复抓取完成, 共 {len(comments)} 条")
+        total_count = 0
+
+        async def _store_comments_callback(items_json: List[Dict]):
+            nonlocal total_count
+            new_comments = self._parse_and_filter_comments(items_json, user_id, seen_ids)
+            if new_comments:
+                await xueqiu_store.batch_update_xueqiu_comments(new_comments)
+                total_count += len(new_comments)
+                utils.logger.info(f"[XueqiuCrawler] 已抓取 {total_count} 条回复")
+
+        max_id = start_max_id
+        max_resume = 10
+        for resume_round in range(max_resume):
+            try:
+                await self.xueqiu_client.get_all_user_comments(
+                    user_id=user_id,
+                    callback=_store_comments_callback,
+                    start_max_id=max_id,
+                )
+                resume_state["comments_done"] = True
+                resume_state["last_comment_max_id"] = max_id
+                self._save_resume_state(user_id, resume_state)
+                break
+            except CrawlInterruptedError as exc:
+                utils.logger.warning(
+                    f"[XueqiuCrawler] 回复抓取在游标 {exc.page} 被 WAF 中断 "
+                    f"(第 {resume_round + 1} 次), 等待 {30 * resume_round + 10}s 后重新访问主页续爬"
+                )
+                max_id = exc.page
+                resume_state["last_comment_max_id"] = max_id
+                self._save_resume_state(user_id, resume_state)
+                # 等 WAF 风控窗口冷却 (仅在被拦截时等待, 正常抓取无任何等待)
+                await asyncio.sleep(30 * resume_round + 10)
+                await self._goto_with_waf(
+                    f"{self.index_url}/u/{user_id}",
+                    what=f"用户 {user_id} 主页 (断点续爬)",
+                )
+        else:
+            utils.logger.warning(
+                f"[XueqiuCrawler] 用户 {user_id} 回复抓取多次被 WAF 中断, 已达最大重试轮数, 暂停在游标 {max_id}"
+            )
+
+        utils.logger.info(f"[XueqiuCrawler] 用户 {user_id} 回复抓取完成, 共 {total_count} 条")
+
+    def _parse_and_filter_comments(
+        self, items_json: List[Dict], user_id: str, seen_ids: set
+    ) -> List[XueqiuComment]:
+        """解析 statuses/user/comments.json 的 items, 跳过已存储过的 comment_id。"""
+        new_comments: List[XueqiuComment] = []
+        for item in items_json or []:
+            comment_id = str(item.get("id") or "")
+            if not comment_id or comment_id in seen_ids:
+                continue
+            status_id = str(item.get("statusId") or "")
+            status = item.get("status") or {}
+            new_comments.append(
+                XueqiuComment(
+                    comment_id=comment_id,
+                    content=(item.get("text") or item.get("description") or "").strip(),
+                    publish_time=int(item.get("created_at") or 0),
+                    like_count=int(item.get("like_count") or 0),
+                    reply_count=int(item.get("comment_reply_count") or 0),
+                    status_id=status_id,
+                    status_title=(status.get("description") or status.get("text") or "")[:200],
+                    status_url=f"{self.index_url}/{user_id}/{status_id}" if status_id else "",
+                    user_id=user_id,
+                    user_link=f"{self.index_url}/{user_id}",
+                    user_nickname="",
+                    user_avatar="",
+                )
+            )
+            seen_ids.add(comment_id)
+        return new_comments
 
     def _load_stored_comment_ids(self, user_id: str) -> set:
         """
@@ -707,77 +724,6 @@ class XueqiuCrawler(AbstractCrawler):
         except Exception as e:
             utils.logger.warning(f"[XueqiuCrawler] 读取历史回复记录失败: {e}")
         return ids
-
-    async def _extract_comments_from_dom(self, user_id: str) -> List[XueqiuComment]:
-        """
-        从当前页面 DOM 提取回复列表。
-
-        雪球 "回复" tab 的 DOM 结构 (2026-09 实测):
-          article.timeline__item
-            div.timeline__item__info > a.date-and-source   (href=/<uid>/<status_id>, 时间+来源)
-            div.timeline__item__content .content          (回复正文)
-            blockquote.timeline__item__forward
-              a.fake-anchor[data-id]                       (评论 ID)
-              .user-name                                  (被回复用户)
-              .content                                    (被回复原文)
-              a.replay-count                              (" · 讨论 N")
-        """
-        try:
-            raw_items = await self.context_page.evaluate(
-                """() => {
-                    const out = [];
-                    for (const el of document.querySelectorAll('article.timeline__item')) {
-                        const dateLink = el.querySelector('a.date-and-source');
-                        const href = dateLink ? dateLink.getAttribute('href') : '';
-                        const m = href ? href.match(/\\/(\\d+)\\/(\\d+)/) : null;
-                        const contentEl = el.querySelector('.timeline__item__content .content, .timeline__item__content');
-                        const anchor = el.querySelector('.timeline__item__forward a.fake-anchor, blockquote a.fake-anchor');
-                        const replyCountEl = el.querySelector('a.replay-count');
-                        const replyCount = replyCountEl ? (replyCountEl.innerText.match(/\\d+/) || ['0'])[0] : '0';
-                        out.push({
-                            comment_id: anchor ? String(anchor.getAttribute('data-id')) : '',
-                            content: contentEl ? contentEl.innerText.trim() : '',
-                            publish_text: dateLink ? dateLink.innerText.trim() : '',
-                            status_url: m ? 'https://xueqiu.com' + href.split('#')[0] : '',
-                            reply_count: parseInt(replyCount || '0', 10),
-                        });
-                    }
-                    return out;
-                }"""
-            )
-        except Exception as e:
-            utils.logger.warning(f"[XueqiuCrawler] DOM 回复提取失败: {e}")
-            return []
-
-        comments: List[XueqiuComment] = []
-        for item in raw_items:
-            content = (item.get("content") or "").strip()
-            if not content:
-                continue
-            status_url = item.get("status_url") or ""
-            status_id = ""
-            m = re.search(r"/(\d+)/(\d+)", status_url)
-            if m:
-                status_id = m.group(2)
-            # 无 data-id 时用内容+帖子链接的稳定哈希兜底 (跨进程一致)
-            fallback_id = f"dom-{int(hashlib.md5((content + status_url).encode('utf-8')).hexdigest(), 16) % 10**10}"
-            comments.append(
-                XueqiuComment(
-                    comment_id=str(item.get("comment_id") or fallback_id),
-                    content=content,
-                    publish_time=0,  # 发布时间由 date-and-source 文本给出, 留待后续解析
-                    like_count=0,
-                    reply_count=int(item.get("reply_count") or 0),
-                    status_id=status_id,
-                    status_title="",
-                    status_url=status_url,
-                    user_id=user_id,
-                    user_link=f"{self.index_url}/{user_id}",
-                    user_nickname="",
-                    user_avatar="",
-                )
-            )
-        return comments
 
     async def launch_browser(
         self,

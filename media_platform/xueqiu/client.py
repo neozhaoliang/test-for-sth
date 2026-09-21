@@ -175,6 +175,76 @@ class XueqiuClient:
         utils.logger.info(f"[XueqiuClient.get_status_comments] status_id={status_id} page={page}")
         return await self._xhr_json_with_retry(url)
 
+    async def get_user_comments(self, user_id: str, max_id: int = -1, size: int = 20) -> Dict[str, Any]:
+        """
+        获取用户发出的回复/评论列表 (主页 "回复" tab 对应接口, 游标分页)。
+
+        Args:
+            user_id: 用户数字 ID
+            max_id: 分页游标, -1 表示从最新开始; 后续传上一页响应的 next_max_id
+            size: 每页数量
+
+        Returns:
+            API 原始响应: {"items": [...], "next_max_id": ..., "next_id": ...}
+        """
+        params = {"user_id": user_id, "size": size, "max_id": max_id}
+        url = f"{self._host}/statuses/user/comments.json?{urlencode(params)}"
+        utils.logger.info(f"[XueqiuClient.get_user_comments] user_id={user_id} max_id={max_id}")
+        return await self._xhr_json_with_retry(url)
+
+    async def get_all_user_comments(
+        self,
+        user_id: str,
+        callback: Optional[Callable] = None,
+        max_count: int = 0,
+        start_max_id: int = -1,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取用户全部回复/评论 (游标分页直至无更多)。
+
+        Args:
+            user_id: 用户数字 ID
+            callback: 每页回调, 用于增量存储
+            max_count: 最大条数, 0 表示不限制 (抓取全部)
+            start_max_id: 起始分页游标 (用于断点续爬), -1 表示从最新开始
+
+        Returns:
+            全部评论原始 JSON 列表
+
+        Raises:
+            CrawlInterruptedError: 被 WAF 中断, 携带中断游标可从此处恢复
+        """
+        result: List[Dict[str, Any]] = []
+        max_id = start_max_id
+        while True:
+            try:
+                res = await self.get_user_comments(user_id, max_id=max_id)
+            except (WafChallengeError, DataFetchError) as e:
+                utils.logger.warning(
+                    f"[XueqiuClient.get_all_user_comments] max_id={max_id} 被 WAF 中断: {e}"
+                )
+                raise CrawlInterruptedError(page=max_id, cause=e) from e
+            items = res.get("items") or []
+            if not items:
+                utils.logger.info(f"[XueqiuClient.get_all_user_comments] max_id={max_id} 无数据, 回复抓取结束")
+                break
+            if callback:
+                await callback(items)
+            result.extend(items)
+            if max_count and len(result) >= max_count:
+                result = result[:max_count]
+                break
+            next_max_id = res.get("next_max_id")
+            if next_max_id is None or next_max_id == max_id:
+                utils.logger.info(f"[XueqiuClient.get_all_user_comments] 游标未推进, 回复抓取结束")
+                break
+            max_id = next_max_id
+            # 可选节流: --pace N 时每页之间等待 N 秒 (降低触发 WAF 风控的概率)
+            if getattr(config, "XUEQIU_PACE_SEC", 0) > 0:
+                await asyncio.sleep(config.XUEQIU_PACE_SEC)
+        utils.logger.info(f"[XueqiuClient.get_all_user_comments] user_id={user_id} 共获取 {len(result)} 条回复")
+        return result
+
     async def get_all_user_posts(
         self,
         user_id: str,
