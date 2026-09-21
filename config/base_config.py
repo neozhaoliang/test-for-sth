@@ -90,6 +90,13 @@ CDP_CONNECT_EXISTING = True
 # 设置为 False 可以保持浏览器运行，方便调试
 AUTO_CLOSE_BROWSER = True
 
+# 雪球登录等待: 浏览器会话建立后若未检测到雪球登录态 (xq_a_token cookie)，
+# 停在首页等用户在浏览器里登录，登录成功立即继续。CDP_LOGIN_WAIT_SECONDS 是
+# 最多等待秒数 (0 或关闭开关表示不等待，未登录直接继续，部分内容会受限)。
+# 登录态会随 SAVE_LOGIN_STATE 的 user data 目录保留，下一次运行无需重新登录。
+CDP_WAIT_FOR_LOGIN = True
+CDP_LOGIN_WAIT_SECONDS = 120
+
 # Data saving type option configuration, supports: csv, db, json, jsonl, sqlite, excel, postgres. It is best to save to DB, with deduplication function.
 SAVE_DATA_OPTION = "jsonl"  # csv or db or json or jsonl or sqlite or excel or postgres
 

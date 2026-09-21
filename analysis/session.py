@@ -77,8 +77,43 @@ class AnalysisBrowserSession:
             await self.close()
             return False
 
+        # 未登录时停在首页，给用户时间在弹出的浏览器里登录雪球 (超时后降级继续)
+        await self._wait_for_xueqiu_login()
+
         self.xueqiu_client = XueqiuClient(playwright_page=self.context_page)
         return True
+
+    async def _is_xueqiu_logged_in(self) -> bool:
+        """通过雪球登录 cookie (xq_a_token) 判断当前会话是否已登录。"""
+        try:
+            cookies = await self.browser_context.cookies("https://xueqiu.com/")
+        except Exception:
+            return False
+        return any(c.get("name") == "xq_a_token" and c.get("value") for c in cookies)
+
+    async def _wait_for_xueqiu_login(self) -> None:
+        """未登录时停在雪球首页等待用户登录，超时后降级为未登录状态继续。"""
+        if not getattr(config, "CDP_WAIT_FOR_LOGIN", True):
+            return
+        timeout = int(getattr(config, "CDP_LOGIN_WAIT_SECONDS", 120) or 0)
+        if timeout <= 0:
+            return
+        if await self._is_xueqiu_logged_in():
+            utils.logger.info("[AnalysisBrowserSession] 雪球已登录")
+            return
+        utils.logger.info(
+            f"[AnalysisBrowserSession] 雪球未登录，等待登录 (最多 {timeout}s): "
+            "请在弹出的浏览器里完成雪球登录，登录成功后自动继续"
+        )
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
+            await asyncio.sleep(3)
+            if await self._is_xueqiu_logged_in():
+                utils.logger.info("[AnalysisBrowserSession] 雪球登录成功，继续分析")
+                return
+        utils.logger.warning(
+            "[AnalysisBrowserSession] 等待登录超时，以未登录状态继续 (部分页面/接口可能受限)"
+        )
 
     async def _recreate_page_if_needed(self) -> bool:
         try:
