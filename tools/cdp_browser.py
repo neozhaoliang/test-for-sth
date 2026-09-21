@@ -159,7 +159,7 @@ class CDPBrowserManager:
 
         # Wait for the browser's CDP port to become available
         # The user may need time to enable remote debugging or confirm the connection dialog
-        timeout = config.BROWSER_LAUNCH_TIMEOUT
+        timeout = config.CDP_CONNECT_WAIT_SECONDS
         utils.logger.info(
             f"[CDPBrowserManager] Waiting up to {timeout}s for browser CDP connection..."
         )

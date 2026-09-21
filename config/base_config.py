@@ -72,6 +72,13 @@ CDP_HEADLESS = False
 # 浏览器启动超时时间（秒）
 BROWSER_LAUNCH_TIMEOUT = 60
 
+# 连接"已打开的浏览器"时，等待其调试端口出现的秒数。
+# 单独设一个值是因为这个等待和上面不是一回事：BROWSER_LAUNCH_TIMEOUT 是等我们自己
+# 拉起的浏览器进程冷启动（慢机器上可能要十几秒），而这个是在等用户手动去开调试端口，
+# 单次探测本身在 Windows 上还要 ~2s。没开调试端口时每份报告都要白等满这个时间，
+# 所以调小它，不要连带压缩浏览器冷启动的预算。
+CDP_CONNECT_WAIT_SECONDS = 15
+
 # 是否连接用户已打开的浏览器，而不是启动新的浏览器
 # 开启后，程序会连接一个已经启用了远程调试的浏览器
 # 用户需要在 Chrome 中开启远程调试：chrome://inspect/#remote-debugging
