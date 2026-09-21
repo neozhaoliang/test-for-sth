@@ -34,8 +34,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from analysis.candidates import list_supported_stocks
 from analysis.knowledge_base import ensure_loaded as ensure_knowledge_base_loaded
+from analysis.realtime_price import resolve_stock_code
 from analysis.report import generate_report
 from tools.utils import utils
 
@@ -77,9 +77,13 @@ async def _run_analysis(task_id: str, stock_code: str) -> None:
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)
 async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
-    stock_code = req.stock_code.strip()
-    if not stock_code:
+    raw_input = req.stock_code.strip()
+    if not raw_input:
         raise HTTPException(status_code=400, detail="stock_code 不能为空")
+
+    stock_code = await resolve_stock_code(raw_input)
+    if not stock_code:
+        raise HTTPException(status_code=404, detail=f"未找到股票: {raw_input}")
 
     task_id = str(uuid.uuid4())
     _tasks[task_id] = {"status": "pending", "result": None, "error": None}
@@ -93,11 +97,6 @@ async def get_task(task_id: str) -> Dict:
     if task is None:
         raise HTTPException(status_code=404, detail="task_id 不存在")
     return {"status": task["status"], "result": task["result"], "error": task["error"]}
-
-
-@app.get("/api/stocks")
-async def get_supported_stocks() -> Dict:
-    return {"stocks": list_supported_stocks()}
 
 
 class CrawlXueqiuRequest(BaseModel):
@@ -224,17 +223,24 @@ _INDEX_HTML = """<!DOCTYPE html>
   .stance-bearish { background: #2a9d3f; }
   .stance-neutral { background: #888; }
   .thesis-block { margin: 12px 0; }
+  .counter-evidence-block { margin: 12px 0; padding: 10px 12px; background: #fff0f0; border-left: 4px solid #d33; border-radius: 4px; }
   .lynch-category { display: inline-block; padding: 3px 9px; margin-left: 6px; border-radius: 10px; font-size: 12px; background: #eef2f7; color: #444; border: 1px solid #dbe2ea; }
   .invalidation-block { margin: 12px 0; padding: 10px 12px; background: #eef6ff; border-left: 4px solid #1a73e8; border-radius: 4px; }
   .risk-block { margin: 12px 0; padding: 10px 12px; background: #fff6e5; border-left: 4px solid #e0a020; border-radius: 4px; }
+  /* LLM 生成的段落带 \n 换行，HTML 默认把换行折叠成空格，必须显式保留，
+     否则分条列举的结论会挤成一整行 */
+  .thesis-block, .counter-evidence-block, .invalidation-block, .risk-block { white-space: pre-wrap; }
+  .evidence-section { margin: 20px 0; }
+  .evidence-block { margin: 8px 0; padding: 10px 12px; background: #f7f7f7; border-left: 4px solid #999; border-radius: 4px; font-size: 13px; }
+  .evidence-block.missing { color: #999; }
+  .evidence-block ul { margin: 4px 0 0; padding-left: 20px; }
   .credibility-note { color: #555; }
   .prompt-version { color: #aaa; font-size: 12px; }
   .disclaimer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #eee; color: #999; font-size: 12px; }
-  .supported-stocks { margin: 12px 0; }
-  .supported-stocks p { margin: 0 0 6px; color: #666; font-size: 13px; }
+  .watchlist { margin: 12px 0; }
+  .watchlist p { margin: 0 0 6px; color: #666; font-size: 13px; }
   .stock-chip { display: inline-block; padding: 4px 10px; margin: 0 6px 6px 0; border: 1px solid #ccc; border-radius: 14px; font-size: 13px; cursor: pointer; background: #f7f7f7; }
   .stock-chip:hover { background: #eaf1fd; border-color: #1a73e8; }
-  .stock-chip .record-count { color: #999; margin-left: 4px; }
   .crawl-section { margin: 24px 0; padding: 16px; border: 1px solid #e0e0e0; border-radius: 6px; background: #fafafa; }
   .crawl-section h3 { margin: 0 0 10px; font-size: 15px; }
   .crawl-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
@@ -250,12 +256,12 @@ _INDEX_HTML = """<!DOCTYPE html>
   <p>输入股票代码，查看历史高可信度用户的观点与最新发言综合分析。</p>
 </header>
 <div class="search-bar">
-  <input id="stockCode" placeholder="SH603408" />
+  <input id="stockCode" placeholder="股票代码或名称，如 SH603408 / 洛阳钼业" />
   <button id="submitBtn">分析</button>
 </div>
-<div class="supported-stocks">
-  <p>当前有历史验证数据支持的股票 (数据为后台离线抓取分析，非全市场覆盖，点击可快速填入):</p>
-  <div id="stockChips">加载中...</div>
+<div class="watchlist">
+  <p>常用股票 (点击可快速填入分析):</p>
+  <div id="stockChips"></div>
 </div>
 <div id="status"></div>
 <div id="result"></div>
@@ -284,30 +290,32 @@ _INDEX_HTML = """<!DOCTYPE html>
 <script>
 let pollTimer = null;
 
-async function loadSupportedStocks() {
+// 固定自选股。代码已对全市场代码表核实；"长鑫存储"的上市主体名为"长鑫科技"(688825)，
+// 用上市名是因为输入框打"长鑫存储"后端解析不出来 (按名称解析只做单向包含匹配)。
+const WATCHLIST = [
+  { code: 'SH600519', name: '贵州茅台' },
+  { code: 'SH601088', name: '中国神华' },
+  { code: 'SH600938', name: '中国海油' },
+  { code: 'SH601398', name: '工商银行' },
+  { code: 'SZ300308', name: '中际旭创' },
+  { code: 'SH601899', name: '紫金矿业' },
+  { code: 'SZ000333', name: '美的集团' },
+  { code: 'SH601919', name: '中远海控' },
+  { code: 'SH688256', name: '寒武纪' },
+  { code: 'SH688825', name: '长鑫科技' },
+];
+
+function renderWatchlist() {
   const el = document.getElementById('stockChips');
-  try {
-    const res = await fetch('/api/stocks');
-    if (!res.ok) throw new Error('请求失败');
-    const { stocks } = await res.json();
-    if (!stocks || !stocks.length) {
-      el.textContent = '暂无支持的股票';
-      return;
-    }
-    el.innerHTML = stocks.map(s =>
-      '<span class="stock-chip" data-code="' + escapeHtml(s.stock_code) + '">' +
-      escapeHtml(s.stock_name || s.stock_code) + ' (' + escapeHtml(s.stock_code) + ')' +
-      '<span class="record-count">' + s.record_count + ' 条记录</span></span>'
-    ).join('');
-    el.querySelectorAll('.stock-chip').forEach(chip => {
-      chip.addEventListener('click', () => {
-        document.getElementById('stockCode').value = chip.getAttribute('data-code');
-        submitAnalysis();
-      });
+  el.innerHTML = WATCHLIST.map(s =>
+    '<span class="stock-chip" data-code="' + s.code + '">' + s.name + ' (' + s.code + ')</span>'
+  ).join('');
+  el.querySelectorAll('.stock-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.getElementById('stockCode').value = chip.getAttribute('data-code');
+      submitAnalysis();
     });
-  } catch (e) {
-    el.textContent = '加载失败';
-  }
+  });
 }
 
 async function submitAnalysis() {
@@ -323,7 +331,8 @@ async function submitAnalysis() {
     body: JSON.stringify({ stock_code: stockCode }),
   });
   if (!res.ok) {
-    document.getElementById('status').textContent = '提交失败: ' + res.status;
+    const err = await res.json().catch(() => ({}));
+    document.getElementById('status').textContent = '提交失败: ' + (err.detail || res.status);
     return;
   }
   const { task_id } = await res.json();
@@ -372,6 +381,170 @@ function lynchCategoryLabel(cat) {
   return labels[cat] || '';
 }
 
+function yi(yuan) {
+  if (yuan === null || yuan === undefined) return '暂缺';
+  return (yuan / 1e8).toFixed(2) + '亿';
+}
+
+function pctStr(v) {
+  return (v === null || v === undefined) ? '暂缺' : v + '%';
+}
+
+function renderFundamentalsBlock(f) {
+  if (!f || !f.facts) {
+    return '<div class="evidence-block missing"><b>结构性事实:</b> 暂缺 (本次未能取到同花顺 F10 数据)</div>';
+  }
+  const x = f.facts;
+  const rows = [
+    ['财务数据期间', x.finance_period],
+    ['客户/供应商集中度期间', f.concentration_period],
+    ['营业收入', yi(x.revenue) + (x.revenue_yoy_pct === null || x.revenue_yoy_pct === undefined ? '' : ' (同比 ' + x.revenue_yoy_pct + '%)')],
+    ['净利润', yi(x.net_profit) + (x.net_profit_basis ? ' (口径: ' + x.net_profit_basis + ')' : '')],
+    ['经营活动现金流净额', yi(x.operating_cash_flow)],
+    ['经营现金流/净利润', x.cash_to_profit_ratio === null || x.cash_to_profit_ratio === undefined ? '暂缺' : x.cash_to_profit_ratio],
+    ['研发投入', yi(x.rd_investment_yuan) + '，研发强度 ' + pctStr(x.rd_intensity_pct)],
+    ['前五大客户占营收', pctStr(x.top5_customer_pct)],
+    ['前五大供应商占采购额', pctStr(x.top5_supplier_pct)],
+    ['海外业务收入', yi(x.overseas_revenue_yuan) + '，占营收 ' + pctStr(x.overseas_revenue_pct)],
+    ['境外销量占比', pctStr(x.overseas_sales_pct)],
+    ['发明专利占比', pctStr(x.invention_ratio_pct) + (x.patents_granted ? ' (' + (x.patents_invention || 0) + '/' + x.patents_granted + ')' : '')],
+    ['股东户数', (x.holder_count_latest === null || x.holder_count_latest === undefined ? '暂缺' : x.holder_count_latest + ' 户')
+      + ' (截止 ' + (x.holder_count_period || '未知') + ')，环比 ' + pctStr(x.holder_count_qoq_pct) + '，同比 ' + pctStr(x.holder_count_yoy_pct)],
+  ].filter(([, v]) => v !== null && v !== undefined && v !== '' && v !== '暂缺');
+
+  let html = '<div class="evidence-block"><b>结构性事实 (同花顺 F10，公司定期报告原文):</b><ul>' +
+    rows.map(([k, v]) => '<li>' + k + ': ' + escapeHtml(String(v)) + '</li>').join('') + '</ul>';
+
+  const series = x.holder_count_series || [];
+  if (series.length >= 2) {
+    html += '<div style="margin-top:6px"><b>股东户数 vs 同期股价 (判断股价暴涨是否伴随筹码派发):</b><ul>' +
+      series.slice(0, 8).map(p => '<li>' + escapeHtml(String(p.period)) + ': 股东户数 ' +
+        p.holders + ' 户, 股价 ' + p.price + '</li>').join('') + '</ul></div>';
+  }
+
+  const risks = (f.self_disclosed_risks || '').trim();
+  html += '<div class="risk-block"><b>公司自述的风险 (原文):</b> ' +
+    (risks ? escapeHtml(risks) : '暂缺 (该公司本期报告的董事会经营评述中没有独立的风险小节)') + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function renderXueqiuBlock(x) {
+  if (!x) {
+    return '<div class="evidence-block missing"><b>雪球个股维度:</b> 暂缺 (本次未能取到机构持仓/讨论热度)</div>';
+  }
+  let html = '<div class="evidence-block"><b>雪球个股维度:</b><ul>';
+  const holding = x.org_holding || [];
+  if (holding.length) {
+    html += '<li>机构/主要股东持仓:' + holding.slice(0, 10).map(h =>
+      '<br>&nbsp;&nbsp;· ' + escapeHtml(h.name || '') + ': ' +
+      Object.keys(h).filter(k => k !== 'name').map(k => escapeHtml(k) + '=' + escapeHtml(String(h[k]))).join(', ')
+    ).join('') + '</li>';
+  } else {
+    html += '<li>机构持仓: 暂缺</li>';
+  }
+  const d = x.discussion || {};
+  html += '<li>讨论热度: ' + (d.post_count === null || d.post_count === undefined
+    ? '暂缺' : '相关帖子约 ' + d.post_count + ' 条 (仅情绪/关注度参考)') + '</li>';
+  html += '</ul></div>';
+  return html;
+}
+
+function renderEvidenceSection(report) {
+  let html = '<div class="evidence-section"><h3>多维度证据</h3>';
+
+  const ic = report.industry_comparison;
+  if (ic && ic.advancing !== undefined && ic.advancing !== null) {
+    html += '<div class="evidence-block"><b>行业涨跌:</b> 所属行业 ' + escapeHtml(ic.industry_name) +
+      '，上涨家数 ' + ic.advancing + '，下跌家数 ' + ic.declining +
+      '，行业涨跌幅 ' + ic.industry_change_pct + '%</div>';
+  } else if (ic) {
+    // 只认出行业归属、没匹配到同花顺板块统计时仍显示行业名，但不显示涨跌家数
+    html += '<div class="evidence-block missing"><b>行业涨跌:</b> 所属申万行业 ' +
+      escapeHtml(ic.sw_industry) + '，涨跌家数与涨跌幅暂缺</div>';
+  } else {
+    html += '<div class="evidence-block missing"><b>行业涨跌:</b> 暂缺 (行业归属数据本次未能取到)</div>';
+  }
+
+  const st = report.shareholder_trend;
+  if (st) {
+    html += '<div class="evidence-block"><b>股东户数 (散户情绪代理):</b> 最新 ' + st.latest_count + ' 户 (截止 ' +
+      escapeHtml(st.as_of) + ')，环比变化 ' + st.change_pct + '%，筹码趋于' + (st.trend === 'increasing' ? '分散' : '集中') + '</div>';
+  } else {
+    html += '<div class="evidence-block missing"><b>股东户数:</b> 暂缺</div>';
+  }
+
+  const pt = report.profitability_trend;
+  if (pt) {
+    html += '<div class="evidence-block"><b>盈利能力与成本弹性:</b><ul>' +
+      [pt.gross_margin_trend_note, pt.net_margin_trend_note, pt.roe_trend_note, pt.debt_ratio_trend_note]
+        .filter(Boolean).map(n => '<li>' + escapeHtml(n) + '</li>').join('') +
+      '</ul></div>';
+  } else {
+    html += '<div class="evidence-block missing"><b>盈利能力与成本弹性:</b> 暂缺 (本次未能取到财务指标数据)</div>';
+  }
+
+  const div = report.dividend_history || [];
+  if (div.length) {
+    html += '<div class="evidence-block"><b>历史分红:</b><ul>' +
+      div.map(d => '<li>' + escapeHtml(d.announce_date) + ': 每10股派息 ' + d.dividend_per_10_shares + ' 元 (' + escapeHtml(d.progress) + ')</li>').join('') +
+      '</ul></div>';
+  } else {
+    html += '<div class="evidence-block missing"><b>历史分红:</b> 暂缺</div>';
+  }
+
+  const bb = report.buyback_history || [];
+  if (bb.length) {
+    html += '<div class="evidence-block"><b>历史回购:</b><ul>' +
+      bb.map(b => '<li>' + escapeHtml(b.announce_date) + ': 计划金额区间 [' + b.planned_amount_range[0] + ', ' + b.planned_amount_range[1] +
+        ']，已回购 ' + b.actual_amount + ' (' + escapeHtml(b.progress) + ')</li>').join('') +
+      '</ul></div>';
+  } else {
+    html += '<div class="evidence-block missing"><b>历史回购:</b> 暂缺</div>';
+  }
+
+  const cs = report.commodity_signal;
+  if (cs) {
+    html += '<div class="evidence-block"><b>大宗商品价差/汇率 (周期性矿业股):</b> 沪铜 ' + cs.sh_copper_price + ' ' + escapeHtml(cs.sh_copper_unit) +
+      '，COMEX铜 ' + cs.comex_copper_price + ' ' + escapeHtml(cs.comex_copper_unit) +
+      '，人民币汇率趋势: ' + escapeHtml(cs.rmb_trend || '暂缺') +
+      (cs.note ? '<br>' + escapeHtml(cs.note) : '') + '</div>';
+  } else {
+    html += '<div class="evidence-block missing"><b>大宗商品价差/汇率:</b> 暂缺 (非周期性矿业股，或行业归属数据未能取到)</div>';
+  }
+
+  const fx = report.rmb_signal;
+  if (fx && fx.rmb_trend_note) {
+    const overseas = ((report.fundamentals || {}).facts || {}).overseas_revenue_pct;
+    html += '<div class="evidence-block"><b>汇率敞口:</b> ' + escapeHtml(fx.rmb_trend_note) +
+      (overseas === null || overseas === undefined
+        ? '；海外收入占比 暂缺'
+        : '；海外收入占比 ' + overseas + '%') + '</div>';
+  } else {
+    html += '<div class="evidence-block missing"><b>汇率敞口:</b> 暂缺 (本次未能取到人民币汇率趋势)</div>';
+  }
+
+  const v = report.valuation;
+  if (v) {
+    const valCells = [
+      ['市盈率(动态)', v.pe_dynamic], ['市盈率(静态)', v.pe_static], ['市净率', v.pb],
+      ['每股收益', v.eps], ['每股净资产', v.nav_per_share], ['净资产收益率', v.roe_pct],
+      ['毛利率', v.gross_margin_pct], ['股权质押占A股', v.pledge_ratio_pct],
+    ].filter(([, x]) => x !== null && x !== undefined)
+     .map(([k, x]) => '<li>' + k + ': ' + x + '</li>').join('');
+    html += '<div class="evidence-block"><b>估值 (数据日期 ' + escapeHtml(v.valuation_as_of || '未知') + '):</b>' +
+      (valCells ? '<ul>' + valCells + '</ul>' : ' 暂缺') + '</div>';
+  } else {
+    html += '<div class="evidence-block missing"><b>估值:</b> 暂缺 (本次未能取到估值数据)</div>';
+  }
+
+  html += renderFundamentalsBlock(report.fundamentals);
+  html += renderXueqiuBlock(report.xueqiu_stock);
+
+  html += '</div>';
+  return html;
+}
+
 function renderResult(report) {
   const el = document.getElementById('result');
   let html = '<h2>' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
@@ -395,12 +568,18 @@ function renderResult(report) {
   if (summary.thesis_summary) {
     html += '<div class="thesis-block"><b>关键论据:</b> ' + escapeHtml(summary.thesis_summary) + '</div>';
   }
+  if (summary.core_counter_evidence) {
+    html += '<div class="counter-evidence-block"><b>与结论相悖的最强证据:</b> ' +
+      escapeHtml(summary.core_counter_evidence) + '</div>';
+  }
   if (summary.invalidation_condition) {
     html += '<div class="invalidation-block"><b>如果这个判断错了，会是因为:</b> ' + escapeHtml(summary.invalidation_condition) + '</div>';
   }
   if (summary.risk_notes) {
     html += '<div class="risk-block"><b>风险提示:</b> ' + escapeHtml(summary.risk_notes) + '</div>';
   }
+
+  html += renderEvidenceSection(report);
 
   html += '<h3>候选用户 (' + report.candidates.length + ')</h3>';
   for (const c of report.candidates) {
@@ -423,7 +602,7 @@ function renderResult(report) {
 document.getElementById('submitBtn').addEventListener('click', submitAnalysis);
 document.getElementById('crawlXueqiuBtn').addEventListener('click', () => submitCrawl('xueqiu'));
 document.getElementById('crawlBiliBtn').addEventListener('click', () => submitCrawl('bili'));
-loadSupportedStocks();
+renderWatchlist();
 
 let crawlPollTimer = null;
 
