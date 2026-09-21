@@ -49,6 +49,10 @@ class StructuredSummary(BaseModel):
     )
     stance: str = Field(default="", description="综合倾向: bullish|bearish|neutral")
     thesis_summary: str = Field(default="", description="关键论据摘要")
+    core_counter_evidence: str = Field(
+        default="",
+        description="与结论相悖的最强证据 (必须带具体数字)，没有也要写「未发现」",
+    )
     invalidation_condition: str = Field(default="", description="如果出现什么情况，说明这个判断是错的")
     risk_notes: str = Field(default="", description="风险提示/需要注意的不确定性")
 
@@ -60,6 +64,16 @@ class AnalysisReport(BaseModel):
     realtime_quote: Optional[dict] = Field(default=None, description="实时行情快照 (最新价/涨跌幅/成交量等)")
     candidates: List[CandidateOpinion] = Field(default_factory=list, description="候选高可信度用户列表")
     knowledge_excerpts: List[KnowledgeExcerpt] = Field(default_factory=list, description="知识库背景资料 (全量，未按股票筛选)")
+    industry_comparison: Optional[dict] = Field(default=None, description="所属行业涨跌家数对比 (行业普涨/普跌判断)")
+    shareholder_trend: Optional[dict] = Field(default=None, description="股东户数环比变化 (散户情绪/筹码集中度代理)")
+    dividend_history: List[dict] = Field(default_factory=list, description="历史分红记录")
+    buyback_history: List[dict] = Field(default_factory=list, description="历史回购记录")
+    commodity_signal: Optional[dict] = Field(default=None, description="沪铜/COMEX铜价差 + 人民币汇率趋势 (仅周期性矿业股)")
+    rmb_signal: Optional[dict] = Field(default=None, description="人民币汇率趋势 (全部股票，用于判断汇率对海外收入的影响方向)")
+    profitability_trend: Optional[dict] = Field(default=None, description="近几个报告期毛利率/净利率/ROE/资产负债率趋势 (盈利能力与成本弹性)")
+    fundamentals: Optional[dict] = Field(default=None, description="同花顺 F10 结构性事实 (集中度/海外占比/现金流质量/研发强度/股东人数/公司自述风险)")
+    valuation: Optional[dict] = Field(default=None, description="估值快照 (PE/PB/每股指标/股权质押)")
+    xueqiu_stock: Optional[dict] = Field(default=None, description="雪球个股维度 (机构持仓/讨论热度，仅聚合数字)")
     summary: StructuredSummary = Field(default_factory=StructuredSummary, description="LLM 生成的结构化分析摘要")
     prompt_version: str = Field(default="", description="生成本报告所用的 prompt 版本号")
     generated_at: int = Field(default=0, description="报告生成时间 (Unix 秒)")
