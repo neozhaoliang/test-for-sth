@@ -28,9 +28,11 @@ from typing import Dict, List, Optional
 
 from analysis.candidates import find_candidates
 from analysis.commodity import get_copper_spread_signal, get_rmb_trend_signal
+from analysis.freight import get_container_freight_signal
 from analysis.fundamentals import get_ths_fundamentals
 from analysis.industry import get_industry_comparison
 from analysis.knowledge_base import ensure_loaded as ensure_knowledge_base_loaded
+from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.realtime_price import get_realtime_quote, get_stock_name
 from analysis.session import AnalysisBrowserSession
@@ -45,7 +47,7 @@ _MAX_LATEST_POSTS = 5
 _MAX_HISTORICAL_THESIS = 5
 _MIN_CORROBORATING_RECORDS = 2  # 历史验证记录 < 该值时提示"参考价值有限"
 
-_PROMPT_VERSION = "v9-plain-language"
+_PROMPT_VERSION = "v10-freight-market"
 
 # 实测: 300308 的 v7 prompt 输出 6060 tokens，其中约 5000 花在 thinking 块上。
 # 报告类 prompt 的思考预算随输入维度数量增长，上限必须留足余量，否则截断到 len=0。
@@ -87,6 +89,9 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 行业整体涨跌 (判断是不是行业普涨/普跌带来的行情，而非公司自身经营变化):
 {industry_block}
 
+大盘与风格 (A 股市场生态: 主要指数与个股的年内/上半年/下半年涨跌幅，以及个股相对自身历史区间的位置):
+{market_block}
+
 股东回报与筹码 (股东户数变化可作散户情绪/筹码集中度的代理指标——户数增加通常意味着原有大户/机构筹码被拆分卖给了更分散的散户，即"机构派发给散户"；户数减少则是筹码集中。分红回购历史反映管理层对股东的回报态度):
 {shareholder_block}
 
@@ -96,33 +101,38 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 大宗商品价差与汇率信号 (仅周期性矿业股适用；只有这里给出了具体数字时，才能在结论里提"囤货/金融属性"，否则不能提):
 {commodity_block}
 
+运价景气度 (仅航运/港口类公司适用；运价是集运公司利润的最强领先指标，判断行业景气方向必须引用这里的具体数字，禁止仅凭公司财务同比增速外推景气):
+{freight_block}
+
 按以下顺序分析。**必须依次走完这七步，每一步都要落到具体数字上；后一步不能跳过前一步直接下结论。**
 
 **一、大势与宏观周期 (先看大势，再看个股)**
 1. 点名主要央行的当前位置: 美联储、欧洲央行、日本央行、中国人民银行，各自处于 QE/扩表、缩表、加息、降息、还是观望的哪个阶段，给出政策利率的大致水平或最近一次变动的方向与幅度。
 2. 正面回答这个格局问题: 当前是否处在"疫情后美欧日经历 QE 宽松、如今转向新一轮加息/紧缩，而中国既未跟随放水、也未跟随加息"的政策分化中？**如果存在这种分化，必须说明它对本标的的含义** (外资流向、人民币汇率、出口导向型企业的相对竞争力、国内流动性环境)；如果实际情况不是这样，说明真实的格局是什么。
-3. 给出这个阶段的预期持续时间窗口 (到什么时候、看什么信号)。
+3. **市场生态与该股的相对强弱**: 引用大盘与风格数据块的具体数字——上证指数、沪深300、上证红利、科创50、创业板指与个股的年内/上半年/下半年涨跌幅，判断当前 A 股处于哪种生态 (科技牛、红利补涨、高位回调、普涨普跌等)，以及该股在其中的位置 (领先、滞后、补涨中、还是逆势下跌)；再结合个股 52 周与 2018 年以来高低点，说明它处于自身历史区间的什么位置。该数据块暂缺时写"该维度数据暂缺"，不得凭市场印象补全。
+4. 给出这个阶段的预期持续时间窗口 (到什么时候、看什么信号)。
 > 不确定精确数字时必须标注为"基于知识的粗略估计"，但仍要给出主体和数量级，不能只写"加息预期"四个字。知识库资料里若有对当前宏观周期的判断，优先采用它并注明来自知识库。
 
 **二、业务本质与外部依赖 (公司靠什么赚钱、命门握在谁手里)**
-4. **海外市场依赖**: 引用海外收入占比 / 境外销量占比。占比高时必须评估海外需求波动、关税与贸易政策变化的影响。
-5. **供应链自主性**: 是自主可控的国内供应链，还是关键环节依赖国外？从供应商集中度、公司自述风险原文、公司经营表述里找证据。**数据不足以判断时必须写"暂缺"，不得凭印象断言。**
-6. **汇率对收入的影响**: 结合"汇率敞口"数据块给出方向性判断 (顺风/逆风) 和传导路径 (折算收入 / 报价竞争力 / 汇兑损益)。该块标注暂缺时，这一项写暂缺。
-7. **核心科技与断供/制裁风险**: 用研发强度、发明专利占授权专利比例判断技术壁垒的真实高度；用海外收入占比、公司自述的出口管制/地缘政治风险判断断供与制裁的风险敞口。**"低研发强度 + 高海外依赖"这个组合意味着代工属性与被替代风险，一旦同时出现必须明确指出，不得含糊过去。**
+5. **海外市场依赖**: 引用海外收入占比 / 境外销量占比。占比高时必须评估海外需求波动、关税与贸易政策变化的影响。
+6. **供应链自主性**: 是自主可控的国内供应链，还是关键环节依赖国外？从供应商集中度、公司自述风险原文、公司经营表述里找证据。**数据不足以判断时必须写"暂缺"，不得凭印象断言。**
+7. **汇率对收入的影响**: 结合"汇率敞口"数据块给出方向性判断 (顺风/逆风) 和传导路径 (折算收入 / 报价竞争力 / 汇兑损益)。该块标注暂缺时，这一项写暂缺。
+8. **核心科技与断供/制裁风险**: 用研发强度、发明专利占授权专利比例判断技术壁垒的真实高度；用海外收入占比、公司自述的出口管制/地缘政治风险判断断供与制裁的风险敞口。**"低研发强度 + 高海外依赖"这个组合意味着代工属性与被替代风险，一旦同时出现必须明确指出，不得含糊过去。**
+9. **周期位置与景气度** (仅运价数据块给出具体数字时): 引用运价数据块的最新点位、年内高低点及日期、历史分位，判断行业景气当前处于历史区间的什么位置、方向向上还是向下。**禁止仅凭公司财务指标的同比增速断言"景气见顶/回落"**——同比增速受上一年基数影响，必须同时说明基数水平。若运价处历史高位区间而公司财务同比下滑，必须把"高基数效应"与"景气回落"两种解释都摆出来，用数据块里的数字取舍；数据不足以取舍时写"无法从本次数据确认"，不得二选一硬下结论。
 
 **三、现金流质量 (利润是不是真金白银)**
-8. 引用经营现金流/净利润比值、经营现金流同比方向、每股经营现金流。比值显著小于 1、或现金流同比大幅下滑时，必须说明利润含金量问题，并结合应收账款/存货的可能性给出解释或标注为"原因无法从本次数据确认"。
+10. 引用经营现金流/净利润比值、经营现金流同比方向、每股经营现金流。比值显著小于 1、或现金流同比大幅下滑时，必须说明利润含金量问题，并结合应收账款/存货的可能性给出解释或标注为"原因无法从本次数据确认"。
 
 **四、管理层行为与股东回报 (看行为记录，不做人身评价)**
-9. 用可核验的行为记录评估管理层是否善待股东: 分红是否长期持续、金额多少；回购是否真实执行、金额与进度；**股权质押比例** (高比例质押是治理风险信号，大股东资金链紧张时可能损害中小股东利益)。
-10. 财务上有没有不合理的做法: 结合现金流与利润的背离、质押比例给出判断。**应收账款、存货、商誉、关联交易、大股东减持这几项本次未取到数据，不得凭空评价**——只能写"该维度数据暂缺"。
+11. 用可核验的行为记录评估管理层是否善待股东: 分红是否长期持续、金额多少；回购是否真实执行、金额与进度；**股权质押比例** (高比例质押是治理风险信号，大股东资金链紧张时可能损害中小股东利益)。
+12. 财务上有没有不合理的做法: 结合现金流与利润的背离、质押比例给出判断。**应收账款、存货、商誉、关联交易、大股东减持这几项本次未取到数据，不得凭空评价**——只能写"该维度数据暂缺"。
 
 **五、股价与筹码的联动 (暴涨之后还有没有基本面支撑)**
-11. 若结构性事实块给出了"股东户数 vs 同期股价序列"，引用其中的股价与户数对照，判断是否出现**"股价暴涨 + 股东户数同步暴涨"**的派发特征: 股价大涨的同时户数也大增，通常意味着原有大户/机构在高位把筹码分散卖给了散户。引用具体的股价区间和户数变化。
-12. 然后回答本步最关键的问题: **后续基本面能否继续支撑这个涨幅？** 用营收增速、净利增速、经营现金流、当前估值四项来判断。**若股价涨幅远高于同期业绩增速，必须明确写出这是估值扩张而非业绩驱动**，并指出它靠什么继续维持。
+13. 若结构性事实块给出了"股东户数 vs 同期股价序列"，引用其中的股价与户数对照，判断是否出现**"股价暴涨 + 股东户数同步暴涨"**的派发特征: 股价大涨的同时户数也大增，通常意味着原有大户/机构在高位把筹码分散卖给了散户。引用具体的股价区间和户数变化。
+14. 然后回答本步最关键的问题: **后续基本面能否继续支撑这个涨幅？** 用营收增速、净利增速、经营现金流、当前估值四项来判断。**若股价涨幅远高于同期业绩增速，必须明确写出这是估值扩张而非业绩驱动**，并指出它靠什么继续维持。
 
 **六、结构性反证六查 (整份分析的核心，必须逐条做完再下结论)**
-13. 对下面六项，逐条写明"命中/未命中/数据暂缺"，命中的必须引用具体数字：
+15. 对下面六项，逐条写明"命中/未命中/数据暂缺"，命中的必须引用具体数字：
    a. **客户与供应商集中度**: 前五大客户占营业收入 ≥50%，或前五大供应商占总采购额 ≥50% → 命中。集中度高意味着单一客户流失或压价就能重创业绩，这是脆弱性而不是护城河，除非数据块显示该比例在多个报告期持续下降。
    b. **海外收入/销量占比与地缘风险**: 海外收入占比 ≥50%，或公司自述风险段落里明确提到出口、贸易、关税、地缘政治、出口管制风险 → 命中。必须直接引用公司自述的那句话。
    c. **利润含金量**: 经营现金流/净利润 <0.8 → 命中。比值显著小于 1 说明账面利润没有同步变成现金，可能依赖应收账款或存货，需要结合盈利数据判断是季节性还是趋势性。
@@ -131,15 +141,16 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
    f. **估值**: 市盈率(静态) >50 或 市净率 >8 → 命中。同时必须对比动态与静态市盈率的差距：二者差距巨大说明当前估值高度依赖未来利润继续高速增长，一旦增速回落估值会双杀。
 
 **七、综合结论**
-14. 判断这只股票更接近彼得林奇分类中的哪一类: fast_grower(高成长)、stalwart(大盘稳健股)、cyclical(周期股)、turnaround(困境反转)、asset_play(资产价值被低估)、slow_grower(低增长)。证据完全不足以判断时才选 unclear。
-15. 判断当前行情是不是行业普涨/普跌驱动，引用行业数据块里的涨跌家数/涨跌幅数字。只有大宗商品数据块给出具体价格数字时，才能据此提"金融属性/套利成分"。
-16. 引用盈利能力数据块里的毛利率/净利率/ROE/资产负债率数字和期间，判断盈利趋势是改善还是恶化。
-17. **基于以上全部方面** (必须同时包含大势、业务本质、财务质量、管理层行为、筹码与股价联动这五类中的至少四类，不能只依赖其中一两个)，给出一个明确倾向 (bullish/bearish/neutral)。neutral 仅在证据真正相互抵消、没有任何一方占优时才能选，不能用来逃避判断。
+16. 判断这只股票更接近彼得林奇分类中的哪一类: fast_grower(高成长)、stalwart(大盘稳健股)、cyclical(周期股)、turnaround(困境反转)、asset_play(资产价值被低估)、slow_grower(低增长)。证据完全不足以判断时才选 unclear。
+17. 判断当前行情是不是行业普涨/普跌驱动，引用行业数据块里的涨跌家数/涨跌幅数字。只有大宗商品数据块给出具体价格数字时，才能据此提"金融属性/套利成分"。
+18. 引用盈利能力数据块里的毛利率/净利率/ROE/资产负债率数字和期间，判断盈利趋势是改善还是恶化。**对比必须在同一口径下进行**: 该块每个期间都是截至该期末的累计数 (如 2026-06-30 是上半年累计，不是单季)，不得把累计值与单季值混比；同比增长率受上一年基数影响，基数极端时必须在结论里说明基数。
+19. **基于以上全部方面** (必须同时包含大势、业务本质、财务质量、管理层行为、筹码与股价联动这五类中的至少四类，不能只依赖其中一两个)，给出一个明确倾向 (bullish/bearish/neutral)。neutral 仅在证据真正相互抵消、没有任何一方占优时才能选，不能用来逃避判断。
 
 **结论约束 (违反即视为不合格输出):**
-- 六查 (第 13 步) 中只要有任意一项命中，就**不得**给出 bullish——除非你能用该数据块里的具体数字正面反驳它 (例如：证明集中度在多个报告期持续下降、现金流比值低是明确的季节性且有往期数字佐证)。空泛的辩护不算反驳。
-- **禁止用分类豁免风险**: 选 fast_grower/cyclical 等等，不能成为跳过第 13 步已命中项的理由。"高成长所以贵一点合理""周期股现金流本来就波动"这类话，如果拿不出数字，就是不合格。
-- **禁止用"行业景气"豁免第二、五步的结论**: 若第 11 步判定为"股价暴涨 + 户数暴涨"且第 12 步判定基本面增速跟不上涨幅，则同样不得给出 bullish。
+- 六查 (第 15 步) 中只要有任意一项命中，就**不得**给出 bullish——除非你能用该数据块里的具体数字正面反驳它 (例如：证明集中度在多个报告期持续下降、现金流比值低是明确的季节性且有往期数字佐证)。空泛的辩护不算反驳。
+- **禁止用分类豁免风险**: 选 fast_grower/cyclical 等等，不能成为跳过第 15 步已命中项的理由。"高成长所以贵一点合理""周期股现金流本来就波动"这类话，如果拿不出数字，就是不合格。
+- **禁止用"行业景气"豁免第二、五步的结论**: 若第 13 步判定为"股价暴涨 + 户数暴涨"且第 14 步判定基本面增速跟不上涨幅，则同样不得给出 bullish。
+- **周期性行业的景气判断必须引用运价/商品价格数据块的具体数字**。该数据块有数据却弃之不用、只凭财务同比增速断言"景气见顶/回落/高位"，视为不合格输出；该数据块暂缺时，对景气的任何方向断言 (包括"景气回落""景气高位") 都禁止。
 - 无论最终倾向是什么，`core_counter_evidence` **必须填写**与你的结论相悖的最强证据，并带具体数字。确实一条都没有时才写"未发现"。**不允许留空，不允许写"暂无"。**
 - `thesis_summary` 必须引用至少四个不同方面的具体数字，且必须正面回应对结论不利的脆弱性事实——不允许只挑利好数字、把不利事实挪到 risk_notes 里一笔带过。
 
@@ -148,8 +159,8 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 - 要表达某项脆弱性成立，就直接把它作为事实陈述出来: 写"前五大客户占营收 75.98%，单一客户流失即可重创业绩"，而不是写"客户集中度一项命中"。语气要像研究员写给基金经理的段落，不是分析流程的日志。
 - **分条列举时必须换行**: 每个要点独占一行，行首用 "1. " / "2. " 或 "· "，行与行之间用 \\n 分隔 (JSON 字符串里的换行必须写成 \\n 这个转义序列)。不要把多个要点挤成一行连续的文字，也不要整段不分行。
 
-18. 明确说明: 如果接下来出现什么具体情况/数据，会证明这个判断是错的 (invalidation_condition)。这一步是强制的，不能写"无法确定"之类的话。
-19. 列出其他需要注意的风险/不确定性。
+20. 明确说明: 如果接下来出现什么具体情况/数据，会证明这个判断是错的 (invalidation_condition)。这一步是强制的，不能写"无法确定"之类的话。
+21. 列出其他需要注意的风险/不确定性。
 
 无论证据是否充分、是否有疑点，都必须直接输出下面的 JSON，不要输出任何其他文字，不要提出反问或要求澄清:
 {{
@@ -180,6 +191,8 @@ class AnalysisInputs:
     fundamentals: Optional[Dict] = None
     valuation: Optional[Dict] = None
     xueqiu_stock: Optional[Dict] = None
+    market_context: Optional[Dict] = None
+    freight_signal: Optional[Dict] = None
 
 
 def _credibility_note(hit_rate: float, correct: int, incorrect: int) -> str:
@@ -288,6 +301,61 @@ def _build_industry_block(industry_comparison: Optional[Dict]) -> str:
         f"下跌家数 {industry_comparison.get('declining')}, "
         f"行业涨跌幅 {industry_comparison.get('industry_change_pct')}%"
     )
+
+
+def _build_market_block(market_context: Optional[Dict]) -> str:
+    if not market_context:
+        return f"大盘与风格: {_MISSING_TAIL}"
+
+    lines = ["大盘与风格 (指数与个股均为不复权收盘价口径):"]
+    for idx in market_context.get("indices") or []:
+        seg = []
+        for key, label in (("h1_pct", "上半年"), ("h2_pct", "下半年"), ("ytd_pct", "年内")):
+            v = idx.get(key)
+            seg.append(f"{label} {v:+}%" if v is not None else f"{label} 暂缺")
+        lines.append(
+            f"  · {idx.get('name')} 最新 {idx.get('latest')} ({idx.get('latest_date')}): "
+            + "，".join(seg)
+        )
+
+    stock = market_context.get("stock")
+    if stock:
+        seg = []
+        for key, label in (("h1_pct", "上半年"), ("h2_pct", "下半年"), ("ytd_pct", "年内")):
+            v = stock.get(key)
+            seg.append(f"{label} {v:+}%" if v is not None else f"{label} 暂缺")
+        lines.append(
+            f"  个股 最新 {stock.get('latest')} ({stock.get('latest_date')}): " + "，".join(seg)
+        )
+        lines.append(
+            f"  个股 52 周区间 {stock.get('w52_low')} ({stock.get('w52_low_date')}) ~ "
+            f"{stock.get('w52_high')} ({stock.get('w52_high_date')})"
+        )
+        lines.append(
+            f"  个股 {stock.get('hist_start')} 以来区间 {stock.get('hist_low')} "
+            f"({stock.get('hist_low_date')}) ~ {stock.get('hist_high')} ({stock.get('hist_high_date')})"
+        )
+    else:
+        lines.append("  个股行情序列: 暂缺 (不得据此判断该股相对强弱)")
+    return "\n".join(lines)
+
+
+def _build_freight_block(freight_signal: Optional[Dict]) -> str:
+    if not freight_signal:
+        return f"运价景气度: {_MISSING_TAIL}"
+
+    f = freight_signal
+    lines = [f"运价景气度 ({f.get('instrument')}):"]
+    ytd = f.get("ytd_pct")
+    lines.append(
+        f"  最新 {f.get('latest')} 点 ({f.get('latest_date')})"
+        + (f"，年内 {ytd:+}%" if ytd is not None else "，年内涨跌 暂缺")
+        + f"，当前处于历史 {f.get('hist_pct_rank')}% 分位"
+    )
+    lines.append("  走势骨架:")
+    lines.extend(f"    {m}" for m in (f.get("milestones") or []))
+    lines.append(f"  注: {f.get('note')}")
+    return "\n".join(lines)
 
 
 def _build_shareholder_block(
@@ -619,11 +687,13 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         candidates_block=_build_candidates_block(candidates),
         knowledge_block=_build_knowledge_block(inputs.knowledge_excerpts),
         industry_block=_build_industry_block(inputs.industry_comparison),
+        market_block=_build_market_block(inputs.market_context),
         shareholder_block=_build_shareholder_block(
             inputs.shareholder_trend, inputs.dividend_history, inputs.buyback_history
         ),
         profitability_block=_build_profitability_block(inputs.profitability_trend),
         commodity_block=_build_commodity_block(inputs.commodity_signal),
+        freight_block=_build_freight_block(inputs.freight_signal),
     )
 
 
@@ -679,6 +749,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         buyback_history,
         profitability_trend,
         fundamentals,
+        market_context,
     ) = await asyncio.gather(
         _load_knowledge_excerpts(),
         get_shareholder_count_trend(stock_code),
@@ -686,6 +757,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         get_buyback_history(stock_code),
         get_profitability_trend(stock_code),
         get_ths_fundamentals(stock_code),
+        get_market_context(stock_code),
     )
 
     # 行业反查的起点是 F10 公司概要页里的申万行业名，所以必须等 fundamentals 回来。
@@ -703,6 +775,9 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         get_copper_spread_signal(stock_code, industry_name),
         get_rmb_trend_signal(),
     )
+    # 运价景气度同样依赖申万行业名做触发判断，与铜价信号并行获取。
+    sw_industry = (fundamentals or {}).get("facts", {}).get("sw_industry")
+    freight_signal = await get_container_freight_signal(stock_code, sw_industry)
     knowledge_excerpts = await _filter_relevant_knowledge(
         knowledge_excerpts, stock_code, stock_name, industry_name
     )
@@ -729,6 +804,8 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         rmb_signal=rmb_signal,
         fundamentals=fundamentals,
         valuation=valuation,
+        market_context=market_context,
+        freight_signal=freight_signal,
     )
 
     # 雪球个股数据必须借道已登录的浏览器会话，且只在会话存活期内可用；
@@ -780,6 +857,8 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         fundamentals=inputs.fundamentals,
         valuation=inputs.valuation,
         xueqiu_stock=inputs.xueqiu_stock,
+        market_context=market_context,
+        freight_signal=freight_signal,
         summary=summary,
         prompt_version=_PROMPT_VERSION,
         generated_at=int(time.time()),

@@ -527,6 +527,40 @@ function renderEvidenceSection(report) {
     html += '<div class="evidence-block missing"><b>大宗商品价差/汇率:</b> 暂缺 (非周期性矿业股，或行业归属数据未能取到)</div>';
   }
 
+  const mc = report.market_context;
+  if (mc) {
+    let rows = (mc.indices || []).map(i => {
+      const seg = [['上半年', i.h1_pct], ['下半年', i.h2_pct], ['年内', i.ytd_pct]]
+        .filter(([, v]) => v !== null && v !== undefined)
+        .map(([k, v]) => k + ' ' + (v >= 0 ? '+' : '') + v + '%').join('，');
+      return '<li>' + escapeHtml(i.name) + ' 最新 ' + i.latest + ' (' + escapeHtml(i.latest_date) + '): ' + seg + '</li>';
+    }).join('');
+    if (mc.stock) {
+      const s = mc.stock;
+      const seg = [['上半年', s.h1_pct], ['下半年', s.h2_pct], ['年内', s.ytd_pct]]
+        .filter(([, v]) => v !== null && v !== undefined)
+        .map(([k, v]) => k + ' ' + (v >= 0 ? '+' : '') + v + '%').join('，');
+      rows += '<li>个股 最新 ' + s.latest + ' (' + escapeHtml(s.latest_date) + '): ' + seg + '</li>' +
+        '<li>个股 52周区间 ' + s.w52_low + ' (' + escapeHtml(s.w52_low_date) + ') ~ ' + s.w52_high + ' (' + escapeHtml(s.w52_high_date) + ')</li>' +
+        '<li>个股 ' + escapeHtml(s.hist_start) + ' 以来区间 ' + s.hist_low + ' (' + escapeHtml(s.hist_low_date) + ') ~ ' + s.hist_high + ' (' + escapeHtml(s.hist_high_date) + ')</li>';
+    }
+    html += '<div class="evidence-block"><b>大盘与风格 (A股市场生态):</b><ul>' + rows + '</ul></div>';
+  } else {
+    html += '<div class="evidence-block missing"><b>大盘与风格:</b> 暂缺 (本次未能取到指数/个股行情序列)</div>';
+  }
+
+  const fs = report.freight_signal;
+  if (fs) {
+    const ytd = (fs.ytd_pct === null || fs.ytd_pct === undefined) ? '' : '，年内 ' + (fs.ytd_pct >= 0 ? '+' : '') + fs.ytd_pct + '%';
+    html += '<div class="evidence-block"><b>运价景气度 (' + escapeHtml(fs.instrument) + '):</b><ul>' +
+      '<li>最新 ' + fs.latest + ' 点 (' + escapeHtml(fs.latest_date) + ')' + ytd +
+      '，当前处于历史 ' + fs.hist_pct_rank + '% 分位</li>' +
+      (fs.milestones || []).map(m => '<li>' + escapeHtml(m.replace(/^· /, '')) + '</li>').join('') +
+      '<li>' + escapeHtml(fs.note) + '</li></ul></div>';
+  } else {
+    html += '<div class="evidence-block missing"><b>运价景气度:</b> 暂缺 (非航运/港口类公司，或运价数据未能取到)</div>';
+  }
+
   const fx = report.rmb_signal;
   if (fx && fx.rmb_trend_note) {
     const overseas = ((report.fundamentals || {}).facts || {}).overseas_revenue_pct;

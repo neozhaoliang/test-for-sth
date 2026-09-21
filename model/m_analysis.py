@@ -69,6 +69,8 @@ class AnalysisReport(BaseModel):
     dividend_history: List[dict] = Field(default_factory=list, description="历史分红记录")
     buyback_history: List[dict] = Field(default_factory=list, description="历史回购记录")
     commodity_signal: Optional[dict] = Field(default=None, description="沪铜/COMEX铜价差 + 人民币汇率趋势 (仅周期性矿业股)")
+    freight_signal: Optional[dict] = Field(default=None, description="集运运价景气度 (仅航运/港口类公司)")
+    market_context: Optional[dict] = Field(default=None, description="大盘与风格: 主要指数与个股的年内/上半年/下半年涨跌幅 + 个股历史区间位置")
     rmb_signal: Optional[dict] = Field(default=None, description="人民币汇率趋势 (全部股票，用于判断汇率对海外收入的影响方向)")
     profitability_trend: Optional[dict] = Field(default=None, description="近几个报告期毛利率/净利率/ROE/资产负债率趋势 (盈利能力与成本弹性)")
     fundamentals: Optional[dict] = Field(default=None, description="同花顺 F10 结构性事实 (集中度/海外占比/现金流质量/研发强度/股东人数/公司自述风险)")
