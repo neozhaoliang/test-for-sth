@@ -289,6 +289,7 @@ _INDEX_HTML = """<!DOCTYPE html>
 
 <script>
 let pollTimer = null;
+let submitting = false;
 
 // 固定自选股。代码已对全市场代码表核实；"长鑫存储"的上市主体名为"长鑫科技"(688825)，
 // 用上市名是因为输入框打"长鑫存储"后端解析不出来 (按名称解析只做单向包含匹配)。
@@ -321,6 +322,14 @@ function renderWatchlist() {
 async function submitAnalysis() {
   const stockCode = document.getElementById('stockCode').value.trim();
   if (!stockCode) return;
+  // 重入保护: 后端每个 POST 都会 create_task 跑完整报告 (含 3 分钟 CDP 等待 + 一次
+  // LLM 调用)。连点两下会同时跑两份，而前端只轮询后一个 task_id，前一个就成了没人
+  // 认领却仍在消耗资源的孤儿任务——表现是日志里同一只股票出现两组会话启动。
+  if (submitting) {
+    document.getElementById('status').textContent = '已有分析任务在跑，等它结束再提交 (一次分析要几分钟)';
+    return;
+  }
+  submitting = true;
   document.getElementById('result').innerHTML = '';
   document.getElementById('status').textContent = '提交中...';
   if (pollTimer) clearInterval(pollTimer);
@@ -333,6 +342,7 @@ async function submitAnalysis() {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     document.getElementById('status').textContent = '提交失败: ' + (err.detail || res.status);
+    submitting = false;
     return;
   }
   const { task_id } = await res.json();
@@ -346,11 +356,15 @@ async function pollTask(taskId) {
   const data = await res.json();
   document.getElementById('status').textContent = '状态: ' + data.status;
 
+  // 任务跑到终态才解锁，而不是 POST 返回就解锁——一次分析要几分钟，
+  // POST 返回时后端还在跑，此时放开会让用户再点出一个并行任务。
   if (data.status === 'done') {
     clearInterval(pollTimer);
+    submitting = false;
     renderResult(data.result);
   } else if (data.status === 'failed') {
     clearInterval(pollTimer);
+    submitting = false;
     document.getElementById('status').textContent = '任务失败: ' + (data.error || '未知错误');
   }
 }

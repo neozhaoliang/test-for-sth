@@ -20,7 +20,7 @@
 
 import os
 import asyncio
-import socket
+import time
 import httpx
 import signal
 import atexit
@@ -163,16 +163,22 @@ class CDPBrowserManager:
         utils.logger.info(
             f"[CDPBrowserManager] Waiting up to {timeout}s for browser CDP connection..."
         )
+        # 按**墙钟时间**计时，不是循环次数: 单次探测本身要 ~2s，按次数算 60 次实际会等
+        # 满 3 分钟，而且打出来的 "(50s elapsed)" 是循环计数器、不是真实秒数，会误导排查。
+        start = time.monotonic()
         connected = False
-        for i in range(timeout):
+        next_note = 10.0
+        while time.monotonic() - start < timeout:
             if await self._test_cdp_connection(self.debug_port):
                 connected = True
                 break
-            if i % 5 == 0 and i > 0:
+            elapsed = time.monotonic() - start
+            if elapsed >= next_note and elapsed < timeout:
                 utils.logger.info(
-                    f"[CDPBrowserManager] Still waiting for browser... ({i}s elapsed) "
+                    f"[CDPBrowserManager] Still waiting for browser... ({int(elapsed)}s elapsed) "
                     "Please enable remote debugging: chrome://inspect/#remote-debugging"
                 )
+                next_note = elapsed + 10
             await asyncio.sleep(1)
 
         if not connected:
@@ -226,23 +232,22 @@ class CDPBrowserManager:
 
     async def _test_cdp_connection(self, debug_port: int) -> bool:
         """
-        Test if CDP connection is available
+        Test if CDP connection is available.
+
+        必须走 asyncio 而不是阻塞式 socket: Windows 上探测一个没人监听的端口要约 2 秒
+        才返回 ECONNREFUSED，阻塞调用会把事件循环一起卡住——排查这个问题时表现为整个
+        Web 服务在等待期间失去响应 (轮询接口的日志明显变稀疏)。
         """
         try:
-            # Simple socket connection test
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(5)
-                result = s.connect_ex(("localhost", debug_port))
-                if result == 0:
-                    utils.logger.info(
-                        f"[CDPBrowserManager] CDP port {debug_port} is accessible"
-                    )
-                    return True
-                else:
-                    utils.logger.warning(
-                        f"[CDPBrowserManager] CDP port {debug_port} is not accessible"
-                    )
-                    return False
+            _reader, writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", debug_port), timeout=5
+            )
+            writer.close()
+            utils.logger.info(f"[CDPBrowserManager] CDP port {debug_port} is accessible")
+            return True
+        except (OSError, asyncio.TimeoutError):
+            utils.logger.warning(f"[CDPBrowserManager] CDP port {debug_port} is not accessible")
+            return False
         except Exception as e:
             utils.logger.warning(f"[CDPBrowserManager] CDP connection test failed: {e}")
             return False
