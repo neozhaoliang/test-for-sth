@@ -56,6 +56,11 @@ _HEADERS = {
 _CACHE_TTL_SECONDS = 6 * 3600
 # 低于此体积视为异常页 (验证页/错误页)。F10 首页比内页小得多，单独放宽。
 _MIN_PAGE_BYTES = {"operate": 50_000, "holder": 50_000, "finance": 50_000, "profile": 20_000}
+# 某些维度对特定行业本来就不披露 (如银行没有客户/供应商集中度)，这类缺失属正常，
+# 仍记入 missing 供报告如实说明"暂缺"，但日志降级为 info 而非 WARNING。
+_SECTOR_INHERENT_MISSING = {
+    "客户/供应商集中度": ("银行", "证券", "保险", "非银金融", "多元金融"),
+}
 
 _cache: Dict[str, tuple] = {}
 _locks: "defaultdict[str, asyncio.Lock]" = defaultdict(asyncio.Lock)
@@ -723,7 +728,21 @@ def _log_result(code6: str, data: Optional[Dict], pages: Dict[str, Optional[str]
         f"(其中估值 {len(filled_val)} 项), 缺失维度: {data['missing'] or '无'}"
     )
     if data["missing"]:
-        utils.logger.warning(f"[fundamentals] {code6} 未解析出: {data['missing']}")
+        # 部分维度对特定行业本来就无法取得 (如银行不披露客户/供应商集中度)，
+        # 这类"缺失"不该打 WARNING，降级为 info，避免日志噪声掩盖真正的解析失败。
+        sw_industry = facts.get("sw_industry") or ""
+        expected = [
+            m for m in data["missing"]
+            if m in _SECTOR_INHERENT_MISSING
+            and any(s in sw_industry for s in _SECTOR_INHERENT_MISSING[m])
+        ]
+        unexpected = [m for m in data["missing"] if m not in expected]
+        if unexpected:
+            utils.logger.warning(f"[fundamentals] {code6} 未解析出: {unexpected}")
+        if expected:
+            utils.logger.info(
+                f"[fundamentals] {code6} 缺失维度 {expected} 对该行业({sw_industry})通常不披露, 属正常"
+            )
     ok = [p for p, h in pages.items() if h]
     if ok and not filled:
         # 页面体积正常却一个字段都没解析出来，是网站改版的典型特征，需要显式告警

@@ -43,6 +43,9 @@ class CDPBrowserManager:
         self.browser_context: Optional[BrowserContext] = None
         self.debug_port: Optional[int] = None
         self._cleanup_registered = False
+        # 浏览器进程是否由本管理器启动 (CDP_CONNECT_EXISTING 模式下连接失败
+        # 回退自启时也会置 True)。决定 cleanup 是否要杀进程、CDP 用哪种端点。
+        self._owns_process = False
 
     def _register_cleanup_handlers(self):
         """
@@ -107,7 +110,18 @@ class CDPBrowserManager:
         try:
             if config.CDP_CONNECT_EXISTING:
                 # Connect to an existing browser that already has remote debugging enabled
-                return await self._connect_existing_browser(playwright, playwright_proxy, user_agent)
+                try:
+                    return await self._connect_existing_browser(playwright, playwright_proxy, user_agent)
+                except Exception as e:
+                    # 用户浏览器没开远程调试时不要直接让雪球维度整段失败，
+                    # 回退为自动检测路径并自启一个带调试端口的浏览器。
+                    utils.logger.warning(
+                        f"[CDPBrowserManager] 连接已有浏览器失败: {e}"
+                    )
+                    utils.logger.info(
+                        "[CDPBrowserManager] 回退: 自动启动浏览器 "
+                        "(如需改用你自己的浏览器，请启用远程调试: chrome://inspect/#remote-debugging)"
+                    )
 
             # 1. Detect browser path
             browser_path = await self._get_browser_path()
@@ -274,6 +288,7 @@ class CDPBrowserManager:
             headless=headless,
             user_data_dir=user_data_dir,
         )
+        self._owns_process = True
 
         # Wait for browser to be ready
         if not self.launcher.wait_for_browser_ready(
@@ -320,7 +335,7 @@ class CDPBrowserManager:
         Connect to browser via CDP
         """
         try:
-            if config.CDP_CONNECT_EXISTING:
+            if not self._owns_process:
                 # For existing browser (e.g. chrome://inspect/#remote-debugging),
                 # use the HTTP endpoint and let Playwright resolve the browser WebSocket
                 # (newer Chrome returns 404 for the legacy /devtools/browser ws path).
@@ -481,7 +496,7 @@ class CDPBrowserManager:
                     self.browser = None
 
             # Close browser process (skip if connected to existing browser - we didn't launch it)
-            if config.CDP_CONNECT_EXISTING:
+            if config.CDP_CONNECT_EXISTING and not self._owns_process:
                 utils.logger.info(
                     "[CDPBrowserManager] Connected to existing browser, skipping process cleanup"
                 )

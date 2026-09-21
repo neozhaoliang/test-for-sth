@@ -25,8 +25,9 @@ settings.json env 配置保持一致：ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL
 
 import json
 import os
+import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
@@ -104,29 +105,84 @@ async def _call_llm_raw_ex(prompt: str, max_tokens: int) -> tuple:
     return raw_text.strip(), stop_reason
 
 
-def _parse_json(raw_text: str) -> Optional[Any]:
-    text = raw_text
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
+_JSON_FENCE_RE = re.compile(r"```[^\n]*\n(.*?)\n?```", re.DOTALL)
 
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
 
-    # 模型有时会在 JSON 前后夹带说明性文字，尝试截取最外层的 {...} 或 [...] 再解析一次
-    for open_ch, close_ch in (("{", "}"), ("[", "]")):
-        start = text.find(open_ch)
-        end = text.rfind(close_ch)
-        if start != -1 and end != -1 and end > start:
-            try:
-                return json.loads(text[start : end + 1])
-            except json.JSONDecodeError:
+def _scan_balanced_fragments(text: str) -> List[str]:
+    """扫描出所有顶层配对闭合的 {...}/[...] 片段 (字符串字面量内的括号不参与配对)，
+    用于从夹带说明文字的 LLM 输出里截出真正的 JSON 部分。"""
+    fragments: List[str] = []
+    n = len(text)
+    i = 0
+    while i < n:
+        if text[i] not in "{[":
+            i += 1
+            continue
+        depth = 0
+        in_str = False
+        esc = False
+        for j in range(i, n):
+            c = text[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
                 continue
+            if c == '"':
+                in_str = True
+            elif c in "{[":
+                depth += 1
+            elif c in "}]":
+                depth -= 1
+                if depth == 0:
+                    fragments.append(text[i : j + 1])
+                    i = j + 1
+                    break
+        else:
+            break  # 该片段未配对闭合 (输出被截断)，后面的也不再尝试
+    return fragments
+
+
+def _parse_json(raw_text: str) -> Optional[Any]:
+    """尽量宽容地解析 LLM 输出: 支持纯 JSON、``` 围栏 (可出现在说明文字之后)、
+    以及前后夹带说明文字的裸 JSON。说明文字里的短括号片段 (如 "条目[49]") 也
+    可能被误当成 JSON，所以配对片段按长度降序尝试，真正的答案通常更长。"""
+    text = raw_text.strip()
+    if not text:
+        return None
+    candidates: List[str] = []
+
+    def _add(c: str) -> None:
+        c = c.strip()
+        if c and c not in candidates:
+            candidates.append(c)
+
+    _add(text)
+    if text.startswith("```") and text.count("```") >= 2:
+        _add(text.split("```")[1].strip())
+    for m in _JSON_FENCE_RE.finditer(text):
+        _add(m.group(1))
+    fragments = _scan_balanced_fragments(text)
+    for f in sorted(fragments, key=len, reverse=True):
+        _add(f)
+    for f in fragments:
+        _add(f)
+
+    for c in candidates:
+        try:
+            return json.loads(c)
+        except json.JSONDecodeError:
+            continue
     return None
+
+
+_REPAIR_PROMPT = (
+    "你上一次的输出无法解析为合法 JSON。请把下面引用的内容改写为严格合法的 JSON，"
+    "直接输出 JSON 本身，不要任何解释、前言或代码围栏。\n\n---\n{raw}\n---"
+)
 
 
 async def call_json_ex(prompt: str, max_tokens: int = 1024) -> tuple:
@@ -136,6 +192,7 @@ async def call_json_ex(prompt: str, max_tokens: int = 1024) -> tuple:
     暴露 stop_reason 是为了让调用方分辨"模型输出被 max_tokens 截断"和"模型输出了
     不合规的 JSON"——前者重试一次更长的上限就能救回来，后者重试多少次都没用。
     仅在确认被截断时才用 _RETRY_MAX_TOKENS 重试一次，不无条件加长。
+    若输出完整但解析失败，则做一次"修复式"重试：让模型把自己的输出改写为合法 JSON。
     """
     raw_text, stop_reason = await _call_llm_raw_ex(prompt, max_tokens)
     if raw_text is None:
@@ -155,6 +212,21 @@ async def call_json_ex(prompt: str, max_tokens: int = 1024) -> tuple:
             parsed = _parse_json(raw_text)
             if parsed is not None:
                 return parsed, stop_reason
+
+    if raw_text:
+        # 模型自己收尾 (end_turn) 却输出不合规 JSON: 再重试多少次原 prompt 都未必有用，
+        # 改为把上一轮输出交还给模型修复。只试一次，失败即按原样放弃。
+        utils.logger.warning(
+            f"[llm_client.call_json_ex] JSON 解析失败 (stop_reason={stop_reason}, "
+            f"len={len(raw_text)})，尝试让模型修复输出后重试一次"
+        )
+        repair_raw, repair_reason = await _call_llm_raw_ex(
+            _REPAIR_PROMPT.format(raw=raw_text), _RETRY_MAX_TOKENS
+        )
+        if repair_raw:
+            parsed = _parse_json(repair_raw)
+            if parsed is not None:
+                return parsed, repair_reason
 
     utils.logger.warning(
         f"[llm_client.call_json_ex] Failed to parse LLM response as JSON "
