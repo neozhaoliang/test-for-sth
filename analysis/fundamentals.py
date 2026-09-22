@@ -44,6 +44,7 @@ _URLS = {
     "holder": _BASE + "holder.html",
     "finance": _BASE + "finance.html",
     "profile": _BASE,
+    "event": _BASE + "event.html",
 }
 _PAGES = tuple(_URLS)
 _HEADERS = {
@@ -55,7 +56,13 @@ _HEADERS = {
 }
 _CACHE_TTL_SECONDS = 6 * 3600
 # 低于此体积视为异常页 (验证页/错误页)。F10 首页比内页小得多，单独放宽。
-_MIN_PAGE_BYTES = {"operate": 50_000, "holder": 50_000, "finance": 50_000, "profile": 20_000}
+_MIN_PAGE_BYTES = {
+    "operate": 50_000,
+    "holder": 50_000,
+    "finance": 50_000,
+    "profile": 20_000,
+    "event": 30_000,
+}
 # 某些维度对特定行业本来就不披露 (如银行没有客户/供应商集中度)，这类缺失属正常，
 # 仍记入 missing 供报告如实说明"暂缺"，但日志降级为 info 而非 WARNING。
 _SECTOR_INHERENT_MISSING = {
@@ -519,6 +526,72 @@ def _parse_finance_metrics(html: str) -> tuple:
     return newest_period, newest_metrics
 
 
+def _parse_major_events(html: str) -> List[Dict]:
+    """
+    公司大事页 (event.html): 每行 <tr> 内是 日期 (<td class="hltip">) + 事项标签
+    (<strong>发布公告：</strong> 等) + 公告标题链接。返回 [{date, kind, title}]，
+    按页面顺序 (最新在前)。银行页面天然覆盖定增/注资/股东会等再融资事件。
+    """
+    events: List[Dict] = []
+    for tr in re.findall(r"<tr\b.*?</tr>", html, re.S | re.I):
+        date_m = re.search(
+            r'class="[^"]*hltip[^"]*"[^>]*>\s*(\d{4}-\d{2}-\d{2})', tr, re.S
+        )
+        if not date_m:
+            continue
+        kind = "事项"
+        kind_m = re.search(r"<strong[^>]*>\s*([^<：:]{2,12})[：:]?\s*</strong>", tr)
+        if kind_m:
+            kind = kind_m.group(1).strip()
+        title = ""
+        for a in re.findall(r"<a\b[^>]*>(.*?)</a>", tr, re.S | re.I):
+            t = re.sub(r"<[^>]+>", "", a)
+            t = re.sub(r"&nbsp;?", " ", t).strip()
+            if not t or "更多" in t or "详情" in t or "详细内容" in t:
+                continue
+            title = t
+            break
+        if not title:
+            # 股东会议案等行的正文在 <span> 里而非链接里，取整行纯文本兜底
+            plain = re.sub(r"<[^>]+>", " ", tr)
+            plain = re.sub(r"&nbsp;?", " ", plain)
+            plain = re.sub(r"\s+", " ", plain).strip()
+            if not plain or "换肤" in plain or "更多" in plain or "详情" in plain:
+                continue
+            title = plain[:100]
+        events.append({"date": date_m.group(1), "kind": kind, "title": title})
+        if len(events) >= 10:
+            break
+    return events
+
+
+def _parse_bank_industry_metrics(html: Optional[str]) -> Optional[Dict]:
+    """
+    经营分析页行业综述段落 (仅银行业页面存在): "6月末，商业银行本外币总资产…
+    不良贷款余额3.72万亿元，不良贷款率1.52%，拨备覆盖率202.87%；资本充足率15.26%。"
+    这是**行业口径**而非本行口径，供报告对比本行水平用，字段名与注释都标明 industry_。
+    """
+    if not html:
+        return None
+    # 分号会打断 [^。；]*, 而行业综述句中间有分号; 改用 [^。] + 有界惰性匹配，
+    # 既允许分号又不会跨到别的段落去。
+    m = re.search(
+        r"(\d+)月末[^。]{0,150}?不良贷款余额\s*([\d.,]+)万亿[^。]{0,80}?"
+        r"不良贷款率\s*([\d.]+)%[^。]{0,80}?拨备覆盖率\s*([\d.]+)%[^。]{0,80}?"
+        r"资本充足率\s*([\d.]+)%",
+        html,
+    )
+    if not m:
+        return None
+    return {
+        "period": f"{m.group(1)}月末",
+        "industry_npl_balance_trillion": float(m.group(2).replace(",", "")),
+        "industry_npl_ratio_pct": float(m.group(3)),
+        "industry_provision_coverage_pct": float(m.group(4)),
+        "industry_capital_adequacy_pct": float(m.group(5)),
+    }
+
+
 def _ratio(numerator: Optional[float], denominator: Optional[float]) -> Optional[float]:
     if numerator is None or denominator in (None, 0):
         return None
@@ -562,7 +635,8 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
     holder = pages.get("holder")
     finance = pages.get("finance")
     profile = pages.get("profile")
-    if not any((operate, holder, finance, profile)):
+    event = pages.get("event")
+    if not any((operate, holder, finance, profile, event)):
         return None
 
     facts: Dict = {}
@@ -619,6 +693,16 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
         facts.update({k: v for k, v in o_facts.items()})
     else:
         missing.append("董事会经营评述")
+
+    # 银行行业口径资产质量 (经营分析页行业综述段落, 仅银行业页面存在; 可选维度)
+    bank_metrics = _parse_bank_industry_metrics(operate)
+    if bank_metrics:
+        facts["bank_industry_metrics"] = bank_metrics
+
+    # 公司大事 (公告/股东会等): 定增/注资/分红调整等关键事件的来源
+    major_events = _parse_major_events(event) if event else []
+    if not major_events:
+        missing.append("公司大事(公告)")
 
     if holder:
         series = _parse_holdernum(holder)
@@ -711,6 +795,7 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
         "self_disclosed_risks": (observe or {}).get("self_disclosed_risks", ""),
         "top_customers": (provider or {}).get("customers", []),
         "top_suppliers": (provider or {}).get("suppliers", []),
+        "major_events": major_events,
         "missing": missing,
         "sources": sources,
     }

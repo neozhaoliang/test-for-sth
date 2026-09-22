@@ -22,6 +22,7 @@
 """
 
 import asyncio
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -66,6 +67,8 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 - 引用任何维度的证据时，必须带出该数据块里的具体数字/期间。数据块标注"暂缺"的维度，只能写"该维度数据暂缺"，**禁止编造，也禁止在该维度上做任何方向的断言——包括反向断言** (数据缺失时不能说"客户集中度低""没有地缘风险")。
 - 引用"加息/降息/宏观流动性"类论据时，必须点名央行/经济体、当前政策利率水平或近期变动幅度、预期持续时间窗口。不确定精确数字时，要说明这是基于知识的粗略估计，但仍要给出具体数量级和主体，不能只写"加息预期"四个字。
 - **你的判断只能建立在下述数据块给出的数字上。** 数据块里没有的维度一律写"该维度数据暂缺"，禁止凭记忆、市场印象或"这类公司通常……"来补全。读起来通顺但对不上数据块的结论，比写"暂缺"更糟糕。
+- **重大事项必须正面处理**: 近期重大事项块若包含定增/注资/再融资/股东会等事件，必须点名事件与日期，并评估其对每股净资产、每股收益、ROE 的摊薄或增厚影响及当前进度；认购方是财政部/国资等政策性主体时必须点明其含义。该块标注暂缺时写明"重大事项数据暂缺"，不得凭记忆补全。
+- **输出中禁止出现"六查""第N步""检查项"等内部流程用语**——结论直接陈述事实与判断，不得提及分析流程本身。
 - 结构性事实块里的比率全部已在 Python 里算好，直接引用，**不要自己重新做算术**。该块里"公司自述的风险"和"公司自己的经营表述"属于利益相关方视角，不能当作客观事实，只能作为"公司自己承认了什么""公司自己想让你相信什么"来引用；公司自述与其披露数字矛盾时以数字为准。严禁把"与头部客户深度绑定""技术领先""行业龙头"这类说法当成护城河证据——除非同一数据块里有可核验的数字支撑。
 
 股票: {stock_code} ({stock_name})
@@ -74,6 +77,9 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 {valuation_block}
 
 {fundamentals_block}
+
+近期重大事项 (公司公告/股东会等，判断再融资、分红调整等事件的摊薄/增厚影响):
+{major_events_block}
 
 汇率敞口 (判断汇率变动对收入的影响方向):
 {fx_block}
@@ -190,6 +196,7 @@ class AnalysisInputs:
     rmb_signal: Optional[Dict] = None
     fundamentals: Optional[Dict] = None
     valuation: Optional[Dict] = None
+    major_events: List[Dict] = field(default_factory=list)
     xueqiu_stock: Optional[Dict] = None
     market_context: Optional[Dict] = None
     freight_signal: Optional[Dict] = None
@@ -291,6 +298,15 @@ async def _filter_relevant_knowledge(
         return knowledge_excerpts
 
     return [e for i, e in enumerate(knowledge_excerpts) if i in kept_indices]
+
+
+def _build_major_events_block(major_events: Optional[List[Dict]]) -> str:
+    if not major_events:
+        return f"近期重大事项 (公告/股东会等): {_MISSING_TAIL}"
+    lines = ["近期重大事项 (同花顺 F10 公司大事，倒序排列):"]
+    for e in major_events[:8]:
+        lines.append(f"  {e.get('date', '')} [{e.get('kind', '')}] {e.get('title', '')}")
+    return "\n".join(lines)
 
 
 def _build_industry_block(industry_comparison: Optional[Dict]) -> str:
@@ -595,6 +611,16 @@ def _build_fundamentals_block(fundamentals: Optional[Dict]) -> str:
         for s in suppliers[:5]:
             lines.append(f"    · {s.get('name')}: 采购额 {_yi(s.get('amount_yuan'))}, 占比 {_pct_str(s.get('pct'))}")
 
+    bank = facts.get("bank_industry_metrics")
+    if bank:
+        lines.append(
+            f"  银行资产质量与资本 (行业口径, {bank.get('period')}, 供对比本行水平用): "
+            f"商业银行不良贷款余额 {bank.get('industry_npl_balance_trillion')} 万亿元, "
+            f"不良贷款率 {bank.get('industry_npl_ratio_pct')}%, "
+            f"拨备覆盖率 {bank.get('industry_provision_coverage_pct')}%, "
+            f"资本充足率 {bank.get('industry_capital_adequacy_pct')}%"
+        )
+
     risks = (fundamentals.get("self_disclosed_risks") or "").strip()
     lines.append("")
     lines.append("公司自述的风险 (原文摘录: 公司在自己的定期报告里承认的风险，引用时请注明来自公司披露):")
@@ -690,6 +716,7 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         quote_line=quote_line,
         valuation_block=_build_valuation_block(inputs.valuation, quote),
         fundamentals_block=_build_fundamentals_block(inputs.fundamentals),
+        major_events_block=_build_major_events_block(inputs.major_events),
         fx_block=_build_fx_block(inputs.rmb_signal, (inputs.fundamentals or {}).get("facts")),
         xueqiu_block=_build_xueqiu_block(inputs.xueqiu_stock),
         candidates_block=_build_candidates_block(candidates),
@@ -703,6 +730,21 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         commodity_block=_build_commodity_block(inputs.commodity_signal),
         freight_block=_build_freight_block(inputs.freight_signal),
     )
+
+
+_PROCESS_TERM_RE = re.compile(r"六查|第[一二三四五六七八九十\d]+步|检查项\d*")
+
+
+def _scrub_process_terms(text: str, stock_code: str) -> str:
+    """兜底剔除摘要里泄露的内部流程用语 (如"六查""第3步")。prompt 已禁用，
+    这里防模型漏网; 剔除整行并留日志，便于发现模型又写了什么。"""
+    if not text or not _PROCESS_TERM_RE.search(text):
+        return text
+    kept = [ln for ln in text.split("\n") if not _PROCESS_TERM_RE.search(ln)]
+    utils.logger.warning(
+        f"[analysis.report] {stock_code} 摘要输出包含流程用语，已剔除 {len(text.split(chr(10))) - len(kept)} 行"
+    )
+    return "\n".join(kept).strip()
 
 
 async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) -> StructuredSummary:
@@ -736,10 +778,14 @@ async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOp
     return StructuredSummary(
         lynch_category=lynch_category,
         stance=parsed.get("stance", ""),
-        thesis_summary=parsed.get("thesis_summary", "") or "",
-        core_counter_evidence=parsed.get("core_counter_evidence", "") or "",
-        invalidation_condition=parsed.get("invalidation_condition", "") or "",
-        risk_notes=parsed.get("risk_notes", "") or "",
+        thesis_summary=_scrub_process_terms(parsed.get("thesis_summary", "") or "", inputs.stock_code),
+        core_counter_evidence=_scrub_process_terms(
+            parsed.get("core_counter_evidence", "") or "", inputs.stock_code
+        ),
+        invalidation_condition=_scrub_process_terms(
+            parsed.get("invalidation_condition", "") or "", inputs.stock_code
+        ),
+        risk_notes=_scrub_process_terms(parsed.get("risk_notes", "") or "", inputs.stock_code),
     )
 
 
@@ -803,9 +849,11 @@ async def generate_report(stock_code: str) -> AnalysisReport:
     # 必须拷一份再 pop: get_ths_fundamentals 返回的是带 6 小时缓存的同一个 dict，
     # 直接 pop 会把缓存里的估值维度永久删掉。
     valuation = None
+    major_events: List[Dict] = []
     if fundamentals:
         fundamentals = dict(fundamentals)
         valuation = fundamentals.pop("valuation", None)
+        major_events = fundamentals.pop("major_events", None) or []
 
     inputs = AnalysisInputs(
         stock_code=stock_code,
@@ -821,6 +869,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         rmb_signal=rmb_signal,
         fundamentals=fundamentals,
         valuation=valuation,
+        major_events=major_events,
         market_context=market_context,
         freight_signal=freight_signal,
     )
