@@ -20,6 +20,8 @@
 将验证通过 (verdict=correct) 的预测记录落盘为 jsonl，每个用户单独一个文件。
 """
 
+from typing import Optional
+
 from backtest.classify import ClassifiedPrediction
 from backtest.verify import VerifyResult
 from model.m_backtest import XueqiuPredictionRecord
@@ -28,8 +30,16 @@ from tools.async_file_writer import AsyncFileWriter
 _writer = AsyncFileWriter(platform="xueqiu", crawler_type="backtest")
 
 
-def build_record(prediction: ClassifiedPrediction, result: VerifyResult) -> XueqiuPredictionRecord:
+def build_record(
+    prediction: ClassifiedPrediction, result: Optional[VerifyResult] = None
+) -> XueqiuPredictionRecord:
+    """
+    组装回测记录。direction 为空的预测是"观点型" (无方向性预测, 如清仓理由/
+    宏观判断), 不做走势验证, verdict 记为 "view"、验证字段留空;
+    方向型预测必须带 VerifyResult。
+    """
     post = prediction["post"]
+    is_view = not (prediction.get("direction") or "")
     return XueqiuPredictionRecord(
         user_id=str(post.get("user_id") or ""),
         user_nickname=post.get("user_nickname", ""),
@@ -42,10 +52,10 @@ def build_record(prediction: ClassifiedPrediction, result: VerifyResult) -> Xueq
         thesis=prediction["thesis"],
         industry_view=prediction["industry_view"],
         market_context=prediction["market_context"],
-        verified_at=result["verified_at"],
-        actual_trend=result["actual_trend"],
-        price_change_pct=result["price_change_pct"],
-        verdict=result["verdict"],
+        verified_at=result["verified_at"] if result else 0,
+        actual_trend=result["actual_trend"] if result else "",
+        price_change_pct=result["price_change_pct"] if result else 0.0,
+        verdict="view" if is_view else result["verdict"],
     )
 
 async def store_record(record: XueqiuPredictionRecord) -> None:

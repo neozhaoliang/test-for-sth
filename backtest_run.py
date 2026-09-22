@@ -36,6 +36,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from backtest import score
 from backtest.classify import classify_post
 from backtest.extract import extract_from_posts
 from backtest.store import build_record, store_record
@@ -82,7 +83,9 @@ def _load_posts(paths: List[str], since: Optional[str]) -> List[Dict[str, Any]]:
     return posts
 
 
-async def _process_one(extracted, semaphore: asyncio.Semaphore, stats: Dict[str, int]) -> None:
+async def _process_one(
+    extracted, semaphore: asyncio.Semaphore, stats: Dict[str, int], done_pairs: set
+) -> None:
     async with semaphore:
         try:
             predictions = await classify_post(extracted)
@@ -96,6 +99,18 @@ async def _process_one(extracted, semaphore: asyncio.Semaphore, stats: Dict[str,
         stats["predictions_found"] += len(predictions)
 
         for prediction in predictions:
+            pair = (str(prediction["post"].get("status_id") or ""), prediction["stock_code"])
+            if pair in done_pairs:
+                continue  # 该帖子对该股票的记录已存在, 重跑不重复存储
+
+            if not prediction["direction"]:
+                # 观点型 (清仓理由/宏观判断等, 无方向): 不验证走势, 直接落盘
+                record = build_record(prediction)
+                await store_record(record)
+                done_pairs.add(pair)
+                stats["views"] += 1
+                continue
+
             try:
                 result = await verify_prediction(prediction)
             except Exception as e:
@@ -115,6 +130,7 @@ async def _process_one(extracted, semaphore: asyncio.Semaphore, stats: Dict[str,
 
             record = build_record(prediction, result)
             await store_record(record)
+            done_pairs.add(pair)
             if result["verdict"] == "correct":
                 stats["verified_correct"] += 1
             else:
@@ -143,12 +159,18 @@ async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> No
         "predictions_found": 0,
         "verified_correct": 0,
         "verified_incorrect": 0,
+        "views": 0,
         "inconclusive": 0,
         "no_date": 0,
         "errors": 0,
     }
+    # 已存储的 (status_id, stock_code) 集合: 重跑回测时不重复落盘
+    done_pairs = {
+        (str(r.get("status_id") or ""), str(r.get("stock_code") or ""))
+        for r in score.load_records(creator_id)
+    }
     semaphore = asyncio.Semaphore(_CONCURRENCY)
-    tasks = [_process_one(ep, semaphore, stats) for ep in extracted_posts]
+    tasks = [_process_one(ep, semaphore, stats, done_pairs) for ep in extracted_posts]
 
     processed = 0
     for coro in asyncio.as_completed(tasks):
@@ -167,8 +189,8 @@ async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> No
     utils.logger.info(
         f"[backtest_run] Done. predictions_found={stats['predictions_found']}, "
         f"correct={stats['verified_correct']}, incorrect={stats['verified_incorrect']}, "
-        f"inconclusive={stats['inconclusive']}, no_date={stats['no_date']}, "
-        f"errors={stats['errors']}, "
+        f"views={stats['views']}, inconclusive={stats['inconclusive']}, "
+        f"no_date={stats['no_date']}, errors={stats['errors']}, "
         f"hit_rate={hit_rate:.1f}% (of {total_verified} conclusive predictions)"
     )
 

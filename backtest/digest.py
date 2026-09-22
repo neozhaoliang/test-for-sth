@@ -20,13 +20,15 @@
 用户观点摘录 (digest): 对每个用户的历史验证记录做离线聚合与提炼，
 生成可直接用于报告/问答的总结文件。
 
-- build: 加载全部验证记录, 按 (user_id, stock_code) 分组; 每组内 verdict=correct
-  的论据是"预测被后续股价走势验证正确"的有价值观点。多条正确论据时用 LLM 提炼成
-  一段连贯观点摘要 (按内容哈希缓存, 内容不变不重复调用 LLM); 只有一条时直接用
-  原论据, 不做无谓的 LLM 调用。
+- build: 加载全部验证记录, 按 (user_id, stock_code) 分组。两类内容都会进摘录:
+  1. verdict=correct 的预测论据 ("被后续股价走势验证正确"的判断);
+  2. verdict=view 的观点记录 (宏观/行业/估值/买卖操作及理由等无方向的观点,
+     不做走势验证, 但同样是该用户有价值的看法)。
+  多条内容时用 LLM 提炼成一段连贯观点摘要 (按内容哈希缓存, 内容不变不重复
+  调用 LLM), 并要求标注哪些判断已被走势验证; 只有一条时直接用原文。
 - 产物: data/xueqiu/digest/user_digests.jsonl, 每行一个 (user, stock) 条目:
   {user_id, user_nickname, stock_code, stock_name, correct, incorrect, total,
-   hit_rate, summary, theses, last_verified_at}
+   hit_rate, summary, theses, views, last_verified_at}
 - load: 进程内缓存, 供报告生成按股票查询、问答按用户查询。
 """
 
@@ -44,10 +46,17 @@ from tools.utils import utils
 
 _DISTILL_CONCURRENCY = 3
 
-_DISTILL_PROMPT = """以下是一位雪球用户"{nickname}"关于"{stock_name}"({stock_code})的多条预测论据，这些预测发布后都已被后续股价走势验证为正确。请把这几条论据整合提炼成一段连贯的观点总结 (该用户看好/看空什么、核心论据是什么、依据什么数据或逻辑)，300字以内，简洁要点式中文。直接输出内容本身，不要"以下是"之类的说明文字，也不要自我介绍。
+_DISTILL_PROMPT = """以下是一位雪球用户"{nickname}"关于"{stock_name}"({stock_code})的历史内容，分两类：
+1. 已验证的预测: 发布后被后续股价走势验证为正确
+2. 其他观点: 宏观/行业/估值/买卖操作及理由等，未经走势验证
 
-预测与论据 (按时间排列):
-{theses_block}"""
+请把两类内容整合成一段连贯的观点总结：先陈述其核心判断与逻辑，再补充其操作与理由；已验证的预测部分要明确标注"该判断已被后续走势验证"。400字以内，简洁要点式中文。直接输出内容本身，不要"以下是"之类的说明文字，也不要自我介绍。
+
+已验证的预测 (按时间排列):
+{theses_block}
+
+其他观点 (按时间排列):
+{views_block}"""
 
 
 def _digest_dir() -> str:
@@ -107,13 +116,12 @@ def _date_str(unix_sec_or_ms: int) -> str:
 
 
 async def _distill_group(
-    user_nickname: str, stock_code: str, stock_name: str, theses: List[Dict]
+    user_nickname: str, stock_code: str, stock_name: str, theses: List[Dict], views: List[Dict]
 ) -> str:
-    """把同一用户对同一只股票的多条正确论据提炼成一段观点总结 (带哈希缓存)。"""
+    """把同一用户对同一只股票的已验证预测与其他观点提炼成一段观点总结 (带哈希缓存)。"""
     parts = "\n".join(
-        f"{t.get('predicted_at') or t.get('date') or ''} {t.get('direction', '')}: {t.get('thesis', '')}"
-        for t in theses
-    )
+        f"T {t.get('date') or ''} {t.get('direction', '')}: {t.get('thesis', '')}" for t in theses
+    ) + "\n" + "\n".join(f"V {v.get('date') or ''}: {v.get('thesis', '')}" for v in views)
     content_hash = _group_hash(parts)
     cache = _read_distill_cache()
     if content_hash in cache and cache[content_hash].get("summary"):
@@ -121,21 +129,27 @@ async def _distill_group(
 
     theses_block = "\n".join(
         f"- [{t.get('date', '')}] {t.get('direction', '')}: {t.get('thesis', '')}" for t in theses
-    )
+    ) or "(无)"
+    views_block = "\n".join(
+        f"- [{v.get('date', '')}] {v.get('thesis', '')}" for v in views
+    ) or "(无)"
     prompt = _DISTILL_PROMPT.format(
         nickname=user_nickname,
         stock_name=stock_name or stock_code,
         stock_code=stock_code,
         theses_block=theses_block,
+        views_block=views_block,
     )
-    summary = (await call_text(prompt, max_tokens=768) or "").strip()
+    summary = (await call_text(prompt, max_tokens=1024) or "").strip()
     if summary:
         _append_distill_cache({"content_hash": content_hash, "summary": summary})
     else:
         utils.logger.warning(
             f"[digest] {user_nickname}({stock_code}) 观点提炼失败, 回退为原始论据拼接"
         )
-        summary = "；".join(t.get("thesis", "") for t in theses)
+        summary = "；".join(
+            [t.get("thesis", "") for t in theses] + [v.get("thesis", "") for v in views]
+        )
     return summary
 
 
@@ -152,11 +166,13 @@ async def build_digests(records: Optional[List[Dict]] = None) -> List[Dict]:
         key = (str(r.get("user_id") or ""), str(r.get("stock_code") or ""))
         if not key[0] or not key[1]:
             continue
-        g = groups.setdefault(key, {"correct": [], "incorrect": 0, "meta": r})
+        g = groups.setdefault(key, {"correct": [], "incorrect": 0, "views": [], "meta": r})
         if r.get("verdict") == "correct":
             g["correct"].append(r)
         elif r.get("verdict") == "incorrect":
             g["incorrect"] += 1
+        elif r.get("verdict") == "view":
+            g["views"].append(r)
 
     entries: List[Dict] = []
     semaphore = asyncio.Semaphore(_DISTILL_CONCURRENCY)
@@ -165,17 +181,29 @@ async def build_digests(records: Optional[List[Dict]] = None) -> List[Dict]:
         user_id, stock_code = key
         g = groups[key]
         correct_recs = g["correct"]
-        if not correct_recs:
-            return None  # 没有任何命中记录的用户-股票组不进摘录文件
+        view_recs = g["views"]
+        if not correct_recs and not view_recs:
+            return None  # 既无命中预测也无观点记录的用户-股票组不进摘录文件
         meta = g["meta"]
-        # 论据去重 (同一条帖子可能被重复回测)
+        # 已验证论据去重: 同日同方向的近似重复 (同一观点多次发帖) 只留最长一条
         seen_thesis = set()
-        theses: List[Dict] = []
+        best_by_daydir: Dict[str, str] = {}
         for r in sorted(correct_recs, key=lambda x: x.get("predicted_at") or 0):
             t = (r.get("thesis") or "").strip()
             if not t or t in seen_thesis:
                 continue
             seen_thesis.add(t)
+            key2 = (r.get("predicted_at") or 0) // 86400000, r.get("direction", "")
+            prev = best_by_daydir.get(key2)
+            if prev is None or len(t) > len(prev):
+                best_by_daydir[key2] = t
+        theses: List[Dict] = []
+        for r in sorted(correct_recs, key=lambda x: x.get("predicted_at") or 0):
+            t = (r.get("thesis") or "").strip()
+            key2 = (r.get("predicted_at") or 0) // 86400000, r.get("direction", "")
+            if best_by_daydir.get(key2) != t:
+                continue
+            best_by_daydir[key2] = ""  # 该组只取一次
             theses.append(
                 {
                     "date": _date_str(r.get("predicted_at") or 0),
@@ -183,14 +211,24 @@ async def build_digests(records: Optional[List[Dict]] = None) -> List[Dict]:
                     "thesis": t,
                 }
             )
-        if not theses:
+        # 观点型记录去重 (按文本)
+        seen_view = set()
+        views: List[Dict] = []
+        for r in sorted(view_recs, key=lambda x: x.get("predicted_at") or 0):
+            t = (r.get("thesis") or "").strip()
+            if not t or t in seen_view:
+                continue
+            seen_view.add(t)
+            views.append({"date": _date_str(r.get("predicted_at") or 0), "thesis": t})
+        if not theses and not views:
             return None
-        if len(theses) == 1:
-            summary = theses[0]["thesis"]
+        if len(theses) + len(views) == 1:
+            summary = (theses[0]["thesis"] if theses else views[0]["thesis"])
         else:
             async with semaphore:
                 summary = await _distill_group(
-                    meta.get("user_nickname", ""), stock_code, meta.get("stock_name", ""), theses
+                    meta.get("user_nickname", ""), stock_code, meta.get("stock_name", ""),
+                    theses, views,
                 )
         total = len(correct_recs) + g["incorrect"]
         return {
@@ -204,7 +242,8 @@ async def build_digests(records: Optional[List[Dict]] = None) -> List[Dict]:
             "hit_rate": round(len(correct_recs) / total, 4) if total else 0.0,
             "summary": summary,
             "theses": theses,
-            "last_verified_at": max(r.get("verified_at") or 0 for r in correct_recs),
+            "views": views,
+            "last_verified_at": max((r.get("verified_at") or 0 for r in correct_recs), default=0),
         }
 
     results = await asyncio.gather(*(_one(k) for k in groups))

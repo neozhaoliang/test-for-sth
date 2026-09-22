@@ -37,9 +37,10 @@ _CODE_RE = re.compile(r"^(SH|SZ|BJ)\d{6}$")
 
 _RULES = """判定规则（严格执行）：
 1. 纯情绪发泄、无理由的喊单/看多/看空（比如"要涨了""绝了""垃圾股"）不算，必须给出具体理由（如财务数据、行业趋势、估值逻辑、竞争格局、政策影响等）才算。
-2. 单纯转发、复述新闻without表达自己观点的不算。
+2. 单纯转发、复述新闻without表达自己观点的不算；只是顺带提一嘴股票、没有任何评价的也不算。
 3. 预测方向只能是以下四种之一：bullish(看多/未来上涨)、bearish(看空/未来下跌)、topped_out(认为已见顶，未来将走弱)、bottomed_out(认为已见底，未来将走强)。如果内容含糊无法归类到这四种，则视为不构成有效预测。
-4. 只讨论 A 股上市公司；提到的股票必须写 6 位代码 (SH/SZ/BJ 开头)。帖子没有明确讨论任何股票时返回空数组 []。"""
+4. 观点型内容单独归类：作者对某只股票表达了明确看法但没有方向性预测时（如宏观判断、行业判断、估值判断、买卖操作及其理由、筹码结构分析），is_reasoned_prediction 为 true、direction 留空字符串、thesis 写该观点的摘要。这类观点同样有价值，不能丢弃。
+5. 只讨论 A 股上市公司；提到的股票必须写 6 位代码 (SH/SZ/BJ 开头)。帖子没有明确讨论任何股票时返回空数组 []。"""
 
 _OUTPUT_SCHEMA = """以 JSON 数组格式返回，每个元素对应一只股票，格式如下，不要输出任何其他文字：
 [
@@ -47,8 +48,8 @@ _OUTPUT_SCHEMA = """以 JSON 数组格式返回，每个元素对应一只股票
     "name": "股票名称",
     "code": "股票代码 (如 SH600519)",
     "is_reasoned_prediction": true或false,
-    "direction": "bullish|bearish|topped_out|bottomed_out",
-    "thesis": "预测理由/论据摘要，用原文提炼，不超过200字",
+    "direction": "bullish|bearish|topped_out|bottomed_out (观点型内容没有方向，留空字符串)",
+    "thesis": "预测理由或观点摘要，用原文提炼，不超过200字",
     "industry_view": "帖子中提到的行业看法摘要，没有则为空字符串",
     "market_context": "帖子中提到的当时市场情况摘要，没有则为空字符串"
   }}
@@ -127,8 +128,13 @@ async def classify_post(extracted: ExtractedPost) -> List[ClassifiedPrediction]:
         if not item.get("is_reasoned_prediction"):
             continue
         code = str(item.get("code", "")).upper()
-        direction = item.get("direction", "")
-        if direction not in VALID_DIRECTIONS:
+        direction = item.get("direction", "") or ""
+        # 方向为空 = 观点型 (无方向性预测, 如清仓理由/宏观判断), 合法;
+        # 非空则必须是四种有效方向之一。
+        if direction and direction not in VALID_DIRECTIONS:
+            continue
+        thesis = (item.get("thesis", "") or "").strip()
+        if not thesis:
             continue
         if code in stock_by_code:
             name = stock_by_code[code]
@@ -141,7 +147,7 @@ async def classify_post(extracted: ExtractedPost) -> List[ClassifiedPrediction]:
             "stock_code": code,
             "stock_name": name,
             "direction": direction,
-            "thesis": item.get("thesis", "") or "",
+            "thesis": thesis,
             "industry_view": item.get("industry_view", "") or "",
             "market_context": item.get("market_context", "") or "",
         })
