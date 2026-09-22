@@ -146,10 +146,60 @@ def _scan_balanced_fragments(text: str) -> List[str]:
     return fragments
 
 
+def _fix_json_text(text: str) -> str:
+    """尽力修复模型 JSON 输出的常见语法问题 (纯字符串处理，不调用 LLM):
+    - 字符串字面量内的原始换行/制表符 -> \\n / \\t (合法 JSON 不允许原始控制字符，
+      而模型常把"分条换行"写成真实换行)
+    - 对象/数组最后一个元素后的尾随逗号 -> 删除
+    合法 JSON 经过此函数后内容不变 (合法 JSON 的字符串内不会出现原始控制字符)。
+    """
+    out: List[str] = []
+    in_str = False
+    esc = False
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if in_str:
+            if esc:
+                out.append(c)
+                esc = False
+            elif c == "\\":
+                out.append(c)
+                esc = True
+            elif c == "\n":
+                out.append("\\n")
+            elif c == "\r":
+                out.append("\\r")
+            elif c == "\t":
+                out.append("\\t")
+            else:
+                out.append(c)
+                if c == '"':
+                    in_str = False
+        else:
+            if c == '"':
+                in_str = True
+                out.append(c)
+            elif c == ",":
+                j = i + 1
+                while j < n and text[j] in " \t\r\n":
+                    j += 1
+                if j < n and text[j] in "}]":
+                    pass  # 尾随逗号: 丢弃
+                else:
+                    out.append(c)
+            else:
+                out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def _parse_json(raw_text: str) -> Optional[Any]:
     """尽量宽容地解析 LLM 输出: 支持纯 JSON、``` 围栏 (可出现在说明文字之后)、
     以及前后夹带说明文字的裸 JSON。说明文字里的短括号片段 (如 "条目[49]") 也
-    可能被误当成 JSON，所以配对片段按长度降序尝试，真正的答案通常更长。"""
+    可能被误当成 JSON，所以配对片段按长度降序尝试，真正的答案通常更长。
+    候选先直接 json.loads，失败后再过一遍 _fix_json_text 修复常见语法问题。"""
     text = raw_text.strip()
     if not text:
         return None
@@ -175,17 +225,25 @@ def _parse_json(raw_text: str) -> Optional[Any]:
         try:
             return json.loads(c)
         except json.JSONDecodeError:
-            continue
+            pass
+        fixed = _fix_json_text(c)
+        if fixed != c:
+            try:
+                return json.loads(fixed)
+            except json.JSONDecodeError:
+                continue
     return None
 
 
 _REPAIR_PROMPT = (
     "你上一次的输出无法解析为合法 JSON。请把下面引用的内容改写为严格合法的 JSON，"
-    "直接输出 JSON 本身，不要任何解释、前言或代码围栏。\n\n---\n{raw}\n---"
+    "直接输出 JSON 本身，不要任何解释、前言或代码围栏。{requirements}\n\n---\n{raw}\n---"
 )
 
 
-async def call_json_ex(prompt: str, max_tokens: int = 1024) -> tuple:
+async def call_json_ex(
+    prompt: str, max_tokens: int = 1024, repair_requirements: str = ""
+) -> tuple:
     """
     调用 LLM 并要求返回 JSON，返回 (解析结果, stop_reason)。
 
@@ -193,6 +251,8 @@ async def call_json_ex(prompt: str, max_tokens: int = 1024) -> tuple:
     不合规的 JSON"——前者重试一次更长的上限就能救回来，后者重试多少次都没用。
     仅在确认被截断时才用 _RETRY_MAX_TOKENS 重试一次，不无条件加长。
     若输出完整但解析失败，则做一次"修复式"重试：让模型把自己的输出改写为合法 JSON。
+    repair_requirements 可传入对输出 schema 的要求 (如必含字段与取值枚举)，会附在
+    修复提示里，避免模型"修复"出一个格式合法但字段缺失的结果。
     """
     raw_text, stop_reason = await _call_llm_raw_ex(prompt, max_tokens)
     if raw_text is None:
@@ -220,8 +280,14 @@ async def call_json_ex(prompt: str, max_tokens: int = 1024) -> tuple:
             f"[llm_client.call_json_ex] JSON 解析失败 (stop_reason={stop_reason}, "
             f"len={len(raw_text)})，尝试让模型修复输出后重试一次"
         )
+        requirements = (
+            f"改写后的 JSON 必须满足以下要求: {repair_requirements}。"
+            if repair_requirements
+            else ""
+        )
         repair_raw, repair_reason = await _call_llm_raw_ex(
-            _REPAIR_PROMPT.format(raw=raw_text), _RETRY_MAX_TOKENS
+            _REPAIR_PROMPT.format(raw=raw_text, requirements=requirements),
+            _RETRY_MAX_TOKENS,
         )
         if repair_raw:
             parsed = _parse_json(repair_raw)

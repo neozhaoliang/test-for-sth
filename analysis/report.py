@@ -276,7 +276,11 @@ async def _filter_relevant_knowledge(
         industry_name=industry_name or "未知",
         items_block=items_block,
     )
-    parsed, _ = await call_json_ex(prompt, max_tokens=1024)
+    parsed, _ = await call_json_ex(
+        prompt,
+        max_tokens=1024,
+        repair_requirements="必须是 JSON 数组，元素为条目编号 (非负整数)",
+    )
     if not isinstance(parsed, list):
         utils.logger.warning(f"[analysis.report] 知识库相关性筛选失败，回退为全量 ({stock_code})")
         return knowledge_excerpts
@@ -703,7 +707,16 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
 
 async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) -> StructuredSummary:
     prompt = _build_prompt(inputs, candidates)
-    parsed, stop_reason = await call_json_ex(prompt, max_tokens=_SUMMARY_MAX_TOKENS)
+    parsed, stop_reason = await call_json_ex(
+        prompt,
+        max_tokens=_SUMMARY_MAX_TOKENS,
+        repair_requirements=(
+            "必须是 JSON 对象，且必须包含字段: stance (取值限 bullish/bearish/neutral)、"
+            "lynch_category (取值限 fast_grower/stalwart/cyclical/turnaround/"
+            "asset_play/slow_grower/unclear)、thesis_summary、core_counter_evidence、"
+            "invalidation_condition、risk_notes (后五个均为字符串)"
+        ),
+    )
     if not parsed or not isinstance(parsed, dict) or parsed.get("stance") not in _VALID_STANCES:
         utils.logger.error(
             f"[analysis.report] {inputs.stock_code} 摘要生成失败 "
