@@ -195,6 +195,40 @@ async def get_crawl_task(task_id: str) -> Dict:
     return {"status": task["status"], "log_tail": "\n".join(task["log_lines"])}
 
 
+class BacktestXueqiuRequest(BaseModel):
+    user_id: str
+    since: Optional[str] = None
+    limit: Optional[int] = None
+
+
+@app.post("/api/backtest/xueqiu", response_model=CrawlTaskResponse)
+async def backtest_xueqiu(req: BacktestXueqiuRequest) -> CrawlTaskResponse:
+    """
+    回测某用户的发言: backtest_run.py 依次做
+    LLM 提取观点与预测 -> 用预测发布后的真实股价验证 -> 验证正确的观点
+    写入摘录文件 (回测结束自动重建 digest)。与抓取任务共用一把锁，
+    同一时间只跑一个，避免同时冲击雪球。
+    """
+    user_id = req.user_id.strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id 不能为空")
+
+    cmd = [sys.executable, "backtest_run.py", "--creator_id", user_id]
+    if req.since:
+        cmd += ["--since", req.since]
+    if req.limit:
+        cmd += ["--limit", str(req.limit)]
+    task_id = await _start_crawl_task(cmd)
+    return CrawlTaskResponse(task_id=task_id)
+
+
+@app.post("/api/digest/rebuild", response_model=CrawlTaskResponse)
+async def rebuild_digest() -> CrawlTaskResponse:
+    """从全部历史验证记录全量重建观点摘录文件 (提炼按内容哈希缓存)。"""
+    task_id = await _start_crawl_task([sys.executable, "digest_run.py"])
+    return CrawlTaskResponse(task_id=task_id)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
     return _INDEX_HTML
@@ -267,12 +301,23 @@ _INDEX_HTML = """<!DOCTYPE html>
 <div id="result"></div>
 
 <div class="crawl-section">
-  <h3>数据抓取</h3>
+  <h3>数据抓取 / 观点回测</h3>
 
   <p class="crawl-hint">抓取/更新雪球用户的全部发帖与回复 (公开数据，无需登录)</p>
   <div class="crawl-row">
     <input id="xueqiuUserId" placeholder="雪球用户 ID 或主页 URL，如 1263638109" />
     <button id="crawlXueqiuBtn">抓取/更新</button>
+  </div>
+
+  <p class="crawl-hint">回测某用户的发言: LLM 提取观点与预测 -> 用预测发布后的真实股价验证 -> 验证正确的观点与逻辑写入摘要文件 (耗时长，完成后自动更新摘要)</p>
+  <div class="crawl-row">
+    <input id="backtestUserId" placeholder="雪球用户 ID，如 1263638109" />
+    <button id="backtestBtn">回测并更新摘要</button>
+  </div>
+
+  <p class="crawl-hint">全量重建观点摘要文件 (从全部历史验证记录提炼，用于回测后或数据修复)</p>
+  <div class="crawl-row">
+    <button id="digestBtn">重建全部摘要</button>
   </div>
 
   <p class="crawl-hint">抓取/更新 B 站专栏作者的全部图文 (需要登录，首次抓取请留意弹出的浏览器窗口扫码)</p>
@@ -650,6 +695,8 @@ function renderResult(report) {
 document.getElementById('submitBtn').addEventListener('click', submitAnalysis);
 document.getElementById('crawlXueqiuBtn').addEventListener('click', () => submitCrawl('xueqiu'));
 document.getElementById('crawlBiliBtn').addEventListener('click', () => submitCrawl('bili'));
+document.getElementById('backtestBtn').addEventListener('click', () => submitCrawl('backtest'));
+document.getElementById('digestBtn').addEventListener('click', () => submitCrawl('digest'));
 renderWatchlist();
 
 let crawlPollTimer = null;
@@ -664,6 +711,14 @@ async function submitCrawl(platform) {
     if (!userId) return;
     url = '/api/crawl/xueqiu';
     body = { user_id: userId };
+  } else if (platform === 'backtest') {
+    const userId = document.getElementById('backtestUserId').value.trim();
+    if (!userId) return;
+    url = '/api/backtest/xueqiu';
+    body = { user_id: userId };
+  } else if (platform === 'digest') {
+    url = '/api/digest/rebuild';
+    body = {};
   } else {
     const creatorId = document.getElementById('biliCreatorId').value.trim();
     if (!creatorId) return;
