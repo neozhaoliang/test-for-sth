@@ -62,19 +62,22 @@ def extract_from_posts(posts: List[Dict[str, Any]]) -> List[ExtractedPost]:
     """
     遍历帖子列表，只处理原创帖 (status_type == "original")：
     转发帖不代表该用户自己的预测，跳过。
-    跳过没有提及任何具体股票代码的帖子。
+
+    stocks 为 $标签$ 形式的提及列表——但很多用户 (尤其老派大 V) 从不打标签，
+    直接用文字讨论股票。这类帖子 stocks 为空，由 classify_post 里的 LLM
+    从正文自行识别股票 (检测+判定一次调用完成)。
     """
     result: List[ExtractedPost] = []
     for post in posts:
         if post.get("status_type") != "original":
             continue
         description = post.get("description") or ""
-        stocks = extract_stock_mentions(description)
-        if not stocks:
+        text = strip_html(description)
+        if not text:
             continue
         result.append({
             "post": post,
-            "text": strip_html(description),
-            "stocks": stocks,
+            "text": text,
+            "stocks": extract_stock_mentions(description),
         })
     return result

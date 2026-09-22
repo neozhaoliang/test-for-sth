@@ -397,6 +397,7 @@ class XueqiuCrawler(AbstractCrawler):
         """
         known = self._load_known_status_ids(user_id)
         utils.logger.info(f"[XueqiuCrawler] 增量更新模式, 已有 {len(known)} 条历史帖子索引")
+        no_ts_ids = self._load_status_ids_without_timestamp(user_id)
         ok = await self._goto_with_waf(
             f"{self.index_url}/u/{user_id}",
             what=f"用户 {user_id} 主页 (增量更新)",
@@ -410,7 +411,10 @@ class XueqiuCrawler(AbstractCrawler):
         )
         items = await xueqiu_dom.extract_timeline_items(self.context_page)
         statuses = [xueqiu_dom.item_to_status(item, user_id) for item in items]
-        fresh = [s for s in statuses if s.status_id and s.status_id not in known]
+        fresh = [
+            s for s in statuses
+            if s.status_id and (s.status_id not in known or s.status_id in no_ts_ids)
+        ]
         if fresh:
             await xueqiu_store.batch_update_xueqiu_statuses(fresh)
             for s in fresh:
@@ -441,8 +445,12 @@ class XueqiuCrawler(AbstractCrawler):
         )
         items = await xueqiu_dom.extract_timeline_items(self.context_page)
         known = self._load_known_status_ids(user_id)
+        no_ts_ids = self._load_status_ids_without_timestamp(user_id)
         statuses = [xueqiu_dom.item_to_status(item, user_id) for item in items]
-        fresh = [s for s in statuses if s.status_id and s.status_id not in known]
+        fresh = [
+            s for s in statuses
+            if s.status_id and (s.status_id not in known or s.status_id in no_ts_ids)
+        ]
         if fresh:
             await xueqiu_store.batch_update_xueqiu_statuses(fresh)
             for s in fresh:
@@ -492,6 +500,33 @@ class XueqiuCrawler(AbstractCrawler):
         state = self._load_resume_state(user_id)
         state["known_ids"] = sorted(ids)
         self._save_resume_state(user_id, state)
+
+    def _load_status_ids_without_timestamp(self, user_id: str) -> set:
+        """
+        存量数据里 created_at 为 0 的帖子 ID 集合 (DOM 路径早期版本没有解析
+        发布时间)。再次抓取时这些帖子虽然已在 known_ids 里，但需要重存一次
+        补上时间戳，否则回测会因缺少发布时间而跳过它们。
+        """
+        ids = set()
+        base = os.path.join(config.SAVE_DATA_PATH or "data", "xueqiu", "jsonl")
+        for path in glob.glob(os.path.join(base, f"creator_{user_id}_contents_*.jsonl")):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            item = json.loads(line)
+                        except Exception:
+                            continue
+                        if int(item.get("created_at") or 0) <= 0 and item.get("status_id"):
+                            ids.add(str(item.get("status_id")))
+            except Exception as e:
+                utils.logger.warning(f"[XueqiuCrawler] 扫描 {path} 失败: {e}")
+        if ids:
+            utils.logger.info(f"[XueqiuCrawler] 检测到 {len(ids)} 条存量帖子缺少发布时间, 本次重抓将补齐")
+        return ids
 
     def _resume_file_path(self, user_id: str) -> str:
         base = config.SAVE_DATA_PATH or "data"

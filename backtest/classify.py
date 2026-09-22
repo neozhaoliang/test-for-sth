@@ -19,8 +19,13 @@
 """
 用 LLM 判断一条帖子对其提及的每只股票是否构成"有论据支撑的方向性预测"，
 并抽取预测方向、论据、行业看法、市场背景。纯情绪发泄/无理由喊单/单纯转发不计入。
+
+有 $标签$ 的帖子按标签给的股票列表判断；无标签的帖子 (老派大 V 常见，直接用
+文字讨论股票) 由 LLM 先自行识别正文讨论的股票，再对每只做同样判断——识别与
+判定在同一次调用里完成。
 """
 
+import re
 from typing import Any, Dict, List, TypedDict
 
 from backtest.extract import ExtractedPost
@@ -28,23 +33,19 @@ from backtest.llm_client import call_json
 
 VALID_DIRECTIONS = {"bullish", "bearish", "topped_out", "bottomed_out"}
 
-_PROMPT_TEMPLATE = """你是一名专业的证券分析助手，任务是判断一段雪球用户发帖内容里，对某只股票是否给出了"有论据支撑的方向性预测"。
+_CODE_RE = re.compile(r"^(SH|SZ|BJ)\d{6}$")
 
-判定规则（严格执行）：
+_RULES = """判定规则（严格执行）：
 1. 纯情绪发泄、无理由的喊单/看多/看空（比如"要涨了""绝了""垃圾股"）不算，必须给出具体理由（如财务数据、行业趋势、估值逻辑、竞争格局、政策影响等）才算。
 2. 单纯转发、复述新闻without表达自己观点的不算。
 3. 预测方向只能是以下四种之一：bullish(看多/未来上涨)、bearish(看空/未来下跌)、topped_out(认为已见顶，未来将走弱)、bottomed_out(认为已见底，未来将走强)。如果内容含糊无法归类到这四种，则视为不构成有效预测。
+4. 只讨论 A 股上市公司；提到的股票必须写 6 位代码 (SH/SZ/BJ 开头)。帖子没有明确讨论任何股票时返回空数组 []。"""
 
-帖子发布时间: {created_at}
-帖子正文:
-{text}
-
-该帖子提及的股票列表: {stock_list}
-
-请针对上面每一只股票，判断该帖子是否包含针对该股票的有效预测。以 JSON 数组格式返回，每个元素对应一只股票，格式如下，不要输出任何其他文字：
+_OUTPUT_SCHEMA = """以 JSON 数组格式返回，每个元素对应一只股票，格式如下，不要输出任何其他文字：
 [
   {{
-    "code": "股票代码",
+    "name": "股票名称",
+    "code": "股票代码 (如 SH600519)",
     "is_reasoned_prediction": true或false,
     "direction": "bullish|bearish|topped_out|bottomed_out",
     "thesis": "预测理由/论据摘要，用原文提炼，不超过200字",
@@ -54,6 +55,32 @@ _PROMPT_TEMPLATE = """你是一名专业的证券分析助手，任务是判断�
 ]
 
 如果 is_reasoned_prediction 为 false，其余字段可留空字符串。"""
+
+_PROMPT_TAGGED = """你是一名专业的证券分析助手，任务是判断一段雪球用户发帖内容里，对某只股票是否给出了"有论据支撑的方向性预测"。
+
+{RULES}
+
+帖子发布时间: {created_at}
+帖子正文:
+{text}
+
+该帖子用 $标签$ 提到的股票列表: {stock_list}
+
+请针对上面每一只股票，判断该帖子是否包含针对该股票的有效预测。
+{OUTPUT_SCHEMA}"""
+
+_PROMPT_UNTAGGED = """你是一名专业的证券分析助手，任务是判断一段雪球用户发帖内容里，对某只股票是否给出了"有论据支撑的方向性预测"。
+
+{RULES}
+
+帖子发布时间: {created_at}
+帖子正文:
+{text}
+
+这条帖子没有 $标签$ 标注股票。请先根据正文识别作者**明确讨论并有观点**的股票
+(仅限 A 股上市公司；只是顺带提一嘴、没有评价的不算)，然后对每一只判断是否为
+有效预测。
+{OUTPUT_SCHEMA}"""
 
 
 class ClassifiedPrediction(TypedDict):
@@ -68,18 +95,26 @@ class ClassifiedPrediction(TypedDict):
 
 async def classify_post(extracted: ExtractedPost) -> List[ClassifiedPrediction]:
     """
-    对单条已抽取股票代码的帖子调用一次 LLM，批量判断其中每只股票是否构成有效预测。
-    返回仅包含 is_reasoned_prediction=true 且方向有效的记录。
+    对单条帖子调用一次 LLM：有标签时按标签股票列表判断；无标签时先由 LLM
+    自行识别正文讨论的股票再判断。返回仅包含 is_reasoned_prediction=true
+    且方向/代码有效的记录。
     """
     post = extracted["post"]
     stocks = extracted["stocks"]
     stock_by_code = {s["code"]: s["name"] for s in stocks}
 
-    prompt = _PROMPT_TEMPLATE.format(
-        created_at=post.get("created_at", ""),
-        text=extracted["text"],
-        stock_list=", ".join(f"{s['name']}({s['code']})" for s in stocks),
-    )
+    common = {
+        "created_at": post.get("created_at", ""),
+        "text": extracted["text"],
+        "RULES": _RULES,
+        "OUTPUT_SCHEMA": _OUTPUT_SCHEMA,
+    }
+    if stocks:
+        prompt = _PROMPT_TAGGED.format(
+            stock_list=", ".join(f"{s['name']}({s['code']})" for s in stocks), **common
+        )
+    else:
+        prompt = _PROMPT_UNTAGGED.format(**common)
 
     parsed = await call_json(prompt, max_tokens=2048)
     if not parsed or not isinstance(parsed, list):
@@ -93,12 +128,18 @@ async def classify_post(extracted: ExtractedPost) -> List[ClassifiedPrediction]:
             continue
         code = str(item.get("code", "")).upper()
         direction = item.get("direction", "")
-        if code not in stock_by_code or direction not in VALID_DIRECTIONS:
+        if direction not in VALID_DIRECTIONS:
             continue
+        if code in stock_by_code:
+            name = stock_by_code[code]
+        elif _CODE_RE.match(code):
+            name = str(item.get("name", "") or code)
+        else:
+            continue  # LLM 无标签识别时给出的代码不可信 (格式不对或不存在)
         results.append({
             "post": post,
             "stock_code": code,
-            "stock_name": stock_by_code[code],
+            "stock_name": name,
             "direction": direction,
             "thesis": item.get("thesis", "") or "",
             "industry_view": item.get("industry_view", "") or "",

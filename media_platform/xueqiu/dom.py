@@ -45,6 +45,24 @@ from playwright.async_api import Page
 from model.m_xueqiu import XueqiuStatus
 
 TIMELINE_ITEM_JS = """() => {
+    // 时间线卡片的时间是相对文本 ("昨天 15:32"/"N分钟前")，用页面时钟折算成
+    // 毫秒时间戳。天级精度对回测窗口 (以月计) 足够；"刚刚"等无法折算的返回 0。
+    function parseTimeText(t) {
+        const now = new Date();
+        let m = t.match(/^(\\d{4})-(\\d{2})-(\\d{2})/);
+        if (m) return new Date(m[1], m[2] - 1, m[3]).getTime();
+        m = t.match(/^(\\d{2})-(\\d{2})\\s+(\\d{2}):(\\d{2})/);
+        if (m) return new Date(now.getFullYear(), m[1] - 1, m[2], m[3], m[4]).getTime();
+        m = t.match(/昨天\\s*(\\d{2}):(\\d{2})/);
+        if (m) { const d = new Date(now); d.setDate(d.getDate() - 1); d.setHours(m[1], m[2], 0, 0); return d.getTime(); }
+        m = t.match(/(\\d+)\\s*天前/);
+        if (m) { const d = new Date(now); d.setDate(d.getDate() - Number(m[1])); d.setHours(12, 0, 0, 0); return d.getTime(); }
+        m = t.match(/(\\d+)\\s*小时前/);
+        if (m) return now.getTime() - Number(m[1]) * 3600000;
+        m = t.match(/(\\d+)\\s*分钟前/);
+        if (m) return now.getTime() - Number(m[1]) * 60000;
+        return 0;
+    }
     const out = [];
     const seen = new Set();
     for (const el of document.querySelectorAll('article.timeline__item')) {
@@ -61,11 +79,13 @@ TIMELINE_ITEM_JS = """() => {
             const fwd = (forwardEl.innerText || '').trim();
             text = text ? text + '\\n//转发:\\n' + fwd : fwd;
         }
+        const dateText = dateLink ? (dateLink.innerText || '').trim() : '';
         out.push({
             id: sid,
             status_type: forwardEl ? 'repost' : 'original',
             description: text,
-            created_at: dateLink ? (dateLink.innerText || '').trim() : '',
+            created_at: parseTimeText(dateText),
+            created_at_text: dateText,
         });
     }
     return out;
@@ -165,6 +185,7 @@ def item_to_status(item: Dict, user_id: str) -> XueqiuStatus:
         status_id=sid,
         status_type="retweet" if item.get("status_type") == "repost" else "original",
         description=item.get("description", "") or "",
+        created_at=int(item.get("created_at") or 0),
         status_url=f"https://xueqiu.com/{user_id}/{sid}" if sid else "",
         user_id=user_id,
         user_link=f"https://xueqiu.com/{user_id}",

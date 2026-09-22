@@ -25,6 +25,7 @@
 """
 
 import asyncio
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -117,22 +118,36 @@ def _crawl_task_is_running() -> bool:
     return any(t["status"] == "running" for t in _crawl_tasks.values())
 
 
+def _decode_subprocess_line(raw: bytes) -> str:
+    """子进程 stdout 在 Windows 管道下默认按 locale (GBK) 编码输出，
+    先按 UTF-8 试、失败回退 GB18030，避免日志出现乱码。"""
+    for enc in ("utf-8", "gb18030"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 async def _run_crawler_subprocess(task_id: str, cmd: list) -> None:
     _crawl_tasks[task_id]["status"] = "running"
     log_lines: list = _crawl_tasks[task_id]["log_lines"]
     try:
+        # 强制子进程输出 UTF-8 (Windows 管道默认 GBK, 父进程解码容易乱码)
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             cwd=str(_PROJECT_ROOT),
+            env=env,
         )
         _crawl_tasks[task_id]["process"] = process
         while True:
             line = await process.stdout.readline()
             if not line:
                 break
-            log_lines.append(line.decode("utf-8", errors="replace").rstrip())
+            log_lines.append(_decode_subprocess_line(line).rstrip())
             if len(log_lines) > _CRAWL_LOG_TAIL_LINES:
                 del log_lines[: len(log_lines) - _CRAWL_LOG_TAIL_LINES]
         returncode = await process.wait()

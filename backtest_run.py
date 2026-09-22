@@ -49,28 +49,36 @@ _CONCURRENCY = 3
 skip_digest = False
 
 
-def _latest_contents_file(creator_id: str) -> Optional[str]:
+def _contents_files(creator_id: str) -> List[str]:
     base = os.path.join("data", "xueqiu", "jsonl")
     pattern = os.path.join(base, f"creator_{creator_id}_contents_*.jsonl")
-    matches = sorted(glob.glob(pattern))
-    return matches[-1] if matches else None
+    return sorted(glob.glob(pattern))
 
 
-def _load_posts(path: str, since: Optional[str]) -> List[Dict[str, Any]]:
+def _load_posts(paths: List[str], since: Optional[str]) -> List[Dict[str, Any]]:
+    """合并该用户的全部发帖文件 (按天落盘, 只读最新一个会漏掉历史)，
+    按 status_id 去重后按发布时间升序返回。"""
     since_ms = 0
     if since:
         since_ms = int(datetime.strptime(since, "%Y-%m-%d").timestamp() * 1000)
 
-    posts: List[Dict[str, Any]] = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            post = json.loads(line)
-            if since_ms and int(post.get("created_at") or 0) < since_ms:
-                continue
-            posts.append(post)
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for path in paths:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                post = json.loads(line)
+                if since_ms and int(post.get("created_at") or 0) < since_ms:
+                    continue
+                sid = str(post.get("status_id") or "")
+                if sid:
+                    by_id[sid] = post  # 同日重复时保留后写入的
+                else:
+                    by_id[f"idx-{len(by_id)}"] = post
+    posts = list(by_id.values())
+    posts.sort(key=lambda p: int(p.get("created_at") or 0))
     return posts
 
 
@@ -99,6 +107,7 @@ async def _process_one(extracted, semaphore: asyncio.Semaphore, stats: Dict[str,
                 continue
 
             if result is None:
+                stats["no_date"] += 1
                 continue
             if result["verdict"] == "inconclusive":
                 stats["inconclusive"] += 1
@@ -115,19 +124,19 @@ async def _process_one(extracted, semaphore: asyncio.Semaphore, stats: Dict[str,
 async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> None:
     # 兼容 "主页 URL" 输入 (与 web 端抓取按钮的输入约定一致)
     creator_id = normalize_user_id(creator_id)
-    path = _latest_contents_file(creator_id)
-    if not path:
+    paths = _contents_files(creator_id)
+    if not paths:
         utils.logger.error(f"[backtest_run] No crawled data found for creator_id={creator_id}")
         return
 
-    utils.logger.info(f"[backtest_run] Loading posts from {path}")
-    posts = _load_posts(path, since)
+    utils.logger.info(f"[backtest_run] Loading posts from {len(paths)} file(s) for {creator_id}")
+    posts = _load_posts(paths, since)
     if limit:
         posts = posts[:limit]
 
     extracted_posts = extract_from_posts(posts)
     utils.logger.info(
-        f"[backtest_run] {len(posts)} posts loaded, {len(extracted_posts)} contain stock mentions"
+        f"[backtest_run] {len(posts)} posts loaded, {len(extracted_posts)} original posts to analyze"
     )
 
     stats = {
@@ -135,6 +144,7 @@ async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> No
         "verified_correct": 0,
         "verified_incorrect": 0,
         "inconclusive": 0,
+        "no_date": 0,
         "errors": 0,
     }
     semaphore = asyncio.Semaphore(_CONCURRENCY)
@@ -157,7 +167,8 @@ async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> No
     utils.logger.info(
         f"[backtest_run] Done. predictions_found={stats['predictions_found']}, "
         f"correct={stats['verified_correct']}, incorrect={stats['verified_incorrect']}, "
-        f"inconclusive={stats['inconclusive']}, errors={stats['errors']}, "
+        f"inconclusive={stats['inconclusive']}, no_date={stats['no_date']}, "
+        f"errors={stats['errors']}, "
         f"hit_rate={hit_rate:.1f}% (of {total_verified} conclusive predictions)"
     )
 
