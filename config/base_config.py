@@ -80,11 +80,13 @@ BROWSER_LAUNCH_TIMEOUT = 60
 CDP_CONNECT_WAIT_SECONDS = 15
 
 # 是否连接用户已打开的浏览器，而不是启动新的浏览器
-# 开启后，程序会连接一个已经启用了远程调试的浏览器
-# 用户需要在 Chrome 中开启远程调试：chrome://inspect/#remote-debugging
-# 或者使用命令行参数启动 Chrome：--remote-debugging-port=9222
-# 这种方式反检测效果最好，因为直接使用用户真实浏览器的所有 Cookie、扩展和浏览历史
-CDP_CONNECT_EXISTING = True
+# 注意: 只是打开 chrome://inspect/#remote-debugging 页面并不会开启调试端口，
+# Chrome 必须带 --remote-debugging-port 参数启动；Chrome 111+ 在默认用户数据
+# 目录下会忽略该参数 (需同时指定独立 --user-data-dir)，Chrome 136+ 已移除
+# 端口方式、只支持 --remote-debugging-pipe。当前机器 Chrome 153 无法用端口方式
+# 开启调试，故默认关闭: 直接自启浏览器 (登录态保存在 SAVE_LOGIN_STATE 目录)。
+# 若换用支持调试端口的浏览器，可改回 True。
+CDP_CONNECT_EXISTING = False
 
 # 程序结束时是否自动关闭浏览器
 # 设置为 False 可以保持浏览器运行，方便调试

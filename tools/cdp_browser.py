@@ -182,10 +182,23 @@ class CDPBrowserManager:
         start = time.monotonic()
         connected = False
         next_note = 10.0
+        first_fail_noted = False
         while time.monotonic() - start < timeout:
             if await self._test_cdp_connection(self.debug_port):
                 connected = True
                 break
+            if not first_fail_noted:
+                first_fail_noted = True
+                # 端口无人监听几乎总是因为 Chrome 没带调试参数启动:
+                # 打开 chrome://inspect 页面并不会开启调试; Chrome 111+ 在默认
+                # 用户目录下忽略 --remote-debugging-port, 136+ 已移除端口方式。
+                utils.logger.info(
+                    f"[CDPBrowserManager] 端口 {self.debug_port} 无人监听: 你的 Chrome "
+                    "未以调试模式启动。仅打开 chrome://inspect/#remote-debugging 页面不会开启调试; "
+                    "需要用 --remote-debugging-port 参数启动 Chrome (111+ 需同时指定独立的 "
+                    "--user-data-dir, 136+ 已改用 --remote-debugging-pipe)。"
+                    f"将最多等待 {timeout}s, 之后自动回退为自启浏览器"
+                )
             elapsed = time.monotonic() - start
             if elapsed >= next_note and elapsed < timeout:
                 utils.logger.info(
@@ -260,7 +273,8 @@ class CDPBrowserManager:
             utils.logger.info(f"[CDPBrowserManager] CDP port {debug_port} is accessible")
             return True
         except (OSError, asyncio.TimeoutError):
-            utils.logger.warning(f"[CDPBrowserManager] CDP port {debug_port} is not accessible")
+            # 每 3s 探测一次的失败降为 debug，避免刷屏; 原因说明由调用方打一次 info
+            utils.logger.debug(f"[CDPBrowserManager] CDP port {debug_port} is not accessible")
             return False
         except Exception as e:
             utils.logger.warning(f"[CDPBrowserManager] CDP connection test failed: {e}")
