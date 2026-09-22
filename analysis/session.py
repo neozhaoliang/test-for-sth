@@ -25,13 +25,13 @@ CDP 连接与 WAF 等待逻辑与 media_platform/xueqiu/core.py 保持一致，�
 """
 
 import asyncio
-import random
 import time
 from typing import Dict, List, Optional
 
 from playwright.async_api import BrowserContext, Page, Playwright, async_playwright
 
 import config
+from media_platform.xueqiu import dom as xueqiu_dom
 from tools.cdp_browser import CDPBrowserManager
 from tools.utils import utils
 from tools.waf_slider import is_waf_challenge, solve_waf_slider
@@ -41,38 +41,6 @@ _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
-
-# 时间线卡片 DOM 结构 (与 media_platform/xueqiu/core.py 2026-09 实测一致):
-#   article.timeline__item
-#     div.timeline__item__info > a.date-and-source   (href=/<uid>/<status_id>)
-#     div.timeline__item__content .content          (正文)
-#     blockquote.timeline__item__forward             (转发卡片才有: 被转发内容)
-_TIMELINE_ITEM_JS = """() => {
-    const out = [];
-    const seen = new Set();
-    for (const el of document.querySelectorAll('article.timeline__item')) {
-        const dateLink = el.querySelector('a.date-and-source');
-        const href = dateLink ? dateLink.getAttribute('href') : '';
-        const m = href ? href.match(/\\/(\\d+)\\/(\\d+)/) : null;
-        const sid = m ? m[2] : '';
-        if (!sid || seen.has(sid)) continue;
-        seen.add(sid);
-        const contentEl = el.querySelector('.timeline__item__content .content, .timeline__item__content');
-        const forwardEl = el.querySelector('blockquote.timeline__item__forward, .timeline__item__forward');
-        let text = contentEl ? contentEl.innerText.trim() : '';
-        if (forwardEl) {
-            const fwd = (forwardEl.innerText || '').trim();
-            text = text ? text + '\\n//转发:\\n' + fwd : fwd;
-        }
-        out.push({
-            id: sid,
-            status_type: forwardEl ? 'repost' : 'original',
-            description: text,
-            created_at: dateLink ? (dateLink.innerText || '').trim() : '',
-        });
-    }
-    return out;
-}"""
 
 
 class AnalysisBrowserSession:
@@ -221,65 +189,25 @@ class AnalysisBrowserSession:
         if not ok:
             return []
 
-        # 等 SPA 渲染出时间线卡片
-        count = 0
-        for _ in range(20):
-            try:
-                count = await self.context_page.evaluate(
-                    "() => document.querySelectorAll('article.timeline__item').length"
-                )
-            except Exception:
-                count = 0
-            if count > 0:
-                break
-            await asyncio.sleep(1)
-
-        # 少量滚动触发懒加载 (拟人节奏: 步长与间隔都带抖动，不追求翻完整个历史)
-        rounds = 0
-        while count < page_size and rounds < 8:
-            try:
-                await self.context_page.evaluate(
-                    "() => window.scrollBy(0, 600 + Math.random() * 400)"
-                )
-            except Exception:
-                break
-            await asyncio.sleep(0.8 + random.random() * 1.2)
-            try:
-                new_count = await self.context_page.evaluate(
-                    "() => document.querySelectorAll('article.timeline__item').length"
-                )
-            except Exception:
-                break
-            if new_count == count:
-                # 高度不再增长 (到底或 SPA 停止懒加载)，再确认一次后退出
-                await asyncio.sleep(1.5)
-                try:
-                    new_count = await self.context_page.evaluate(
-                        "() => document.querySelectorAll('article.timeline__item').length"
-                    )
-                except Exception:
-                    break
-                if new_count == count:
-                    break
-            count = new_count
-            rounds += 1
+        # 等 SPA 渲染出时间线卡片，再少量滚动触发懒加载 (拟人节奏，不追求翻完历史)
+        await xueqiu_dom.wait_for_items(self.context_page, "article.timeline__item", timeout_s=20)
+        await xueqiu_dom.scroll_until_stable(
+            self.context_page, "article.timeline__item", max_rounds=8
+        )
 
         posts = await self._extract_timeline_from_dom()
         if posts:
             utils.logger.info(
                 f"[AnalysisBrowserSession] 用户 {user_id} DOM 提取 {len(posts)} 条发帖"
             )
-        else:
-            utils.logger.warning(f"[AnalysisBrowserSession] 用户 {user_id} 时间线 DOM 提取为空")
         return posts[:page_size]
 
     async def _extract_timeline_from_dom(self) -> List[Dict]:
         """从当前页面 DOM 提取时间线帖子 (id/status_type/description/created_at)。"""
-        try:
-            return await self.context_page.evaluate(_TIMELINE_ITEM_JS)
-        except Exception as e:
-            utils.logger.warning(f"[AnalysisBrowserSession] DOM 时间线提取失败: {e}")
-            return []
+        items = await xueqiu_dom.extract_timeline_items(self.context_page)
+        if not items:
+            utils.logger.warning("[AnalysisBrowserSession] DOM 时间线提取为空")
+        return items
 
     async def close(self) -> None:
         try:
