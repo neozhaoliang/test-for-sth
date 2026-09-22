@@ -46,6 +46,12 @@ from tools.utils import utils
 
 _DISTILL_CONCURRENCY = 3
 
+# 知识库来源 -> 雪球用户映射: B 站直播文字稿是老木匠的发言，其观点摘录
+# 并入该用户名下 (来源会标注在 view 条目里，与雪球验证记录区分)。
+_KB_USER_MAP = {
+    "bili_laomujiang": ("3058599833", "买股票的老木匠"),
+}
+
 _DISTILL_PROMPT = """以下是一位雪球用户"{nickname}"关于"{stock_name}"({stock_code})的历史内容，分两类：
 1. 已验证的预测: 发布后被后续股价走势验证为正确
 2. 其他观点: 宏观/行业/估值/买卖操作及理由等，未经走势验证
@@ -106,6 +112,115 @@ def _append_distill_cache(rec: Dict) -> None:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
+def _kb_views_cache_path() -> str:
+    return os.path.join(_digest_dir(), "kb_views_cache.jsonl")
+
+
+def _read_kb_views_cache() -> Dict[str, List[Dict]]:
+    """content_hash -> 该知识库提炼文本检测出的观点列表"""
+    cache: Dict[str, List[Dict]] = {}
+    path = _kb_views_cache_path()
+    if not os.path.exists(path):
+        return cache
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("content_hash"):
+                    cache[rec["content_hash"]] = rec.get("views") or []
+    except (OSError, json.JSONDecodeError) as e:
+        utils.logger.error(f"[digest] 读取知识库观点缓存失败: {e}")
+    return cache
+
+
+def _append_kb_views_cache(rec: Dict) -> None:
+    os.makedirs(os.path.dirname(_kb_views_cache_path()), exist_ok=True)
+    with open(_kb_views_cache_path(), "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+async def _detect_kb_views() -> List[Dict]:
+    """
+    把知识库 (B 站直播文字稿等) 的提炼条目过一遍股票观点检测 (与雪球无标签
+    帖子同一套 classify 逻辑)，产出伪记录合并进摘录分组。检测结果按内容哈希
+    缓存，提炼文本不变不重复调用 LLM。
+    """
+    from analysis.knowledge_base import ensure_loaded as ensure_kb
+    from backtest.classify import classify_post
+
+    entries = await ensure_kb()
+    entries = [e for e in entries if e.source in _KB_USER_MAP and (e.distilled or "").strip()]
+    if not entries:
+        return []
+    cache = _read_kb_views_cache()
+    semaphore = asyncio.Semaphore(_DISTILL_CONCURRENCY)
+
+    async def _one(e) -> List[Dict]:
+        text = (e.distilled or "").strip()
+        h = _group_hash(text)
+        if h in cache:
+            return cache[h]
+        uid, nick = _KB_USER_MAP[e.source]
+        async with semaphore:
+            try:
+                preds = await classify_post(
+                    {
+                        "post": {
+                            "status_id": f"kb-{h}",
+                            "status_type": "original",
+                            "created_at": int(e.timestamp or 0),  # 已是毫秒
+                            "user_id": uid,
+                            "user_nickname": nick,
+                        },
+                        "text": text,
+                        "stocks": [],
+                    }
+                )
+            except Exception as exc:
+                utils.logger.warning(f"[digest] 知识库条目观点检测失败 ({e.title[:30]}): {exc}")
+                return []
+        recs = [
+            {
+                "stock_code": p["stock_code"],
+                "stock_name": p["stock_name"],
+                "direction": p["direction"],
+                "thesis": p["thesis"],
+            }
+            for p in preds
+        ]
+        _append_kb_views_cache({"content_hash": h, "views": recs})
+        return recs
+
+    results = await asyncio.gather(*(_one(e) for e in entries))
+    pseudo: List[Dict] = []
+    for e, recs in zip(entries, results):
+        uid, nick = _KB_USER_MAP[e.source]
+        for r in recs:
+            pseudo.append(
+                {
+                    "user_id": uid,
+                    "user_nickname": nick,
+                    "stock_code": r["stock_code"],
+                    "stock_name": r["stock_name"],
+                    "direction": r.get("direction", ""),
+                    "thesis": r["thesis"],
+                    "predicted_at": int(e.timestamp or 0),  # 已是毫秒
+                    "verified_at": 0,
+                    "verdict": "view",
+                    "view_source": f"bili:{e.source}",
+                }
+            )
+    if pseudo:
+        utils.logger.info(f"[digest] 知识库观点检测: {len(pseudo)} 条 (覆盖 {len(entries)} 条提炼文本)")
+    return pseudo
+
+
 def _date_str(unix_sec_or_ms: int) -> str:
     if not unix_sec_or_ms:
         return ""
@@ -121,7 +236,10 @@ async def _distill_group(
     """把同一用户对同一只股票的已验证预测与其他观点提炼成一段观点总结 (带哈希缓存)。"""
     parts = "\n".join(
         f"T {t.get('date') or ''} {t.get('direction', '')}: {t.get('thesis', '')}" for t in theses
-    ) + "\n" + "\n".join(f"V {v.get('date') or ''}: {v.get('thesis', '')}" for v in views)
+    ) + "\n" + "\n".join(
+        f"V {v.get('date') or ''} {v.get('source', '')} {v.get('direction', '')}: {v.get('thesis', '')}"
+        for v in views
+    )
     content_hash = _group_hash(parts)
     cache = _read_distill_cache()
     if content_hash in cache and cache[content_hash].get("summary"):
@@ -131,7 +249,9 @@ async def _distill_group(
         f"- [{t.get('date', '')}] {t.get('direction', '')}: {t.get('thesis', '')}" for t in theses
     ) or "(无)"
     views_block = "\n".join(
-        f"- [{v.get('date', '')}] {v.get('thesis', '')}" for v in views
+        f"- [{v.get('date', '')}] (来源:{'B站直播' if v.get('source', '').startswith('bili') else '雪球'}) "
+        f"{v.get('direction', '')}{':' if v.get('direction') else ''} {v.get('thesis', '')}"
+        for v in views
     ) or "(无)"
     prompt = _DISTILL_PROMPT.format(
         nickname=user_nickname,
@@ -153,13 +273,20 @@ async def _distill_group(
     return summary
 
 
-async def build_digests(records: Optional[List[Dict]] = None) -> List[Dict]:
+async def build_digests(
+    records: Optional[List[Dict]] = None, include_kb: bool = True
+) -> List[Dict]:
     """
     从验证记录聚合出每个 (用户, 股票) 的观点摘录条目并原子写入 digest 文件。
-    records 为 None 时加载全部验证记录。返回写入的条目列表。
+    records 为 None 时加载全部验证记录；include_kb=True 时把知识库 (B 站直播
+    文字稿等) 提炼文本里检测出的观点作为 view 并入对应用户名下。返回写入的
+    条目列表。
     """
     if records is None:
         records = score.load_records()
+    records = list(records)
+    if include_kb:
+        records.extend(await _detect_kb_views())
 
     groups: Dict[str, Dict] = {}
     for r in records:
@@ -211,7 +338,7 @@ async def build_digests(records: Optional[List[Dict]] = None) -> List[Dict]:
                     "thesis": t,
                 }
             )
-        # 观点型记录去重 (按文本)
+        # 观点型记录去重 (按文本); 来源标注区分雪球发言与 B 站直播稿
         seen_view = set()
         views: List[Dict] = []
         for r in sorted(view_recs, key=lambda x: x.get("predicted_at") or 0):
@@ -219,7 +346,14 @@ async def build_digests(records: Optional[List[Dict]] = None) -> List[Dict]:
             if not t or t in seen_view:
                 continue
             seen_view.add(t)
-            views.append({"date": _date_str(r.get("predicted_at") or 0), "thesis": t})
+            views.append(
+                {
+                    "date": _date_str(r.get("predicted_at") or 0),
+                    "direction": r.get("direction", ""),
+                    "thesis": t,
+                    "source": r.get("view_source") or "xueqiu",
+                }
+            )
         if not theses and not views:
             return None
         if len(theses) + len(views) == 1:
