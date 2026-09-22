@@ -68,7 +68,7 @@ def _group_hash(key_parts: str) -> str:
 
 
 def _read_distill_cache() -> Dict[str, Dict]:
-    """cache_key -> {content_hash, summary}"""
+    """content_hash -> {content_hash, summary}"""
     cache: Dict[str, Dict] = {}
     path = _distill_cache_path()
     if not os.path.exists(path):
@@ -79,8 +79,13 @@ def _read_distill_cache() -> Dict[str, Dict]:
                 line = line.strip()
                 if not line:
                     continue
-                rec = json.loads(line)
-                cache[rec["cache_key"]] = rec
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                key = rec.get("content_hash") or rec.get("cache_key")
+                if key:
+                    cache[key] = rec
     except (OSError, json.JSONDecodeError) as e:
         utils.logger.error(f"[digest] 读取提炼缓存失败: {e}")
     return cache
@@ -111,9 +116,8 @@ async def _distill_group(
     )
     content_hash = _group_hash(parts)
     cache = _read_distill_cache()
-    for rec in cache.values():
-        if rec.get("content_hash") == content_hash and rec.get("summary"):
-            return rec["summary"]
+    if content_hash in cache and cache[content_hash].get("summary"):
+        return cache[content_hash]["summary"]
 
     theses_block = "\n".join(
         f"- [{t.get('date', '')}] {t.get('direction', '')}: {t.get('thesis', '')}" for t in theses
