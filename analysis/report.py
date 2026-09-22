@@ -211,6 +211,18 @@ def _credibility_note(hit_rate: float, correct: int, incorrect: int) -> str:
 
 
 def _historical_thesis(user_id: str, stock_code: str) -> List[str]:
+    """该用户对这只股票的历史观点摘录 (优先读 digest 总结文件, 未构建时回退原始验证记录)。"""
+    from backtest import digest
+
+    views = digest.views_for_user_stock(user_id, stock_code)
+    if views:
+        out: List[str] = []
+        for v in views:
+            text = v.get("summary") or "；".join(t.get("thesis", "") for t in v.get("theses", [])[:3])
+            if text:
+                out.append(text)
+        return out[-_MAX_HISTORICAL_THESIS:]
+
     records = load_records(user_id)
     thesis = [r.get("thesis", "") for r in records if r.get("stock_code") == stock_code and r.get("thesis")]
     return thesis[-_MAX_HISTORICAL_THESIS:]

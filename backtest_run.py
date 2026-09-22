@@ -44,6 +44,9 @@ from tools.utils import utils
 
 _CONCURRENCY = 3
 
+# 回测结束后是否重建观点摘录文件 (由 main() 的 --skip-digest 控制)
+skip_digest = False
+
 
 def _latest_contents_file(creator_id: str) -> Optional[str]:
     base = os.path.join("data", "xueqiu", "jsonl")
@@ -155,13 +158,23 @@ async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> No
         f"hit_rate={hit_rate:.1f}% (of {total_verified} conclusive predictions)"
     )
 
+    if not skip_digest:
+        # 回测完自动重建观点摘录文件 (提炼按内容哈希缓存, 只有新增/变化的
+        # 用户-股票组才触发 LLM 调用), 保证报告与问答读到的摘录总是最新的。
+        from backtest import digest
+
+        await digest.build_digests()
+
 
 def main() -> None:
+    global skip_digest
     parser = argparse.ArgumentParser(description="雪球用户预测回测")
     parser.add_argument("--creator_id", required=True, help="雪球用户 ID")
     parser.add_argument("--since", default=None, help="只回测该日期之后发布的帖子 (YYYY-MM-DD)")
     parser.add_argument("--limit", type=int, default=None, help="限制处理的帖子数量 (调试用)")
+    parser.add_argument("--skip-digest", action="store_true", help="回测结束后不重建观点摘录文件")
     args = parser.parse_args()
+    skip_digest = args.skip_digest
 
     asyncio.run(run(args.creator_id, args.since, args.limit))
 
