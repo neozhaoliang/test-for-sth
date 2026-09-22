@@ -40,6 +40,7 @@ from backtest.classify import classify_post
 from backtest.extract import extract_from_posts
 from backtest.store import build_record, store_record
 from backtest.verify import verify_prediction
+from media_platform.xueqiu.help import normalize_user_id
 from tools.utils import utils
 
 _CONCURRENCY = 3
@@ -112,6 +113,8 @@ async def _process_one(extracted, semaphore: asyncio.Semaphore, stats: Dict[str,
 
 
 async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> None:
+    # 兼容 "主页 URL" 输入 (与 web 端抓取按钮的输入约定一致)
+    creator_id = normalize_user_id(creator_id)
     path = _latest_contents_file(creator_id)
     if not path:
         utils.logger.error(f"[backtest_run] No crawled data found for creator_id={creator_id}")

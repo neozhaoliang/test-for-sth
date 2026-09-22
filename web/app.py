@@ -37,6 +37,7 @@ from pydantic import BaseModel
 from analysis.knowledge_base import ensure_loaded as ensure_knowledge_base_loaded
 from analysis.realtime_price import resolve_stock_code
 from analysis.report import generate_report
+from media_platform.xueqiu.help import normalize_user_id
 from tools.utils import utils
 
 app = FastAPI(title="股票投资助手")
@@ -209,9 +210,9 @@ async def backtest_xueqiu(req: BacktestXueqiuRequest) -> CrawlTaskResponse:
     写入摘录文件 (回测结束自动重建 digest)。与抓取任务共用一把锁，
     同一时间只跑一个，避免同时冲击雪球。
     """
-    user_id = req.user_id.strip()
-    if not user_id:
-        raise HTTPException(status_code=400, detail="user_id 不能为空")
+    user_id = normalize_user_id(req.user_id)
+    if not user_id or not user_id.isdigit():
+        raise HTTPException(status_code=400, detail=f"无法从输入解析出用户 ID: {req.user_id}")
 
     cmd = [sys.executable, "backtest_run.py", "--creator_id", user_id]
     if req.since:
@@ -311,7 +312,7 @@ _INDEX_HTML = """<!DOCTYPE html>
 
   <p class="crawl-hint">回测某用户的发言: LLM 提取观点与预测 -> 用预测发布后的真实股价验证 -> 验证正确的观点与逻辑写入摘要文件 (耗时长，完成后自动更新摘要)</p>
   <div class="crawl-row">
-    <input id="backtestUserId" placeholder="雪球用户 ID，如 1263638109" />
+    <input id="backtestUserId" placeholder="雪球用户 ID 或主页 URL，如 1263638109" />
     <button id="backtestBtn">回测并更新摘要</button>
   </div>
 
