@@ -56,7 +56,12 @@ _DISTILL_PROMPT = """以下是一位雪球用户"{nickname}"关于"{stock_name}"
 1. 已验证的预测: 发布后被后续股价走势验证为正确
 2. 其他观点: 宏观/行业/估值/买卖操作及理由等，未经走势验证
 
-请把两类内容整合成一段连贯的观点总结：先陈述其核心判断与逻辑，再补充其操作与理由；已验证的预测部分要明确标注"该判断已被后续走势验证"。400字以内，简洁要点式中文。直接输出内容本身，不要"以下是"之类的说明文字，也不要自我介绍。
+请整合成一段**完整保留推理链条**的观点总结，读者要能被说服：
+- 每条内容都要保留三要素: 背景 (什么时期、什么市场环境)、论点 (作者主张什么)、论据 (作者引用的具体数字与逻辑链)；
+- 论据必须保留原文中的关键数字 (如成本价、市净率、股息率、产能数据)，禁止压缩成"估值低""基本面好"这类空洞表述；
+- 已验证的预测明确标注"该判断已被后续走势验证"；
+- 同一主题的多次表态合并陈述，但不要丢失时间演进 (先看好→后转谨慎这类变化要写出来)。
+800字以内，要点式中文。直接输出内容本身，不要"以下是"之类的说明文字，也不要自我介绍。
 
 已验证的预测 (按时间排列):
 {theses_block}
@@ -132,7 +137,7 @@ def _read_kb_views_cache() -> Dict[str, List[Dict]]:
                     rec = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if rec.get("content_hash"):
+                if rec.get("content_hash") and int(rec.get("schema_version") or 1) >= 2:
                     cache[rec["content_hash"]] = rec.get("views") or []
     except (OSError, json.JSONDecodeError) as e:
         utils.logger.error(f"[digest] 读取知识库观点缓存失败: {e}")
@@ -191,10 +196,12 @@ async def _detect_kb_views() -> List[Dict]:
                 "stock_name": p["stock_name"],
                 "direction": p["direction"],
                 "thesis": p["thesis"],
+                "evidence": p.get("evidence", ""),
+                "market_context": p.get("market_context", ""),
             }
             for p in preds
         ]
-        _append_kb_views_cache({"content_hash": h, "views": recs})
+        _append_kb_views_cache({"content_hash": h, "views": recs, "schema_version": 2})
         return recs
 
     results = await asyncio.gather(*(_one(e) for e in entries))
@@ -210,6 +217,8 @@ async def _detect_kb_views() -> List[Dict]:
                     "stock_name": r["stock_name"],
                     "direction": r.get("direction", ""),
                     "thesis": r["thesis"],
+                    "evidence": r.get("evidence", ""),
+                    "market_context": r.get("market_context", ""),
                     "predicted_at": int(e.timestamp or 0),  # 已是毫秒
                     "verified_at": 0,
                     "verdict": "view",
@@ -234,33 +243,34 @@ async def _distill_group(
     user_nickname: str, stock_code: str, stock_name: str, theses: List[Dict], views: List[Dict]
 ) -> str:
     """把同一用户对同一只股票的已验证预测与其他观点提炼成一段观点总结 (带哈希缓存)。"""
-    parts = "\n".join(
-        f"T {t.get('date') or ''} {t.get('direction', '')}: {t.get('thesis', '')}" for t in theses
-    ) + "\n" + "\n".join(
-        f"V {v.get('date') or ''} {v.get('source', '')} {v.get('direction', '')}: {v.get('thesis', '')}"
-        for v in views
-    )
+    def _item_block(items) -> str:
+        lines = []
+        for t in items:
+            head = f"- [{t.get('date', '')}] {t.get('direction', '')}"
+            if t.get("source"):
+                head += f" (来源:{'B站直播' if t.get('source', '').startswith('bili') else '雪球'})"
+            lines.append(head)
+            lines.append(f"  论点: {t.get('thesis', '')}")
+            if t.get("evidence"):
+                lines.append(f"  论据: {t.get('evidence', '')}")
+            if t.get("context"):
+                lines.append(f"  背景: {t.get('context', '')}")
+        return "\n".join(lines) or "(无)"
+
+    parts = _item_block(theses) + "\n" + _item_block(views)
     content_hash = _group_hash(parts)
     cache = _read_distill_cache()
     if content_hash in cache and cache[content_hash].get("summary"):
         return cache[content_hash]["summary"]
 
-    theses_block = "\n".join(
-        f"- [{t.get('date', '')}] {t.get('direction', '')}: {t.get('thesis', '')}" for t in theses
-    ) or "(无)"
-    views_block = "\n".join(
-        f"- [{v.get('date', '')}] (来源:{'B站直播' if v.get('source', '').startswith('bili') else '雪球'}) "
-        f"{v.get('direction', '')}{':' if v.get('direction') else ''} {v.get('thesis', '')}"
-        for v in views
-    ) or "(无)"
     prompt = _DISTILL_PROMPT.format(
         nickname=user_nickname,
         stock_name=stock_name or stock_code,
         stock_code=stock_code,
-        theses_block=theses_block,
-        views_block=views_block,
+        theses_block=_item_block(theses),
+        views_block=_item_block(views),
     )
-    summary = (await call_text(prompt, max_tokens=1024) or "").strip()
+    summary = (await call_text(prompt, max_tokens=1600) or "").strip()
     if summary:
         _append_distill_cache({"content_hash": content_hash, "summary": summary})
     else:
@@ -336,6 +346,8 @@ async def build_digests(
                     "date": _date_str(r.get("predicted_at") or 0),
                     "direction": r.get("direction", ""),
                     "thesis": t,
+                    "evidence": (r.get("evidence") or "").strip(),
+                    "context": (r.get("market_context") or "").strip(),
                 }
             )
         # 观点型记录去重 (按文本); 来源标注区分雪球发言与 B 站直播稿
@@ -351,13 +363,18 @@ async def build_digests(
                     "date": _date_str(r.get("predicted_at") or 0),
                     "direction": r.get("direction", ""),
                     "thesis": t,
+                    "evidence": (r.get("evidence") or "").strip(),
+                    "context": (r.get("market_context") or "").strip(),
                     "source": r.get("view_source") or "xueqiu",
                 }
             )
         if not theses and not views:
             return None
         if len(theses) + len(views) == 1:
-            summary = (theses[0]["thesis"] if theses else views[0]["thesis"])
+            item = theses[0] if theses else views[0]
+            summary = item["thesis"]
+            if item.get("evidence") and item["evidence"] != summary:
+                summary += f"。论据: {item['evidence']}"
         else:
             async with semaphore:
                 summary = await _distill_group(

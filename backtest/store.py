@@ -50,6 +50,7 @@ def build_record(
         stock_name=prediction["stock_name"],
         direction=prediction["direction"],
         thesis=prediction["thesis"],
+        evidence=prediction.get("evidence", "") or "",
         industry_view=prediction["industry_view"],
         market_context=prediction["market_context"],
         verified_at=result["verified_at"] if result else 0,

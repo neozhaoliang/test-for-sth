@@ -49,6 +49,9 @@ _CONCURRENCY = 3
 # 回测结束后是否重建观点摘录文件 (由 main() 的 --skip-digest 控制)
 skip_digest = False
 
+# 记录结构版本: 升级后重跑回测会把旧版记录重新处理并压缩掉旧行
+_SCHEMA_VERSION = 2
+
 
 def _contents_files(creator_id: str) -> List[str]:
     base = os.path.join("data", "xueqiu", "jsonl")
@@ -164,10 +167,13 @@ async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> No
         "no_date": 0,
         "errors": 0,
     }
-    # 已存储的 (status_id, stock_code) 集合: 重跑回测时不重复落盘
+    # 已存储的 (status_id, stock_code) 集合: 重跑回测时不重复落盘。
+    # 只跳过 schema 已达当前版本的记录——旧版本 (没有论据字段) 需要重新
+    # 处理以补全论点/论据/背景, 压缩时再把旧版行清掉。
     done_pairs = {
         (str(r.get("status_id") or ""), str(r.get("stock_code") or ""))
         for r in score.load_records(creator_id)
+        if int(r.get("schema_version") or 1) >= _SCHEMA_VERSION
     }
     semaphore = asyncio.Semaphore(_CONCURRENCY)
     tasks = [_process_one(ep, semaphore, stats, done_pairs) for ep in extracted_posts]
@@ -193,6 +199,9 @@ async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> No
         f"no_date={stats['no_date']}, errors={stats['errors']}, "
         f"hit_rate={hit_rate:.1f}% (of {total_verified} conclusive predictions)"
     )
+
+    # schema 升级重跑时旧版记录已被新行取代, 压缩掉旧行避免重复统计
+    score.compact_records(creator_id)
 
     if not skip_digest:
         # 回测完自动重建观点摘录文件 (提炼按内容哈希缓存, 只有新增/变化的

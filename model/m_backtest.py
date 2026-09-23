@@ -34,14 +34,16 @@ class XueqiuPredictionRecord(BaseModel):
     stock_code: str = Field(default="", description="股票代码 (如 SH600519)")
     stock_name: str = Field(default="", description="股票名称")
     direction: str = Field(default="", description="预测方向: bullish|bearish|topped_out|bottomed_out")
-    thesis: str = Field(default="", description="预测理由/论据摘要")
+    thesis: str = Field(default="", description="论点: 作者的主张/判断摘要")
+    evidence: str = Field(default="", description="论据: 作者引用的具体数据/数字/推理链摘要 (保留原帖关键数字)")
     industry_view: str = Field(default="", description="帖子中提到的行业看法")
-    market_context: str = Field(default="", description="帖子中提到的当时市场情况")
+    market_context: str = Field(default="", description="帖子中提到的当时市场情况 (背景)")
+    schema_version: int = Field(default=2, description="记录结构版本 (升级后重跑可覆盖旧记录)")
 
     verified_at: int = Field(default=0, description="验证时使用的最新价格日期 (Unix 秒)")
     actual_trend: str = Field(default="", description="验证得到的实际走势: bullish|bearish|neutral")
     price_change_pct: float = Field(default=0.0, description="验证窗口内的涨跌幅 (%)")
-    verdict: str = Field(default="", description="验证结论: correct|incorrect|inconclusive")
+    verdict: str = Field(default="", description="验证结论: correct|incorrect|inconclusive|view")
 
 
 class StockCredibilityScore(BaseModel):

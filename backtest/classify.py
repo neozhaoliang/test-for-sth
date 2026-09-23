@@ -40,7 +40,8 @@ _RULES = """判定规则（严格执行）：
 2. 单纯转发、复述新闻without表达自己观点的不算；只是顺带提一嘴股票、没有任何评价的也不算。
 3. 预测方向只能是以下四种之一：bullish(看多/未来上涨)、bearish(看空/未来下跌)、topped_out(认为已见顶，未来将走弱)、bottomed_out(认为已见底，未来将走强)。如果内容含糊无法归类到这四种，则视为不构成有效预测。
 4. 观点型内容单独归类：作者对某只股票表达了明确看法但没有方向性预测时（如宏观判断、行业判断、估值判断、买卖操作及其理由、筹码结构分析），is_reasoned_prediction 为 true、direction 留空字符串、thesis 写该观点的摘要。这类观点同样有价值，不能丢弃。
-5. 只讨论 A 股上市公司；提到的股票必须写 6 位代码 (SH/SZ/BJ 开头)。帖子没有明确讨论任何股票时返回空数组 []。"""
+5. 论据必须忠实保留作者原话里的关键数字与推理链 (如"持仓成本 8 元""市净率 0.7""股息率 4%"这类具体数字)，不能概括成"估值低""基本面好"这类空洞表述。作者没有给出具体论据时 evidence 留空字符串。
+6. 只讨论 A 股上市公司；提到的股票必须写 6 位代码 (SH/SZ/BJ 开头)。帖子没有明确讨论任何股票时返回空数组 []。"""
 
 _OUTPUT_SCHEMA = """以 JSON 数组格式返回，每个元素对应一只股票，格式如下，不要输出任何其他文字：
 [
@@ -49,9 +50,10 @@ _OUTPUT_SCHEMA = """以 JSON 数组格式返回，每个元素对应一只股票
     "code": "股票代码 (如 SH600519)",
     "is_reasoned_prediction": true或false,
     "direction": "bullish|bearish|topped_out|bottomed_out (观点型内容没有方向，留空字符串)",
-    "thesis": "预测理由或观点摘要，用原文提炼，不超过200字",
+    "thesis": "论点: 作者的主张/判断，用原文提炼，不超过200字",
+    "evidence": "论据: 作者引用的具体数据与推理链 (保留原帖关键数字)，不超过300字，没有则为空字符串",
     "industry_view": "帖子中提到的行业看法摘要，没有则为空字符串",
-    "market_context": "帖子中提到的当时市场情况摘要，没有则为空字符串"
+    "market_context": "帖子中提到的当时市场情况摘要 (背景)，没有则为空字符串"
   }}
 ]
 
@@ -90,6 +92,7 @@ class ClassifiedPrediction(TypedDict):
     stock_name: str
     direction: str
     thesis: str
+    evidence: str
     industry_view: str
     market_context: str
 
@@ -148,6 +151,7 @@ async def classify_post(extracted: ExtractedPost) -> List[ClassifiedPrediction]:
             "stock_name": name,
             "direction": direction,
             "thesis": thesis,
+            "evidence": (item.get("evidence", "") or "").strip(),
             "industry_view": item.get("industry_view", "") or "",
             "market_context": item.get("market_context", "") or "",
         })

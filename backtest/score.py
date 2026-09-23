@@ -76,6 +76,54 @@ def load_records(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     return records
 
 
+def compact_records(user_id: str) -> int:
+    """
+    清理被新版本记录取代的旧记录: 同一 (status_id, stock_code) 只保留
+    出现位置最靠后的那条 (文件按名排序, 新文件在后)。schema 升级后重跑回测
+    会留下旧版记录, 必须压缩掉, 否则命中率统计会被重复行翻倍。返回删除行数。
+    """
+    paths = _record_files(user_id)
+    if not paths:
+        return 0
+    rows: List[tuple] = []  # (file_idx, rec)
+    for i, path in enumerate(paths):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append((i, json.loads(line)))
+                except json.JSONDecodeError:
+                    continue
+
+    last_idx: Dict[tuple, int] = {}
+    for i, rec in rows:
+        pair = (str(rec.get("status_id") or ""), str(rec.get("stock_code") or ""))
+        if pair[0] and pair[1]:
+            last_idx[pair] = i
+
+    per_file_kept: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+    dropped = 0
+    for i, rec in rows:
+        pair = (str(rec.get("status_id") or ""), str(rec.get("stock_code") or ""))
+        if pair[0] and pair[1] and last_idx[pair] != i:
+            dropped += 1
+            continue
+        per_file_kept[i].append(rec)
+
+    if dropped:
+        for i, path in enumerate(paths):
+            original_count = sum(1 for j, _ in rows if j == i)
+            if i not in per_file_kept or len(per_file_kept[i]) == original_count:
+                continue  # 该文件没有行被删除, 不重写
+            with open(path, "w", encoding="utf-8") as f:
+                for rec in per_file_kept[i]:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        utils.logger.info(f"[score.compact] {user_id} 清理旧版本记录 {dropped} 行")
+    return dropped
+
+
 def _score_stock_group(stock_code: str, stock_name: str, records: List[Dict[str, Any]]) -> StockCredibilityScore:
     correct = sum(1 for r in records if r["verdict"] == "correct")
     incorrect = sum(1 for r in records if r["verdict"] == "incorrect")
