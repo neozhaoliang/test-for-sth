@@ -343,6 +343,7 @@ _INDEX_HTML = """<!DOCTYPE html>
   </div>
 
   <div class="crawl-status" id="crawlStatus"></div>
+  <button id="copyLogBtn" style="display:none;">复制全部日志</button>
   <pre class="crawl-log" id="crawlLog" style="display:none;"></pre>
 </div>
 
@@ -772,11 +773,33 @@ async function pollCrawlTask(taskId) {
   statusEl.textContent = '状态: ' + data.status;
   logEl.textContent = data.log_tail || '';
   logEl.scrollTop = logEl.scrollHeight;
+  document.getElementById('copyLogBtn').style.display = (data.log_tail || '') ? 'inline-block' : 'none';
 
   if (data.status === 'done' || data.status === 'failed') {
     clearInterval(crawlPollTimer);
   }
 }
+
+document.getElementById('copyLogBtn').addEventListener('click', async () => {
+  const logEl = document.getElementById('crawlLog');
+  const btn = document.getElementById('copyLogBtn');
+  const text = logEl.textContent || '';
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    // clipboard API 失败时回退: 选中日志文本 + execCommand
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(logEl);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand('copy');
+    sel.removeAllRanges();
+  }
+  btn.textContent = '已复制';
+  setTimeout(() => { btn.textContent = '复制全部日志'; }, 1500);
+});
 </script>
 </body>
 </html>
