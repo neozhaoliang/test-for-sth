@@ -729,16 +729,89 @@ class XueqiuCrawler(AbstractCrawler):
 
     async def _crawl_user_replies(self, user_id: str) -> None:
         """
-        抓取用户的回复 (主页 "回复" tab, DOM 滚动路径, 不走接口)。
-
-        接口 (statuses/user/comments.json) 被 WAF 识别为爬虫行为, 而页面导航
-        不受影响; 改为点击 "回复" tab 后滚动加载并解析 DOM。受 SPA 懒加载提前
-        停止限制, 拿到的是"DOM 可达的最近 N 条回复", 日志如实报告。
+        抓取用户回复: 接口优先 (statuses/user/comments.json 游标分页, 登录后
+        WAF 放行, 可翻全部回复), 被拦时降级 DOM。断点文件 comments_done 表示
+        接口路径已完成。
         """
-        utils.logger.info(f"[XueqiuCrawler] 开始抓取用户 {user_id} 的回复 ...")
+        resume_state = self._load_resume_state(user_id)
+        if resume_state.get("comments_done"):
+            utils.logger.info(
+                f"[XueqiuCrawler] 用户 {user_id} 回复此前已完整抓取, 跳过 "
+                f"(如需重新抓取, 删除 data/xueqiu/resume/resume_{user_id}.json)"
+            )
+            return
+        try:
+            await self._crawl_user_replies_api(user_id, resume_state)
+        except CrawlInterruptedError as e:
+            utils.logger.warning(
+                f"[XueqiuCrawler] 回复接口被 WAF 中断 (游标 {e.page}), 降级为 DOM 路径"
+            )
+            await self._crawl_user_replies_dom(user_id)
+
+    async def _crawl_user_replies_api(self, user_id: str, resume_state: Dict) -> None:
+        """回复抓取接口路径: max_id 游标分页直至无更多, 跳过已存储的 comment_id。"""
+        utils.logger.info(f"[XueqiuCrawler] 开始抓取用户 {user_id} 的回复 (接口路径) ...")
+        client = XueqiuClient(playwright_page=self.context_page)
+        seen_ids = self._load_stored_comment_ids(user_id)
+        total_count = 0
+
+        async def _store_comments_callback(items_json: List[Dict]):
+            nonlocal total_count
+            new_comments = self._parse_and_filter_comments(items_json, user_id, seen_ids)
+            if new_comments:
+                await xueqiu_store.batch_update_xueqiu_comments(new_comments)
+                total_count += len(new_comments)
+
+        start_max_id = resume_state.get("last_comment_max_id", -1)
+        await client.get_all_user_comments(
+            user_id=user_id,
+            callback=_store_comments_callback,
+            start_max_id=start_max_id,
+        )
+        resume_state["comments_done"] = True
+        resume_state["last_comment_max_id"] = start_max_id
+        self._save_resume_state(user_id, resume_state)
+        utils.logger.info(f"[XueqiuCrawler] 用户 {user_id} 回复抓取完成 (接口路径), 新增 {total_count} 条")
+
+    def _parse_and_filter_comments(
+        self, items_json: List[Dict], user_id: str, seen_ids: set
+    ) -> List[XueqiuComment]:
+        """解析 statuses/user/comments.json 的 items, 跳过已存储过的 comment_id。"""
+        new_comments: List[XueqiuComment] = []
+        for item in items_json or []:
+            comment_id = str(item.get("id") or "")
+            if not comment_id or comment_id in seen_ids:
+                continue
+            status_id = str(item.get("statusId") or "")
+            status = item.get("status") or {}
+            new_comments.append(
+                XueqiuComment(
+                    comment_id=comment_id,
+                    content=(item.get("text") or item.get("description") or "").strip(),
+                    publish_time=int(item.get("created_at") or 0),
+                    like_count=int(item.get("like_count") or 0),
+                    reply_count=int(item.get("comment_reply_count") or 0),
+                    status_id=status_id,
+                    status_title=(status.get("description") or status.get("text") or "")[:200],
+                    status_url=f"{self.index_url}/{user_id}/{status_id}" if status_id else "",
+                    user_id=user_id,
+                    user_link=f"{self.index_url}/{user_id}",
+                    user_nickname="",
+                    user_avatar="",
+                )
+            )
+            seen_ids.add(comment_id)
+        return new_comments
+
+    async def _crawl_user_replies_dom(self, user_id: str) -> None:
+        """
+        回复抓取 DOM 降级路径: 点击 "回复" tab 后滚动加载并解析。
+        受 SPA 懒加载提前停止限制, 拿到的是"DOM 可达的最近 N 条回复"。
+        """
+        utils.logger.info(f"[XueqiuCrawler] 开始抓取用户 {user_id} 的回复 (DOM 降级) ...")
         page = self.context_page
 
-        # 1. 切到 "回复" tab (a.tab-comments, SPA hash 路由 #/comments)
+        # 切到 "回复" tab (a.tab-comments, SPA hash 路由 #/comments)
         clicked = False
         try:
             loc = page.locator("a.tab-comments").first
@@ -747,7 +820,6 @@ class XueqiuCrawler(AbstractCrawler):
                     await loc.click(timeout=5000)
                     clicked = True
                 except Exception:
-                    # WAF 遮罩 (waf_nc_block) 会拦截 pointer 事件, JS 点击兜底
                     utils.logger.warning("[XueqiuCrawler] 正常点击被拦截 (WAF 遮罩?), 改用 JS 点击")
                     await page.evaluate(
                         "() => { const a = document.querySelector('a.tab-comments'); a && a.click(); }"
@@ -760,7 +832,6 @@ class XueqiuCrawler(AbstractCrawler):
             utils.logger.warning("[XueqiuCrawler] 未找到 '回复' tab, 尝试 hash 路由直接访问")
             await page.evaluate("() => { location.hash = '#/comments'; }")
 
-        # 2. 滚动加载 + 解析回复列表
         await xueqiu_dom.wait_for_items(page, "article.timeline__item", timeout_s=15)
         await xueqiu_dom.scroll_until_stable(
             page, "article.timeline__item", max_rounds=50
