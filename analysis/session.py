@@ -87,12 +87,24 @@ class AnalysisBrowserSession:
         return True
 
     async def _is_xueqiu_logged_in(self) -> bool:
-        """通过雪球登录 cookie (xq_a_token) 判断当前会话是否已登录。"""
+        """
+        真实登录态检查: 首页不再出现"立即登录"入口才算已登录。
+        仅凭 cookie 存在会误判——登录失败/过期会留下残缺 cookie (xq_a_token
+        存在但账号实际未登录, 表现为接口第 1 页可用、第 2 页报"请登录")。
+        """
         try:
             cookies = await self.browser_context.cookies("https://xueqiu.com/")
+            if not any(c.get("name") == "xq_a_token" and c.get("value") for c in cookies):
+                return False
+            logged_in = await self.context_page.evaluate(
+                """() => {
+                    const text = document.body ? document.body.innerText.slice(0, 400) : '';
+                    return !/立即登录/.test(text);
+                }"""
+            )
+            return bool(logged_in)
         except Exception:
             return False
-        return any(c.get("name") == "xq_a_token" and c.get("value") for c in cookies)
 
     async def _wait_for_xueqiu_login(self) -> None:
         """未登录时停在雪球首页等待用户登录，超时后降级为未登录状态继续。"""

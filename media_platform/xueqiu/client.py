@@ -31,82 +31,78 @@ from .exception import CrawlInterruptedError, DataFetchError, WafChallengeError
 
 XUEQIU_HOST = "https://xueqiu.com"
 
-# 浏览器页面内 XHR 请求封装。
-# 注意: 必须用页面内 XMLHttpRequest 而不是 fetch/httpx —
-# 阿里云 WAF 的 JS 挑战脚本会重写 XHR.open, 自动为请求附加
-# md5__1038 校验 token, 直接发 HTTP 请求会被 WAF 拦截。
-# xhr.timeout: WAF 可能静默挂起请求 (不响应), 超时后按失败处理并重试。
-_XHR_JS = """async (url, timeoutMs) => {
-    return await new Promise((resolve) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', url, true);
-        xhr.withCredentials = true;
-        xhr.timeout = timeoutMs;
-        xhr.onreadystatechange = () => {
-            if (xhr.readyState === 4) resolve({status: xhr.status, text: xhr.responseText});
-        };
-        xhr.ontimeout = () => resolve({status: 0, text: ''});
-        xhr.onerror = () => resolve({status: -1, text: ''});
-        xhr.send();
-    });
-}"""
-
-# 单次 XHR 超时 (秒)
-_XHR_TIMEOUT_S = 20
+# 取数走顶层导航而不是页面内 XHR: 阿里云 WAF 对 XHR 请求持续下发挑战
+# (即使注入 stealth、手动登录也一样), 而顶层导航中的 JS 挑战会在真实
+# 浏览器里自动解析并重载出真实内容——实测导航到接口 URL 后页面直接
+# 渲染为 JSON 文本。挑战页特征: renderData/_waf_ token (JS 挑战, 可自动
+# 通过) 或"滑动验证页面" (滑块, 需要人工, 本项目不使用)。
+_NAV_TIMEOUT_S = 30
 
 
 class XueqiuClient:
-    """雪球数据客户端 — 所有请求均经由真实浏览器页面内 XHR 发出 (无 HTTP 模式)。"""
+    """雪球数据客户端 — 所有接口请求均通过真实页面导航发出 (导航自动通过
+    WAF JS 挑战), 不使用 XHR/fetch/裸 HTTP。"""
 
     def __init__(self, playwright_page: Page):
         self.playwright_page = playwright_page
         self._host = XUEQIU_HOST
 
-    async def _xhr_json(self, url: str) -> Dict[str, Any]:
+    async def _nav_json(self, url: str) -> Dict[str, Any]:
         """
-        页面内 XHR 请求 JSON 接口。
+        导航到接口 URL 并读取渲染出的 JSON。
 
         Raises:
-            WafChallengeError: 响应为 WAF 验证页 (HTML) 而非 JSON
+            WafChallengeError: 响应为 WAF 验证页 (JS 挑战未自动通过/滑块) 而非 JSON
             DataFetchError: 请求失败/超时/返回错误
         """
         try:
-            # asyncio.wait_for 兜底: WAF 可能静默挂起请求, evaluate 本身也可能卡住
-            res = await asyncio.wait_for(
-                self.playwright_page.evaluate(_XHR_JS, [url, _XHR_TIMEOUT_S * 1000]),
-                timeout=_XHR_TIMEOUT_S + 15,
+            await asyncio.wait_for(
+                self.playwright_page.goto(url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_S * 1000),
+                timeout=_NAV_TIMEOUT_S + 15,
             )
         except asyncio.TimeoutError as e:
-            raise DataFetchError(f"Xueqiu API evaluate timeout, url={url}") from e
+            raise DataFetchError(f"Xueqiu API navigation timeout, url={url}") from e
         except Exception as e:
-            raise DataFetchError(f"Xueqiu API evaluate failed, url={url}: {e}") from e
-        status, text = res.get("status"), res.get("text") or ""
-        if status != 200:
-            if status in (0, -1):
-                raise DataFetchError(f"Xueqiu API request stalled/failed (status={status}), url={url}")
-            raise DataFetchError(f"Xueqiu API failed, status={status}, url={url}")
-        stripped = text.lstrip()
+            raise DataFetchError(f"Xueqiu API navigation failed, url={url}: {e}") from e
+
+        # JS 挑战在真实浏览器中自动解析后会重载出真实内容 (JSON 文本)
+        body = ""
+        for _ in range(12):
+            try:
+                body = await self.playwright_page.evaluate(
+                    "() => document.body ? document.body.innerText : ''"
+                )
+            except Exception:
+                body = ""
+            if body.strip().startswith(("{", "[")):
+                break
+            if "aliyun_waf" not in body and "滑动验证" not in body:
+                break
+            await asyncio.sleep(1)
+
+        stripped = body.strip()
         if not stripped.startswith(("{", "[")):
-            # 被 WAF 拦截时返回的是验证页 HTML
-            if "aliyun_waf" in text or "aliyunCaptcha" in text or "<textarea" in text[:500]:
+            if "aliyun_waf" in stripped:
                 raise WafChallengeError(f"Xueqiu API blocked by WAF challenge, url={url}")
-            raise DataFetchError(f"Xueqiu API returned non-JSON, url={url}, body={text[:300]}")
+            if "滑动验证" in stripped:
+                raise WafChallengeError(f"Xueqiu API blocked by WAF slider, url={url}")
+            raise DataFetchError(f"Xueqiu API returned non-JSON, url={url}, body={stripped[:300]}")
         try:
             return json.loads(stripped)
         except json.JSONDecodeError as exc:
-            raise DataFetchError(f"Xueqiu API JSON decode failed, url={url}, body={text[:300]}") from exc
+            raise DataFetchError(f"Xueqiu API JSON decode failed, url={url}, body={stripped[:300]}") from exc
 
-    async def _xhr_json_with_retry(self, url: str, retries: int = 3) -> Dict[str, Any]:
+    async def _nav_json_with_retry(self, url: str, retries: int = 3) -> Dict[str, Any]:
         """
-        带自适应重试的 JSON 请求。
+        带自适应重试的导航式 JSON 请求。
 
         正常情况下不做任何等待 (无速率限制);
-        仅当请求被 WAF 拦截/挂起时才等待退避并刷新页面重试。
+        仅当请求被 WAF 拦截时才等待退避后重试导航。
         """
         last_exc: Optional[Exception] = None
         for attempt in range(1, retries + 1):
             try:
-                return await self._xhr_json(url)
+                return await self._nav_json(url)
             except (WafChallengeError, DataFetchError) as e:
                 last_exc = e
                 if attempt >= retries:
@@ -114,17 +110,9 @@ class XueqiuClient:
                 wait = min(5 * (2 ** (attempt - 1)), 20)
                 utils.logger.warning(
                     f"[XueqiuClient] 请求被拦截/失败 (第 {attempt}/{retries} 次): {e}, "
-                    f"{wait}s 后刷新页面重试"
+                    f"{wait}s 后重试"
                 )
                 await asyncio.sleep(wait)
-                # 刷新页面恢复 WAF 信任状态 (wait_for 兜底, 防止 reload 卡死)
-                try:
-                    await asyncio.wait_for(
-                        self.playwright_page.reload(wait_until="domcontentloaded", timeout=30000),
-                        timeout=45,
-                    )
-                except Exception as reload_exc:
-                    utils.logger.warning(f"[XueqiuClient] 页面刷新失败: {reload_exc}")
         raise last_exc  # type: ignore
 
     async def get_user_posts(self, user_id: str, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
@@ -142,7 +130,7 @@ class XueqiuClient:
         params = {"user_id": user_id, "page": page, "page_size": page_size}
         url = f"{self._host}/v4/statuses/user_timeline.json?{urlencode(params)}"
         utils.logger.info(f"[XueqiuClient.get_user_posts] user_id={user_id} page={page}")
-        return await self._xhr_json_with_retry(url)
+        return await self._nav_json_with_retry(url)
 
     async def get_status_detail(self, status_id: str) -> Dict[str, Any]:
         """
@@ -156,7 +144,7 @@ class XueqiuClient:
         """
         url = f"{self._host}/statuses/show.json?id={status_id}"
         utils.logger.info(f"[XueqiuClient.get_status_detail] status_id={status_id}")
-        return await self._xhr_json_with_retry(url)
+        return await self._nav_json_with_retry(url)
 
     async def get_status_comments(self, status_id: str, page: int = 1, count: int = 20) -> Dict[str, Any]:
         """
@@ -173,7 +161,7 @@ class XueqiuClient:
         params = {"id": status_id, "page": page, "count": count}
         url = f"{self._host}/statuses/comments.json?{urlencode(params)}"
         utils.logger.info(f"[XueqiuClient.get_status_comments] status_id={status_id} page={page}")
-        return await self._xhr_json_with_retry(url)
+        return await self._nav_json_with_retry(url)
 
     async def get_user_comments(self, user_id: str, max_id: int = -1, size: int = 20) -> Dict[str, Any]:
         """
@@ -190,7 +178,7 @@ class XueqiuClient:
         params = {"user_id": user_id, "size": size, "max_id": max_id}
         url = f"{self._host}/statuses/user/comments.json?{urlencode(params)}"
         utils.logger.info(f"[XueqiuClient.get_user_comments] user_id={user_id} max_id={max_id}")
-        return await self._xhr_json_with_retry(url)
+        return await self._nav_json_with_retry(url)
 
     async def get_all_user_comments(
         self,
