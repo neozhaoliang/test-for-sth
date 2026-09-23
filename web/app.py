@@ -319,10 +319,13 @@ _INDEX_HTML = """<!DOCTYPE html>
 <div class="crawl-section">
   <h3>数据抓取 / 观点回测</h3>
 
-  <p class="crawl-hint">抓取/更新雪球用户的全部发帖与回复 (公开数据，无需登录)</p>
+  <p class="crawl-hint">抓取/更新雪球用户的发帖与回复 (接口需要登录, 弹出的浏览器里登录后自动继续)</p>
   <div class="crawl-row">
     <input id="xueqiuUserId" placeholder="雪球用户 ID 或主页 URL，如 1263638109" />
     <button id="crawlXueqiuBtn">抓取/更新</button>
+    <label style="font-size:13px;color:#666;display:flex;align-items:center;gap:4px;">
+      <input type="checkbox" id="xueqiuIncremental" checked /> 仅增量更新
+    </label>
   </div>
 
   <p class="crawl-hint">回测某用户的发言: LLM 提取观点与预测 -> 用预测发布后的真实股价验证 -> 验证正确的观点与逻辑写入摘要文件 (耗时长，完成后自动更新摘要)</p>
@@ -727,7 +730,7 @@ async function submitCrawl(platform) {
     const userId = document.getElementById('xueqiuUserId').value.trim();
     if (!userId) return;
     url = '/api/crawl/xueqiu';
-    body = { user_id: userId };
+    body = { user_id: userId, incremental: document.getElementById('xueqiuIncremental').checked };
   } else if (platform === 'backtest') {
     const userId = document.getElementById('backtestUserId').value.trim();
     if (!userId) return;
