@@ -20,15 +20,19 @@
 用户观点摘录 (digest): 对每个用户的历史验证记录做离线聚合与提炼，
 生成可直接用于报告/问答的总结文件。
 
-- build: 加载全部验证记录, 按 (user_id, stock_code) 分组。两类内容都会进摘录:
-  1. verdict=correct 的预测论据 ("被后续股价走势验证正确"的判断);
-  2. verdict=view 的观点记录 (宏观/行业/估值/买卖操作及理由等无方向的观点,
-     不做走势验证, 但同样是该用户有价值的看法)。
-  多条内容时用 LLM 提炼成一段连贯观点摘要 (按内容哈希缓存, 内容不变不重复
-  调用 LLM), 并要求标注哪些判断已被走势验证; 只有一条时直接用原文。
+- build: 加载全部验证记录, 按 (user_id, stock_code) 分组。三类内容都会进摘录:
+  1. verdict=correct 的已验证股价预测 (作者给了明确时间范围且被该范围内
+     真实走势验证正确);
+  2. verdict=no_horizon 的未验证预测 (基本面/商品/宏观/行业预测, 或没有
+     时间范围的股价预测——按验证哲学不验证, 但原样记录, 绝不假装验证过);
+  3. verdict=view 的观点记录 (估值评价、买卖操作及理由等)。
+  每组附带逻辑评价聚合 (新颖性/深度/自洽性均分 + 考虑维度集合)。
+  多条内容时用 LLM 提炼成观点档案 (按内容哈希缓存, 内容不变不重复调用
+  LLM), 要求保留"背景→论点→论据"推理链条并总结该用户的分析框架。
 - 产物: data/xueqiu/digest/user_digests.jsonl, 每行一个 (user, stock) 条目:
   {user_id, user_nickname, stock_code, stock_name, correct, incorrect, total,
-   hit_rate, summary, theses, views, last_verified_at}
+   hit_rate, unverified_count, summary, theses, predictions, views, logic,
+   last_verified_at}
 - load: 进程内缓存, 供报告生成按股票查询、问答按用户查询。
 """
 
@@ -52,19 +56,24 @@ _KB_USER_MAP = {
     "bili_laomujiang": ("3058599833", "买股票的老木匠"),
 }
 
-_DISTILL_PROMPT = """以下是一位雪球用户"{nickname}"关于"{stock_name}"({stock_code})的历史内容，分两类：
-1. 已验证的预测: 发布后被后续股价走势验证为正确
-2. 其他观点: 宏观/行业/估值/买卖操作及理由等，未经走势验证
+_DISTILL_PROMPT = """以下是一位雪球用户"{nickname}"关于"{stock_name}"({stock_code})的历史内容，分三类：
+1. 已验证的股价预测: 作者给出了明确时间范围, 且被该范围内真实走势验证为正确
+2. 未验证的预测: 对基本面/商品/宏观/行业/股价的预测, 但没有可验证的时间范围或验证条件
+3. 其他观点: 估值评价、买卖操作及理由等
 
-请整合成一段**完整保留推理链条**的观点总结，读者要能被说服：
-- 每条内容都要保留三要素: 背景 (什么时期、什么市场环境)、论点 (作者主张什么)、论据 (作者引用的具体数字与逻辑链)；
-- 论据必须保留原文中的关键数字 (如成本价、市净率、股息率、产能数据)，禁止压缩成"估值低""基本面好"这类空洞表述；
-- 已验证的预测明确标注"该判断已被后续走势验证"；
-- 同一主题的多次表态合并陈述，但不要丢失时间演进 (先看好→后转谨慎这类变化要写出来)。
-800字以内，要点式中文。直接输出内容本身，不要"以下是"之类的说明文字，也不要自我介绍。
+请整合成一份**完整保留推理链条**的观点档案，读者要能被说服：
+- 每条内容保留三要素: 背景 (什么时期、什么市场环境)、论点 (作者主张什么)、论据 (原文关键数字与逻辑链)；论据禁止压缩成"估值低""基本面好"这类空洞表述；
+- 已验证的预测明确标注时间范围与验证结果；
+- 未验证的预测标注预测类型 (基本面/商品/宏观市场/行业/股价) 与时间范围 (若有)，不要假装验证过；
+- 同一主题的多次表态合并陈述，但不要丢失时间演进 (先看好→后转谨慎这类变化要写出来)；
+- 最后单独一段总结该用户的**分析框架**: 他习惯考虑哪些维度、推理逻辑的特点 (角度新颖性、深度、自洽性)，以及哪些判断被验证过、哪些没有。
+1000字以内，要点式中文。直接输出内容本身，不要"以下是"之类的说明文字，也不要自我介绍。
 
-已验证的预测 (按时间排列):
+已验证的股价预测 (按时间排列):
 {theses_block}
+
+未验证的预测 (按时间排列):
+{predictions_block}
 
 其他观点 (按时间排列):
 {views_block}"""
@@ -137,7 +146,7 @@ def _read_kb_views_cache() -> Dict[str, List[Dict]]:
                     rec = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if rec.get("content_hash") and int(rec.get("schema_version") or 1) >= 2:
+                if rec.get("content_hash") and int(rec.get("schema_version") or 1) >= 3:
                     cache[rec["content_hash"]] = rec.get("views") or []
     except (OSError, json.JSONDecodeError) as e:
         utils.logger.error(f"[digest] 读取知识库观点缓存失败: {e}")
@@ -194,14 +203,20 @@ async def _detect_kb_views() -> List[Dict]:
             {
                 "stock_code": p["stock_code"],
                 "stock_name": p["stock_name"],
+                "prediction_type": p.get("prediction_type", ""),
                 "direction": p["direction"],
+                "time_horizon": p.get("time_horizon", ""),
                 "thesis": p["thesis"],
                 "evidence": p.get("evidence", ""),
                 "market_context": p.get("market_context", ""),
+                "logic_dimensions": ",".join(p.get("logic_dimensions") or []),
+                "logic_novelty": p.get("logic_novelty") or 0,
+                "logic_depth": p.get("logic_depth") or 0,
+                "logic_consistency": p.get("logic_consistency") or 0,
             }
             for p in preds
         ]
-        _append_kb_views_cache({"content_hash": h, "views": recs, "schema_version": 2})
+        _append_kb_views_cache({"content_hash": h, "views": recs, "schema_version": 3})
         return recs
 
     results = await asyncio.gather(*(_one(e) for e in entries))
@@ -209,19 +224,27 @@ async def _detect_kb_views() -> List[Dict]:
     for e, recs in zip(entries, results):
         uid, nick = _KB_USER_MAP[e.source]
         for r in recs:
+            ptype = r.get("prediction_type") or ""
             pseudo.append(
                 {
                     "user_id": uid,
                     "user_nickname": nick,
                     "stock_code": r["stock_code"],
                     "stock_name": r["stock_name"],
+                    "prediction_type": ptype,
                     "direction": r.get("direction", ""),
+                    "time_horizon": r.get("time_horizon", ""),
                     "thesis": r["thesis"],
                     "evidence": r.get("evidence", ""),
                     "market_context": r.get("market_context", ""),
+                    "logic_dimensions": r.get("logic_dimensions", ""),
+                    "logic_novelty": r.get("logic_novelty") or 0,
+                    "logic_depth": r.get("logic_depth") or 0,
+                    "logic_consistency": r.get("logic_consistency") or 0,
                     "predicted_at": int(e.timestamp or 0),  # 已是毫秒
                     "verified_at": 0,
-                    "verdict": "view",
+                    # 知识库观点: 无预测的记 view; 有预测但没有验证条件的记 no_horizon
+                    "verdict": "view" if not ptype else "no_horizon",
                     "view_source": f"bili:{e.source}",
                 }
             )
@@ -240,13 +263,29 @@ def _date_str(unix_sec_or_ms: int) -> str:
 
 
 async def _distill_group(
-    user_nickname: str, stock_code: str, stock_name: str, theses: List[Dict], views: List[Dict]
+    user_nickname: str,
+    stock_code: str,
+    stock_name: str,
+    theses: List[Dict],
+    predictions: List[Dict],
+    views: List[Dict],
 ) -> str:
-    """把同一用户对同一只股票的已验证预测与其他观点提炼成一段观点总结 (带哈希缓存)。"""
+    """把同一用户对同一只股票的三类内容提炼成观点档案 (带哈希缓存)。"""
+    _TYPE_LABELS = {
+        "price": "股价", "fundamental": "基本面", "commodity": "商品",
+        "macro_market": "宏观市场", "industry": "行业",
+    }
+
     def _item_block(items) -> str:
         lines = []
         for t in items:
-            head = f"- [{t.get('date', '')}] {t.get('direction', '')}"
+            head = f"- [{t.get('date', '')}]"
+            if t.get("type"):
+                head += f" [{_TYPE_LABELS.get(t.get('type'), t.get('type'))}]"
+            if t.get("direction"):
+                head += f" {t.get('direction')}"
+            if t.get("horizon"):
+                head += f" (时间范围: {t.get('horizon')})"
             if t.get("source"):
                 head += f" (来源:{'B站直播' if t.get('source', '').startswith('bili') else '雪球'})"
             lines.append(head)
@@ -255,9 +294,16 @@ async def _distill_group(
                 lines.append(f"  论据: {t.get('evidence', '')}")
             if t.get("context"):
                 lines.append(f"  背景: {t.get('context', '')}")
+            if t.get("dimensions"):
+                lines.append(f"  考虑维度: {'、'.join(t.get('dimensions'))}")
+            if t.get("novelty") or t.get("depth") or t.get("consistency"):
+                lines.append(
+                    f"  逻辑评分: 新颖性 {t.get('novelty')}/5, 深度 {t.get('depth')}/5, "
+                    f"自洽性 {t.get('consistency')}/5"
+                )
         return "\n".join(lines) or "(无)"
 
-    parts = _item_block(theses) + "\n" + _item_block(views)
+    parts = _item_block(theses) + "\n" + _item_block(predictions) + "\n" + _item_block(views)
     content_hash = _group_hash(parts)
     cache = _read_distill_cache()
     if content_hash in cache and cache[content_hash].get("summary"):
@@ -268,9 +314,10 @@ async def _distill_group(
         stock_name=stock_name or stock_code,
         stock_code=stock_code,
         theses_block=_item_block(theses),
+        predictions_block=_item_block(predictions),
         views_block=_item_block(views),
     )
-    summary = (await call_text(prompt, max_tokens=1600) or "").strip()
+    summary = (await call_text(prompt, max_tokens=2400) or "").strip()
     if summary:
         _append_distill_cache({"content_hash": content_hash, "summary": summary})
     else:
@@ -278,7 +325,9 @@ async def _distill_group(
             f"[digest] {user_nickname}({stock_code}) 观点提炼失败, 回退为原始论据拼接"
         )
         summary = "；".join(
-            [t.get("thesis", "") for t in theses] + [v.get("thesis", "") for v in views]
+            [t.get("thesis", "") for t in theses]
+            + [p.get("thesis", "") for p in predictions]
+            + [v.get("thesis", "") for v in views]
         )
     return summary
 
@@ -303,24 +352,50 @@ async def build_digests(
         key = (str(r.get("user_id") or ""), str(r.get("stock_code") or ""))
         if not key[0] or not key[1]:
             continue
-        g = groups.setdefault(key, {"correct": [], "incorrect": 0, "views": [], "meta": r})
+        g = groups.setdefault(
+            key, {"correct": [], "incorrect": 0, "views": [], "unverified": [], "meta": r}
+        )
         if r.get("verdict") == "correct":
             g["correct"].append(r)
         elif r.get("verdict") == "incorrect":
             g["incorrect"] += 1
         elif r.get("verdict") == "view":
             g["views"].append(r)
+        elif r.get("verdict") == "no_horizon":
+            g["unverified"].append(r)
 
     entries: List[Dict] = []
     semaphore = asyncio.Semaphore(_DISTILL_CONCURRENCY)
+
+    def _logic_of(r: Dict) -> Dict:
+        return {
+            "dimensions": [d for d in (r.get("logic_dimensions") or "").split(",") if d],
+            "novelty": int(r.get("logic_novelty") or 0),
+            "depth": int(r.get("logic_depth") or 0),
+            "consistency": int(r.get("logic_consistency") or 0),
+        }
+
+    def _item_of(r: Dict, source: str) -> Dict:
+        return {
+            "date": _date_str(r.get("predicted_at") or 0),
+            "type": r.get("prediction_type") or "",
+            "direction": r.get("direction", ""),
+            "horizon": r.get("time_horizon") or "",
+            "thesis": (r.get("thesis") or "").strip(),
+            "evidence": (r.get("evidence") or "").strip(),
+            "context": (r.get("market_context") or "").strip(),
+            "source": source,
+            **_logic_of(r),
+        }
 
     async def _one(key) -> Optional[Dict]:
         user_id, stock_code = key
         g = groups[key]
         correct_recs = g["correct"]
         view_recs = g["views"]
-        if not correct_recs and not view_recs:
-            return None  # 既无命中预测也无观点记录的用户-股票组不进摘录文件
+        unverified_recs = g["unverified"]
+        if not correct_recs and not view_recs and not unverified_recs:
+            return None  # 三类内容都没有的用户-股票组不进摘录文件
         meta = g["meta"]
         # 已验证论据去重: 同日同方向的近似重复 (同一观点多次发帖) 只留最长一条
         seen_thesis = set()
@@ -341,16 +416,16 @@ async def build_digests(
             if best_by_daydir.get(key2) != t:
                 continue
             best_by_daydir[key2] = ""  # 该组只取一次
-            theses.append(
-                {
-                    "date": _date_str(r.get("predicted_at") or 0),
-                    "direction": r.get("direction", ""),
-                    "thesis": t,
-                    "evidence": (r.get("evidence") or "").strip(),
-                    "context": (r.get("market_context") or "").strip(),
-                }
-            )
-        # 观点型记录去重 (按文本); 来源标注区分雪球发言与 B 站直播稿
+            theses.append(_item_of(r, "xueqiu"))
+        # 未验证预测与观点型记录按文本去重; 来源标注区分雪球发言与 B 站直播稿
+        seen_pred = set()
+        predictions: List[Dict] = []
+        for r in sorted(unverified_recs, key=lambda x: x.get("predicted_at") or 0):
+            t = (r.get("thesis") or "").strip()
+            if not t or t in seen_pred:
+                continue
+            seen_pred.add(t)
+            predictions.append(_item_of(r, r.get("view_source") or "xueqiu"))
         seen_view = set()
         views: List[Dict] = []
         for r in sorted(view_recs, key=lambda x: x.get("predicted_at") or 0):
@@ -358,30 +433,32 @@ async def build_digests(
             if not t or t in seen_view:
                 continue
             seen_view.add(t)
-            views.append(
-                {
-                    "date": _date_str(r.get("predicted_at") or 0),
-                    "direction": r.get("direction", ""),
-                    "thesis": t,
-                    "evidence": (r.get("evidence") or "").strip(),
-                    "context": (r.get("market_context") or "").strip(),
-                    "source": r.get("view_source") or "xueqiu",
-                }
-            )
-        if not theses and not views:
+            views.append(_item_of(r, r.get("view_source") or "xueqiu"))
+        if not theses and not predictions and not views:
             return None
-        if len(theses) + len(views) == 1:
-            item = theses[0] if theses else views[0]
-            summary = item["thesis"]
+        if len(theses) + len(predictions) + len(views) == 1:
+            item = theses[0] if theses else (predictions[0] if predictions else views[0])
+            summary = item["thesis"].rstrip("。！？…")
             if item.get("evidence") and item["evidence"] != summary:
                 summary += f"。论据: {item['evidence']}"
         else:
             async with semaphore:
                 summary = await _distill_group(
                     meta.get("user_nickname", ""), stock_code, meta.get("stock_name", ""),
-                    theses, views,
+                    theses, predictions, views,
                 )
         total = len(correct_recs) + g["incorrect"]
+        all_items = theses + predictions + views
+        logic = {
+            "novelty": round(sum(i.get("novelty") or 0 for i in all_items) / len(all_items), 1),
+            "depth": round(sum(i.get("depth") or 0 for i in all_items) / len(all_items), 1),
+            "consistency": round(
+                sum(i.get("consistency") or 0 for i in all_items) / len(all_items), 1
+            ),
+            "dimensions": sorted(
+                {d for i in all_items for d in (i.get("dimensions") or [])}
+            ),
+        }
         return {
             "user_id": user_id,
             "user_nickname": meta.get("user_nickname", ""),
@@ -391,9 +468,12 @@ async def build_digests(
             "incorrect": g["incorrect"],
             "total": total,
             "hit_rate": round(len(correct_recs) / total, 4) if total else 0.0,
+            "unverified_count": len(predictions),
             "summary": summary,
             "theses": theses,
+            "predictions": predictions,
             "views": views,
+            "logic": logic,
             "last_verified_at": max((r.get("verified_at") or 0 for r in correct_recs), default=0),
         }
 

@@ -50,7 +50,7 @@ _CONCURRENCY = 3
 skip_digest = False
 
 # 记录结构版本: 升级后重跑回测会把旧版记录重新处理并压缩掉旧行
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 
 def _contents_files(creator_id: str) -> List[str]:
@@ -106,38 +106,51 @@ async def _process_one(
             if pair in done_pairs:
                 continue  # 该帖子对该股票的记录已存在, 重跑不重复存储
 
-            if not prediction["direction"]:
-                # 观点型 (清仓理由/宏观判断等, 无方向): 不验证走势, 直接落盘
+            if not int(prediction["post"].get("created_at") or 0):
+                stats["no_date"] += 1
+                continue
+
+            ptype = prediction.get("prediction_type") or ""
+            has_horizon = bool((prediction.get("time_horizon") or "").strip())
+
+            if ptype == "price" and has_horizon:
+                # 股价预测且有明确时间范围: 做价格验证
+                try:
+                    result = await verify_prediction(prediction)
+                except Exception as e:
+                    utils.logger.error(
+                        f"[backtest_run] verify_prediction failed for status_id="
+                        f"{prediction['post'].get('status_id')} stock_code={prediction['stock_code']}: {e}"
+                    )
+                    stats["errors"] += 1
+                    continue
+                if result is None:
+                    # 时间范围解析失败: 记录但不验证
+                    record = build_record(prediction)
+                    await store_record(record)
+                    done_pairs.add(pair)
+                    stats["unverified"] += 1
+                    continue
+                if result["verdict"] == "inconclusive":
+                    stats["inconclusive"] += 1
+                    continue
+                record = build_record(prediction, result)
+                await store_record(record)
+                done_pairs.add(pair)
+                if result["verdict"] == "correct":
+                    stats["verified_correct"] += 1
+                else:
+                    stats["verified_incorrect"] += 1
+            else:
+                # 非股价预测 (基本面/商品/宏观/行业) 或股价预测无时间范围:
+                # 按新验证哲学记录但不验证 (verdict=view / no_horizon)
                 record = build_record(prediction)
                 await store_record(record)
                 done_pairs.add(pair)
-                stats["views"] += 1
-                continue
-
-            try:
-                result = await verify_prediction(prediction)
-            except Exception as e:
-                utils.logger.error(
-                    f"[backtest_run] verify_prediction failed for status_id="
-                    f"{prediction['post'].get('status_id')} stock_code={prediction['stock_code']}: {e}"
-                )
-                stats["errors"] += 1
-                continue
-
-            if result is None:
-                stats["no_date"] += 1
-                continue
-            if result["verdict"] == "inconclusive":
-                stats["inconclusive"] += 1
-                continue
-
-            record = build_record(prediction, result)
-            await store_record(record)
-            done_pairs.add(pair)
-            if result["verdict"] == "correct":
-                stats["verified_correct"] += 1
-            else:
-                stats["verified_incorrect"] += 1
+                if not ptype and not prediction.get("direction"):
+                    stats["views"] += 1
+                else:
+                    stats["unverified"] += 1
 
 
 async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> None:
@@ -162,6 +175,7 @@ async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> No
         "predictions_found": 0,
         "verified_correct": 0,
         "verified_incorrect": 0,
+        "unverified": 0,
         "views": 0,
         "inconclusive": 0,
         "no_date": 0,
@@ -195,9 +209,10 @@ async def run(creator_id: str, since: Optional[str], limit: Optional[int]) -> No
     utils.logger.info(
         f"[backtest_run] Done. predictions_found={stats['predictions_found']}, "
         f"correct={stats['verified_correct']}, incorrect={stats['verified_incorrect']}, "
-        f"views={stats['views']}, inconclusive={stats['inconclusive']}, "
-        f"no_date={stats['no_date']}, errors={stats['errors']}, "
-        f"hit_rate={hit_rate:.1f}% (of {total_verified} conclusive predictions)"
+        f"unverified={stats['unverified']}, views={stats['views']}, "
+        f"inconclusive={stats['inconclusive']}, no_date={stats['no_date']}, "
+        f"errors={stats['errors']}, "
+        f"hit_rate={hit_rate:.1f}% (of {total_verified} verified price predictions with horizon)"
     )
 
     # schema 升级重跑时旧版记录已被新行取代, 压缩掉旧行避免重复统计

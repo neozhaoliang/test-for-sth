@@ -150,6 +150,8 @@ def score_user(records: List[Dict[str, Any]]) -> Optional[UserCredibilityScore]:
     correct = sum(1 for r in records if r["verdict"] == "correct")
     incorrect = sum(1 for r in records if r["verdict"] == "incorrect")
     inconclusive = sum(1 for r in records if r["verdict"] == "inconclusive")
+    unverified = sum(1 for r in records if r["verdict"] == "no_horizon")
+    views = sum(1 for r in records if r["verdict"] == "view")
     total = correct + incorrect
     hit_rate = (correct / total) if total else 0.0
 
@@ -171,10 +173,12 @@ def score_user(records: List[Dict[str, Any]]) -> Optional[UserCredibilityScore]:
     return UserCredibilityScore(
         user_id=user_id,
         user_nickname=user_nickname,
-        total_predictions=len(records),
+        total_predictions=total,
         correct=correct,
         incorrect=incorrect,
         inconclusive=inconclusive,
+        unverified=unverified,
+        views=views,
         hit_rate=round(hit_rate, 4),
         wilson_score=round(wilson_lower_bound(correct, total), 4),
         by_stock=by_stock,
