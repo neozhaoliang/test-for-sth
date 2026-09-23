@@ -37,7 +37,7 @@ from playwright.async_api import (
 
 import config
 from base.base_crawler import AbstractCrawler
-from model.m_xueqiu import XueqiuComment, XueqiuCreator
+from model.m_xueqiu import XueqiuComment, XueqiuCreator, XueqiuStatus
 from proxy.proxy_ip_pool import IpInfoModel, create_ip_pool
 from store import xueqiu as xueqiu_store
 from tools import utils
@@ -46,8 +46,11 @@ from tools.waf_slider import is_waf_challenge, solve_waf_slider
 from var import crawler_type_var
 
 from . import discover, dom as xueqiu_dom
+from .client import XueqiuClient
+from .exception import CrawlInterruptedError, DataFetchError, WafChallengeError
 from .help import (
     extract_creator_from_user_obj,
+    extract_status_list,
     normalize_user_id,
 )
 from .login import XueqiuLogin
@@ -107,6 +110,10 @@ class XueqiuCrawler(AbstractCrawler):
             # 访问首页: WAF JS 挑战会自动在真实浏览器中解析通过
             await self._goto_with_waf(self.index_url, what="雪球首页")
 
+            # 等待手动登录: 登录后的会话 WAF 信任度更高, 接口可以翻页;
+            # 未登录时接口大概率被拦 (此时会降级为 DOM 首屏抓取)。
+            await self._wait_for_xueqiu_login()
+
             # 登录 (可选): 爬取公开数据无需登录; 配置了 cookie 时写入浏览器
             if config.COOKIES:
                 login_obj = XueqiuLogin(
@@ -144,6 +151,42 @@ class XueqiuCrawler(AbstractCrawler):
         except Exception as e:
             utils.logger.error(f"[XueqiuCrawler] 重新打开页面失败: {e}")
             return False
+
+    async def _is_xueqiu_logged_in(self) -> bool:
+        """通过雪球登录 cookie (xq_a_token) 判断当前会话是否已登录。"""
+        try:
+            cookies = await self.browser_context.cookies("https://xueqiu.com/")
+        except Exception:
+            return False
+        return any(c.get("name") == "xq_a_token" and c.get("value") for c in cookies)
+
+    async def _wait_for_xueqiu_login(self) -> None:
+        """
+        未登录时停在雪球首页等待用户在浏览器里手动登录 (不做滑块验证)。
+        登录后的会话 WAF 信任度更高, 接口可以正常分页; 超时后继续, 接口
+        被拦时发帖抓取会降级为 DOM 首屏路径。
+        """
+        if not getattr(config, "CDP_WAIT_FOR_LOGIN", True):
+            return
+        timeout = int(getattr(config, "CDP_LOGIN_WAIT_SECONDS", 120) or 0)
+        if timeout <= 0:
+            return
+        if await self._is_xueqiu_logged_in():
+            utils.logger.info("[XueqiuCrawler] 雪球已登录")
+            return
+        utils.logger.info(
+            f"[XueqiuCrawler] 雪球未登录，等待手动登录 (最多 {timeout}s): "
+            "请在弹出的浏览器里完成雪球登录，登录成功后自动继续"
+        )
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
+            await asyncio.sleep(3)
+            if await self._is_xueqiu_logged_in():
+                utils.logger.info("[XueqiuCrawler] 雪球登录成功，继续抓取")
+                return
+        utils.logger.warning(
+            "[XueqiuCrawler] 等待登录超时，以未登录状态继续 (接口可能被 WAF 拦截, 发帖将降级 DOM)"
+        )
 
     async def _goto_with_waf(self, url: str, what: str = "", timeout_s: int = 600) -> bool:
         """
@@ -248,17 +291,23 @@ class XueqiuCrawler(AbstractCrawler):
             # 增量更新: 打开主页滚动加载时间线, 只存已知 ID 之外的新帖 (帖子按时间倒序)
             await self.get_creator_posts_update(user_id)
         else:
-            # 全量抓取 (DOM 滚动路径, 不走接口: 接口被 WAF 识别为爬虫行为)
-            # DOM 拿到的是 SPA 愿意渲染的部分 (懒加载可能提前停止), 不保证与接口
-            # 全量一致; 断点文件 posts_done 表示"DOM 可达部分已抓完"。
+            # 全量抓取: 接口优先 (登录后 WAF 放行, 可翻全部历史);
+            # 接口被拦时降级 DOM 首屏 (约 20 条), 不标记完成, 下次运行重试接口。
             resume_state = self._load_resume_state(user_id)
             if resume_state.get("posts_done"):
                 utils.logger.info(
-                    f"[XueqiuCrawler] 用户 {user_id} 发帖此前已抓取 (DOM 可达部分), 跳过 "
+                    f"[XueqiuCrawler] 用户 {user_id} 发帖此前已完整抓取, 跳过 "
                     f"(如需重新抓取, 删除 data/xueqiu/resume/resume_{user_id}.json)"
                 )
             else:
-                await self._crawl_user_posts_dom(user_id, resume_state)
+                try:
+                    await self._crawl_user_posts_api(user_id, resume_state)
+                except CrawlInterruptedError as e:
+                    utils.logger.warning(
+                        f"[XueqiuCrawler] 接口全量抓取被 WAF 中断 (位置 {e.page}), "
+                        f"降级为 DOM 首屏路径, 下次运行将重试接口"
+                    )
+                    await self._crawl_user_posts_dom(user_id, resume_state, mark_done=False)
 
         # 3. 用户信息: 优先用已存帖子内嵌的 user 对象, 失败再用主页 DOM
         creator: Optional[XueqiuCreator] = None
@@ -389,14 +438,49 @@ class XueqiuCrawler(AbstractCrawler):
 
     async def get_creator_posts_update(self, user_id: str) -> None:
         """
-        增量更新用户发帖 (DOM 滚动路径, 不走接口): 打开主页滚动加载时间线
-        (帖子按时间倒序, 新帖在顶部), 只存储已知 ID 集合之外的新帖。
-
-        可反复执行 (幂等): 本次更新的结果会同步进已知 ID 索引,
-        下次运行只抓更新增内容。
+        增量更新用户发帖: 接口优先 (登录后 WAF 放行, 可翻全部新帖),
+        接口被拦时降级 DOM 首屏 (约 20 条)。可反复执行 (幂等)。
         """
         known = self._load_known_status_ids(user_id)
         utils.logger.info(f"[XueqiuCrawler] 增量更新模式, 已有 {len(known)} 条历史帖子索引")
+        try:
+            new_total = await self._update_posts_api(user_id, known)
+            utils.logger.info(f"[XueqiuCrawler] 增量更新 (接口路径) 新增 {new_total} 条")
+            return
+        except (WafChallengeError, DataFetchError) as e:
+            utils.logger.warning(
+                f"[XueqiuCrawler] 接口被 WAF 拦截 ({type(e).__name__}: {str(e)[:80]}), "
+                f"降级为 DOM 首屏路径 (仅约 20 条)"
+            )
+            await self._update_posts_dom(user_id, known)
+
+    async def _update_posts_api(self, user_id: str, known: set) -> int:
+        """接口分页增量更新: 逐页拉取直到遇到已知帖子 (帖子按时间倒序)。"""
+        client = XueqiuClient(playwright_page=self.context_page)
+        new_total = 0
+        page = 1
+        while page <= 50:
+            res = await client.get_user_posts(user_id, page=page)
+            statuses = res.get("statuses") or []
+            if not statuses:
+                utils.logger.info(f"[XueqiuCrawler] 接口第 {page} 页无数据, 增量更新结束")
+                break
+            fresh = [s for s in statuses if str(s.get("id") or "") not in known]
+            if fresh:
+                models = extract_status_list(fresh)
+                await xueqiu_store.batch_update_xueqiu_statuses(models)
+                for s in fresh:
+                    known.add(str(s.get("id") or ""))
+                self._save_known_status_ids(user_id, known)
+                new_total += len(fresh)
+            if len(fresh) < len(statuses):
+                utils.logger.info(f"[XueqiuCrawler] 接口第 {page} 页出现已存在帖子, 增量更新完成")
+                break
+            page += 1
+        return new_total
+
+    async def _update_posts_dom(self, user_id: str, known: set) -> None:
+        """DOM 首屏增量更新 (接口被拦时的降级路径)。"""
         no_ts_ids = self._load_status_ids_without_timestamp(user_id)
         ok = await self._goto_with_waf(
             f"{self.index_url}/u/{user_id}",
@@ -428,10 +512,36 @@ class XueqiuCrawler(AbstractCrawler):
                 f"[XueqiuCrawler] 增量更新无新增 (DOM 渲染 {len(items)} 条)"
             )
 
-    async def _crawl_user_posts_dom(self, user_id: str, resume_state: Dict) -> None:
+    async def _crawl_user_posts_api(self, user_id: str, resume_state: Dict) -> None:
+        """接口全量抓发帖 (可翻全部历史), 完成时置 posts_done。
+        WAF 拦截时 get_all_user_posts 抛 CrawlInterruptedError, 由调用方降级 DOM。"""
+        client = XueqiuClient(playwright_page=self.context_page)
+        await client.get_all_user_posts(
+            user_id=user_id,
+            callback=self._store_statuses_callback,
+        )
+        resume_state["posts_done"] = True
+        self._save_resume_state(user_id, resume_state)
+        utils.logger.info(f"[XueqiuCrawler] 用户 {user_id} 接口全量发帖抓取完成")
+
+    async def _store_statuses_callback(self, statuses_json: List[Dict]):
+        """timeline 每页回调: 解析并存储帖子"""
+        statuses: List[XueqiuStatus] = extract_status_list(statuses_json)
+        await xueqiu_store.batch_update_xueqiu_statuses(statuses)
+        # 记录最后一个 user 对象用于用户信息提取
+        for item in reversed(statuses_json or []):
+            if item and item.get("user"):
+                self._last_status_user_obj = item["user"]
+                break
+        utils.logger.info(f"[XueqiuCrawler] 已存储 {len(statuses)} 条发帖")
+
+    async def _crawl_user_posts_dom(
+        self, user_id: str, resume_state: Dict, mark_done: bool = True
+    ) -> None:
         """
-        全量抓发帖 (DOM 滚动路径): 打开主页, 滚动直到 SPA 停止懒加载, 提取并存储。
+        全量抓发帖 (DOM 滚动降级路径): 打开主页, 滚动直到 SPA 停止懒加载, 提取并存储。
         SPA 懒加载可能提前停止, 因此拿到的是"DOM 可达的最近 N 条", 日志如实报告。
+        mark_done=False 时 (接口被拦的降级场景) 不置 posts_done, 下次运行重试接口。
         """
         ok = await self._goto_with_waf(
             f"{self.index_url}/u/{user_id}", what=f"用户 {user_id} 主页"
@@ -456,11 +566,13 @@ class XueqiuCrawler(AbstractCrawler):
             for s in fresh:
                 known.add(s.status_id)
             self._save_known_status_ids(user_id, known)
-        resume_state["posts_done"] = True
-        self._save_resume_state(user_id, resume_state)
+        if mark_done:
+            resume_state["posts_done"] = True
+            self._save_resume_state(user_id, resume_state)
         utils.logger.info(
             f"[XueqiuCrawler] 用户 {user_id} DOM 发帖抓取完成: 渲染 {len(items)} 条, "
-            f"新增 {len(fresh)} 条 (受 SPA 懒加载限制, 不保证与接口全量一致)"
+            f"新增 {len(fresh)} 条 (受 SPA 懒加载限制, 不保证与接口全量一致; "
+            f"posts_done={'已标记' if mark_done else '未标记, 下次重试接口'})"
         )
 
     def _load_known_status_ids(self, user_id: str) -> set:
