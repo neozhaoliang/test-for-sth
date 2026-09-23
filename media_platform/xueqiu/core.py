@@ -105,6 +105,12 @@ class XueqiuCrawler(AbstractCrawler):
                     headless=False,
                 )
 
+            # 反检测: 隐藏 webdriver/CDP 痕迹——阿里云滑块会拒绝"自动化软件控制的
+            # 浏览器", 不注入 stealth 时连人工拖动都会被判失败
+            if os.path.exists("libs/stealth.min.js"):
+                await self.browser_context.add_init_script(path="libs/stealth.min.js")
+                utils.logger.info("[XueqiuCrawler] 已注入 stealth 反检测脚本")
+
             self.context_page = await self.browser_context.new_page()
 
             # 访问首页: WAF JS 挑战会自动在真实浏览器中解析通过

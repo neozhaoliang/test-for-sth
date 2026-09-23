@@ -25,6 +25,7 @@ CDP 连接与 WAF 等待逻辑与 media_platform/xueqiu/core.py 保持一致，�
 """
 
 import asyncio
+import os
 import time
 from typing import Dict, List, Optional
 
@@ -69,6 +70,10 @@ class AnalysisBrowserSession:
             utils.logger.error(f"[AnalysisBrowserSession] CDP 连接失败: {e}")
             await self._playwright_cm.__aexit__(None, None, None)
             return False
+
+        # 反检测: 隐藏 webdriver/CDP 痕迹 (阿里云滑块会拒绝自动化控制的浏览器)
+        if os.path.exists("libs/stealth.min.js"):
+            await self.browser_context.add_init_script(path="libs/stealth.min.js")
 
         self.context_page = await self.browser_context.new_page()
         ok = await self._goto_with_waf(_INDEX_URL, what="雪球首页")
