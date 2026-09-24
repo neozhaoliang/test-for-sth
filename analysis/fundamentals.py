@@ -45,6 +45,8 @@ _URLS = {
     "finance": _BASE + "finance.html",
     "profile": _BASE,
     "event": _BASE + "event.html",
+    "capital": _BASE + "capital.html",
+    "company": _BASE + "company.html",
 }
 _PAGES = tuple(_URLS)
 _HEADERS = {
@@ -62,6 +64,8 @@ _MIN_PAGE_BYTES = {
     "finance": 50_000,
     "profile": 20_000,
     "event": 30_000,
+    "capital": 30_000,
+    "company": 30_000,
 }
 # 某些维度对特定行业本来就不披露 (如银行没有客户/供应商集中度)，这类缺失属正常，
 # 仍记入 missing 供报告如实说明"暂缺"，但日志降级为 info 而非 WARNING。
@@ -526,11 +530,14 @@ def _parse_finance_metrics(html: str) -> tuple:
     return newest_period, newest_metrics
 
 
-def _parse_major_events(html: str) -> List[Dict]:
+def _parse_major_events(
+    html: str, max_events: int = 10, kind_filter: Optional["re.Pattern[str]"] = None
+) -> List[Dict]:
     """
     公司大事页 (event.html): 每行 <tr> 内是 日期 (<td class="hltip">) + 事项标签
     (<strong>发布公告：</strong> 等) + 公告标题链接。返回 [{date, kind, title}]，
     按页面顺序 (最新在前)。银行页面天然覆盖定增/注资/股东会等再融资事件。
+    kind_filter 给定时只保留标签+标题匹配的事件 (如治理警示类)。
     """
     events: List[Dict] = []
     for tr in re.findall(r"<tr\b.*?</tr>", html, re.S | re.I):
@@ -559,8 +566,10 @@ def _parse_major_events(html: str) -> List[Dict]:
             if not plain or "换肤" in plain or "更多" in plain or "详情" in plain:
                 continue
             title = plain[:100]
+        if kind_filter and not kind_filter.search(f"{kind} {title}"):
+            continue
         events.append({"date": date_m.group(1), "kind": kind, "title": title})
-        if len(events) >= 10:
+        if len(events) >= max_events:
             break
     return events
 
@@ -590,6 +599,64 @@ def _parse_bank_industry_metrics(html: Optional[str]) -> Optional[Dict]:
         "industry_provision_coverage_pct": float(m.group(4)),
         "industry_capital_adequacy_pct": float(m.group(5)),
     }
+
+
+def _parse_refinancing_records(html: str) -> List[Dict]:
+    """
+    资本运作页 "募集资金来源" 表: 增发/配股/可转债等再融资记录
+    (公告日期/发行类别/发行起始日期/实际募集资金净额)。判断公司是否
+    "滥发定增" 的客观依据。
+    """
+    records: List[Dict] = []
+    for tr in re.findall(r"<tr\b.*?</tr>", html, re.S | re.I):
+        cells = [_strip_tags(c) for c in re.findall(r"<t[dh]\b.*?</t[dh]>", tr, re.S | re.I)]
+        if len(cells) < 4:
+            continue
+        date0, kind = cells[0], cells[1]
+        if not re.match(r"\d{4}-\d{2}-\d{2}", date0) or not kind:
+            continue
+        if not re.search(r"增发|配股|可转债|优先股", kind):
+            continue
+        records.append(
+            {
+                "announce_date": date0,
+                "kind": kind,
+                "start_date": cells[2] if len(cells) > 2 else "",
+                "amount": cells[3] if len(cells) > 3 else "",
+            }
+        )
+        if len(records) >= 10:
+            break
+    return records
+
+
+def _parse_executive_profile(html: str) -> Optional[Dict]:
+    """
+    公司资料页高管介绍: 董事长姓名/加入年份/薪酬/持股数。只取可核验的
+    客观事实, 供管理层评价引用; "人品/美誉度"本身无法从数据自动评价,
+    只能由这些记录侧面印证 (任职年限、薪酬持股与股东利益绑定等)。
+    """
+    text = _strip_tags(html)
+    text = re.sub(r"\s+", " ", text)
+    profile: Dict = {}
+    m = re.search(r"董事长[：:]\s*([一-龥·A-Za-z]{2,8})", text)
+    if m:
+        profile["chairman"] = m.group(1)
+    m = re.search(r"薪酬[：:]\s*([\d.]+)\s*万", text)
+    if m:
+        profile["chairman_salary_wan"] = float(m.group(1))
+    m = re.search(r"持股数[：:]\s*([\d.]+)\s*(亿|万)股?", text)
+    if m:
+        profile["chairman_shares"] = f"{m.group(1)}{m.group(2)}股"
+    years = re.findall(r"(\d{4})年(?:加入|进入)", text)
+    if years:
+        profile["joined_year"] = int(years[0])
+    if not profile:
+        return None
+    return profile
+
+
+_GOVERNANCE_ALERT_RE = re.compile(r"减持|立案|处罚|问询|警示|监管|违规|调查|诉讼|仲裁")
 
 
 def _ratio(numerator: Optional[float], denominator: Optional[float]) -> Optional[float]:
@@ -636,7 +703,9 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
     finance = pages.get("finance")
     profile = pages.get("profile")
     event = pages.get("event")
-    if not any((operate, holder, finance, profile, event)):
+    capital = pages.get("capital")
+    company = pages.get("company")
+    if not any((operate, holder, finance, profile, event, capital, company)):
         return None
 
     facts: Dict = {}
@@ -703,6 +772,23 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
     major_events = _parse_major_events(event) if event else []
     if not major_events:
         missing.append("公司大事(公告)")
+
+    # 再融资记录 (资本运作页 "募集资金来源" 表): 判断是否滥发定增/配股
+    refinancing_history = _parse_refinancing_records(capital) if capital else []
+    if not refinancing_history:
+        missing.append("再融资记录(增发/配股)")
+
+    # 高管画像 (公司资料页高管介绍): 董事长姓名/加入年份/薪酬/持股
+    executive_profile = _parse_executive_profile(company) if company else None
+    if not executive_profile:
+        missing.append("高管介绍")
+
+    # 治理警示事件 (减持/处罚/问询等, 来自公司大事全页扫描)
+    governance_alerts = (
+        _parse_major_events(event, max_events=8, kind_filter=_GOVERNANCE_ALERT_RE)
+        if event
+        else []
+    )
 
     if holder:
         series = _parse_holdernum(holder)
@@ -796,6 +882,9 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
         "top_customers": (provider or {}).get("customers", []),
         "top_suppliers": (provider or {}).get("suppliers", []),
         "major_events": major_events,
+        "refinancing_history": refinancing_history,
+        "executive_profile": executive_profile,
+        "governance_alerts": governance_alerts,
         "missing": missing,
         "sources": sources,
     }

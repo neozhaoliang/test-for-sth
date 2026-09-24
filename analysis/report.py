@@ -71,6 +71,7 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 - **输出中禁止出现"六查""第N步""检查项"等内部流程用语**——结论直接陈述事实与判断，不得提及分析流程本身。
 - **正文立场一律用中文表述 (看多/看空/中性)**——bullish/bearish/neutral 这类英文枚举值只允许出现在 JSON 字段值里，禁止写进论述文字。
 - **禁止声称"外部核实""公开披露""据我所知"等无法溯源的说法**——你只能引用下方数据块给出的数字；数据块里没有的数字一律写"该维度数据暂缺"，不得用"外部数据"的说法为编造或凭记忆补全的数字背书。
+- **管理层评价只能基于"治理与股东回报记录"块的客观事实** (任职年限、薪酬与持股、分红回购、再融资记录、减持/处罚/问询记录)；该块没有的记录一律写"该维度数据暂缺"，禁止凭印象评价管理层人品或美誉度。
 - 结构性事实块里的比率全部已在 Python 里算好，直接引用，**不要自己重新做算术**。该块里"公司自述的风险"和"公司自己的经营表述"属于利益相关方视角，不能当作客观事实，只能作为"公司自己承认了什么""公司自己想让你相信什么"来引用；公司自述与其披露数字矛盾时以数字为准。严禁把"与头部客户深度绑定""技术领先""行业龙头"这类说法当成护城河证据——除非同一数据块里有可核验的数字支撑。
 
 股票: {stock_code} ({stock_name})
@@ -102,6 +103,9 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 
 股东回报与筹码 (股东户数变化可作散户情绪/筹码集中度的代理指标——户数增加通常意味着原有大户/机构筹码被拆分卖给了更分散的散户，即"机构派发给散户"；户数减少则是筹码集中。分红回购历史反映管理层对股东的回报态度):
 {shareholder_block}
+
+治理与股东回报记录 (管理层人品/美誉度只能基于这里的客观事实推断: 任职年限、薪酬与持股、分红回购、再融资记录、减持/处罚/问询记录):
+{governance_block}
 
 盈利能力与成本弹性 (近几个报告期毛利率/主营业务利润率、净利率、ROE、资产负债率的具体走势):
 {profitability_block}
@@ -200,6 +204,9 @@ class AnalysisInputs:
     fundamentals: Optional[Dict] = None
     valuation: Optional[Dict] = None
     major_events: List[Dict] = field(default_factory=list)
+    refinancing_history: List[Dict] = field(default_factory=list)
+    executive_profile: Optional[Dict] = None
+    governance_alerts: List[Dict] = field(default_factory=list)
     xueqiu_stock: Optional[Dict] = None
     market_context: Optional[Dict] = None
     freight_signal: Optional[Dict] = None
@@ -321,6 +328,48 @@ def _build_major_events_block(major_events: Optional[List[Dict]]) -> str:
     lines = ["近期重大事项 (同花顺 F10 公司大事，倒序排列):"]
     for e in major_events[:8]:
         lines.append(f"  {e.get('date', '')} [{e.get('kind', '')}] {e.get('title', '')}")
+    return "\n".join(lines)
+
+
+def _build_governance_block(
+    refinancing_history: Optional[List[Dict]],
+    executive_profile: Optional[Dict],
+    governance_alerts: Optional[List[Dict]],
+) -> str:
+    lines = ["治理与股东回报记录 (管理层评价只能引用这里的客观事实):"]
+    if refinancing_history:
+        lines.append(
+            "  再融资历史 (判断是否滥发定增/配股): "
+            + "；".join(
+                f"{r.get('announce_date', '')} {r.get('kind', '')} 募资 {r.get('amount', '')}"
+                for r in refinancing_history[:5]
+            )
+        )
+    else:
+        lines.append(f"  再融资历史 (增发/配股): {_MISSING_TAIL}")
+    if governance_alerts:
+        lines.append(
+            "  治理警示事件 (减持/处罚/问询等): "
+            + "；".join(
+                f"{e.get('date', '')} [{e.get('kind', '')}] {e.get('title', '')[:60]}"
+                for e in governance_alerts[:5]
+            )
+        )
+    else:
+        lines.append("  治理警示事件: 近期公司大事中无减持/处罚/问询类记录")
+    if executive_profile:
+        parts = []
+        if executive_profile.get("chairman"):
+            parts.append(f"董事长 {executive_profile['chairman']}")
+        if executive_profile.get("joined_year"):
+            parts.append(f"{executive_profile['joined_year']}年加入公司")
+        if executive_profile.get("chairman_salary_wan") is not None:
+            parts.append(f"薪酬 {executive_profile['chairman_salary_wan']}万/年")
+        if executive_profile.get("chairman_shares"):
+            parts.append(f"持股 {executive_profile['chairman_shares']}")
+        lines.append("  高管画像 (客观事实): " + ", ".join(parts))
+    else:
+        lines.append(f"  高管画像 (董事长/任职/薪酬/持股): {_MISSING_TAIL}")
     return "\n".join(lines)
 
 
@@ -732,6 +781,9 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         valuation_block=_build_valuation_block(inputs.valuation, quote),
         fundamentals_block=_build_fundamentals_block(inputs.fundamentals),
         major_events_block=_build_major_events_block(inputs.major_events),
+        governance_block=_build_governance_block(
+            inputs.refinancing_history, inputs.executive_profile, inputs.governance_alerts
+        ),
         fx_block=_build_fx_block(inputs.rmb_signal, (inputs.fundamentals or {}).get("facts")),
         xueqiu_block=_build_xueqiu_block(inputs.xueqiu_stock),
         candidates_block=_build_candidates_block(candidates),
@@ -874,10 +926,16 @@ async def generate_report(stock_code: str) -> AnalysisReport:
     # 直接 pop 会把缓存里的估值维度永久删掉。
     valuation = None
     major_events: List[Dict] = []
+    refinancing_history: List[Dict] = []
+    executive_profile: Optional[Dict] = None
+    governance_alerts: List[Dict] = []
     if fundamentals:
         fundamentals = dict(fundamentals)
         valuation = fundamentals.pop("valuation", None)
         major_events = fundamentals.pop("major_events", None) or []
+        refinancing_history = fundamentals.pop("refinancing_history", None) or []
+        executive_profile = fundamentals.pop("executive_profile", None)
+        governance_alerts = fundamentals.pop("governance_alerts", None) or []
 
     inputs = AnalysisInputs(
         stock_code=stock_code,
@@ -894,6 +952,9 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         fundamentals=fundamentals,
         valuation=valuation,
         major_events=major_events,
+        refinancing_history=refinancing_history,
+        executive_profile=executive_profile,
+        governance_alerts=governance_alerts,
         market_context=market_context,
         freight_signal=freight_signal,
     )
