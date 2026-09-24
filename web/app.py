@@ -729,6 +729,29 @@ function renderEvidenceSection(report) {
   html += renderFundamentalsBlock(report.fundamentals);
   html += renderXueqiuBlock(report.xueqiu_stock);
 
+  const db = report.debate;
+  if (db) {
+    let dbHtml = '<div class="evidence-block"><b>雪球讨论区多空辩论:</b> 收集 ' + db.posts_collected +
+      ' 条表态 (分类 ' + db.classified + ' 条)<ul>' +
+      '<li>多方 ' + db.bull.count + ' 条: 有时间范围的股价预测验证 ' + db.bull.verified +
+      ' 条 (正确 ' + db.bull.correct + ', 错误 ' + db.bull.incorrect + '), 未验证 ' + db.bull.unverified + ' 条</li>' +
+      '<li>空方 ' + db.bear.count + ' 条: 有时间范围的股价预测验证 ' + db.bear.verified +
+      ' 条 (正确 ' + db.bear.correct + ', 错误 ' + db.bear.incorrect + '), 未验证 ' + db.bear.unverified + ' 条</li></ul>';
+    if (db.bull_core) {
+      dbHtml += '<div><b>多方核心论点:</b><br>' +
+        db.bull_core.split('\n').filter(s => s.trim()).map(escapeHtml).join('<br>') + '</div>';
+    }
+    if (db.bear_core) {
+      dbHtml += '<div><b>空方核心论点:</b><br>' +
+        db.bear_core.split('\n').filter(s => s.trim()).map(escapeHtml).join('<br>') + '</div>';
+    }
+    if (db.verdict) {
+      dbHtml += '<div><b>哪方更合理: ' + escapeHtml(db.verdict) + '</b> — ' + escapeHtml(db.reason) + '</div>';
+    }
+    dbHtml += '</div>';
+    html += dbHtml;
+  }
+
   const se = report.sentiment;
   if (se) {
     html += '<div class="evidence-block"><b>雪球讨论区情绪 (反向指标):</b> 收集 ' + se.posts_collected +

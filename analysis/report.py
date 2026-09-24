@@ -36,8 +36,8 @@ from analysis.knowledge_base import ensure_loaded as ensure_knowledge_base_loade
 from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.realtime_price import get_realtime_quote, get_stock_name
+from analysis.debate import derive_sentiment, get_debate
 from analysis.session import AnalysisBrowserSession
-from analysis.sentiment import get_stock_sentiment
 from analysis.shareholder import get_buyback_history, get_dividend_history, get_shareholder_count_trend
 from analysis.xueqiu_stock import get_xueqiu_stock_data
 from backtest.llm_client import call_json_ex
@@ -75,6 +75,7 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 - **管理层评价只能基于"治理与股东回报记录"块的客观事实** (任职年限、薪酬与持股、分红回购、再融资记录、减持/处罚/问询记录)；该块没有的记录一律写"该维度数据暂缺"，禁止凭印象评价管理层人品或美誉度。
 - **知识库优先于模板推断**: 解释股东户数与股价联动、市场风格切换、板块涨跌、资金动向等市场行为时，必须先查知识库背景资料中该时期的真实记录 (如公募调仓、风格切换)；知识库有相关记录时必须引用并以其为准，禁止用"户数增加→筹码派发"这类模板推断覆盖真实背景。知识库没有相关记录时才能用数据块内的模板推断，且要注明这是推断而非事实。
 - **讨论区情绪是反向指标**: 引用雪球讨论区情绪块的数字。一致看多 (看多占方向性表态≥80% 且方向性样本≥10) 必须作为拥挤风险写进结论 (风险提示或关键论据)，一致看空同理提示悲观极点。禁止把多数人的看多当作看多论据。该块暂缺时写"该维度数据暂缺"。
+- **多空辩论必须正面处理**: 结论必须回应"多空辩论"块——引用双方核心论点与历史验证统计 (哪一方有时间范围的股价预测被验证过、命中率如何)，说明你的结论接受了哪方论据、驳斥或保留哪方论据；辩论块标注哪方更合理时，与其相反的方向判断必须额外给出反驳理由。该块暂缺时写"该维度数据暂缺"。
 - 结构性事实块里的比率全部已在 Python 里算好，直接引用，**不要自己重新做算术**。该块里"公司自述的风险"和"公司自己的经营表述"属于利益相关方视角，不能当作客观事实，只能作为"公司自己承认了什么""公司自己想让你相信什么"来引用；公司自述与其披露数字矛盾时以数字为准。严禁把"与头部客户深度绑定""技术领先""行业龙头"这类说法当成护城河证据——除非同一数据块里有可核验的数字支撑。
 
 股票: {stock_code} ({stock_name})
@@ -91,6 +92,9 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 {fx_block}
 
 {xueqiu_block}
+
+雪球讨论区多空辩论 (双方核心论点 + 各自历史验证统计 + 哪方更合理):
+{debate_block}
 
 雪球讨论区情绪 (反向指标参考, 看多/看空比例):
 {sentiment_block}
@@ -214,6 +218,7 @@ class AnalysisInputs:
     executive_profile: Optional[Dict] = None
     governance_alerts: List[Dict] = field(default_factory=list)
     xueqiu_stock: Optional[Dict] = None
+    debate: Optional[Dict] = None
     sentiment: Optional[Dict] = None
     market_context: Optional[Dict] = None
     freight_signal: Optional[Dict] = None
@@ -395,6 +400,30 @@ def _build_sentiment_block(sentiment: Optional[Dict]) -> str:
     ]
     if sentiment.get("note"):
         lines.append(f"  {sentiment['note']}")
+    return "\n".join(lines)
+
+
+def _build_debate_block(debate: Optional[Dict]) -> str:
+    if not debate:
+        return f"雪球多空辩论: {_MISSING_TAIL}"
+    bull = debate.get("bull") or {}
+    bear = debate.get("bear") or {}
+    lines = [
+        f"雪球讨论区多空辩论 (收集 {debate.get('posts_collected')} 条表态, "
+        f"分类 {debate.get('classified')} 条):",
+        f"  多方: {bull.get('count')} 条, 其中有时间范围的股价预测验证 "
+        f"{bull.get('verified')} 条 (正确 {bull.get('correct')}, 错误 {bull.get('incorrect')}), "
+        f"未验证 {bull.get('unverified')} 条",
+        f"  空方: {bear.get('count')} 条, 其中有时间范围的股价预测验证 "
+        f"{bear.get('verified')} 条 (正确 {bear.get('correct')}, 错误 {bear.get('incorrect')}), "
+        f"未验证 {bear.get('unverified')} 条",
+        "  多方核心论点:",
+        *[f"    · {ln}" for ln in (debate.get('bull_core') or '').split('\n') if ln.strip()][:6],
+        "  空方核心论点:",
+        *[f"    · {ln}" for ln in (debate.get('bear_core') or '').split('\n') if ln.strip()][:6],
+    ]
+    if debate.get("verdict"):
+        lines.append(f"  哪方更合理: {debate.get('verdict')} — {debate.get('reason', '')}")
     return "\n".join(lines)
 
 
@@ -811,6 +840,7 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         ),
         fx_block=_build_fx_block(inputs.rmb_signal, (inputs.fundamentals or {}).get("facts")),
         xueqiu_block=_build_xueqiu_block(inputs.xueqiu_stock),
+        debate_block=_build_debate_block(inputs.debate),
         sentiment_block=_build_sentiment_block(inputs.sentiment),
         candidates_block=_build_candidates_block(candidates),
         knowledge_block=_build_knowledge_block(inputs.knowledge_excerpts),
@@ -996,8 +1026,10 @@ async def generate_report(stock_code: str) -> AnalysisReport:
     try:
         if started:
             inputs.xueqiu_stock = await get_xueqiu_stock_data(session, stock_code)
-            # 讨论区情绪 (反向指标): 收集多条不同用户的表态并聚合多空比例
-            inputs.sentiment = await get_stock_sentiment(session, stock_code)
+            # 多空辩论: 收集讨论区表态 -> 分类/验证 -> 双方论点与历史命中率对比;
+            # 情绪维度由同一批分类结果派生, 不重复调用 LLM
+            inputs.debate = await get_debate(session, stock_code)
+            inputs.sentiment = derive_sentiment(inputs.debate)
         for user in candidate_scores:
             stock_score = next(s for s in user.by_stock if s.stock_code == stock_code)
             latest_posts = await _latest_relevant_posts(session, user.user_id) if started else []
@@ -1036,6 +1068,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         fundamentals=inputs.fundamentals,
         valuation=inputs.valuation,
         xueqiu_stock=inputs.xueqiu_stock,
+        debate=inputs.debate,
         sentiment=inputs.sentiment,
         market_context=market_context,
         freight_signal=freight_signal,
