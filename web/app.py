@@ -394,25 +394,25 @@ _INDEX_HTML = """<!DOCTYPE html>
 <div class="crawl-section">
   <h3>数据抓取 / 观点回测</h3>
 
-  <p class="crawl-hint">选择已抓取用户 (下拉自动补全, 显示昵称/ID/帖子数) 或直接输入新用户 ID/主页 URL; 抓取需要登录, 弹出的浏览器里登录后自动继续</p>
+  <p class="crawl-hint">选择已抓取用户 (下拉自动补全, 显示昵称/ID/帖子数) 或直接输入新用户 ID/主页 URL; 抓取需要登录, 弹出的浏览器里登录后自动继续。"更新并回测" = 抓取 + LLM 回测 + 摘要重建, 一条龙</p>
   <div class="crawl-row">
     <input id="xueqiuUserId" placeholder="雪球用户 ID 或主页 URL" list="crawledUserList" style="flex:1;max-width:320px;" />
     <datalist id="crawledUserList"></datalist>
-    <button id="crawlXueqiuBtn">抓取/更新</button>
-    <button id="backtestBtn">回测并更新摘要</button>
-    <button id="digestUserBtn">重建该用户摘要</button>
+    <button id="crawlXueqiuBtn">更新并回测</button>
     <label style="font-size:13px;color:#666;display:flex;align-items:center;gap:4px;">
       <input type="checkbox" id="xueqiuIncremental" checked /> 仅增量更新
     </label>
-    <label style="font-size:13px;color:#666;display:flex;align-items:center;gap:4px;">
-      <input type="checkbox" id="xueqiuAutoBacktest" checked /> 抓取后自动回测
-    </label>
   </div>
 
-  <p class="crawl-hint">全量重建观点摘要文件 (从全部历史验证记录提炼，用于回测后或数据修复)</p>
-  <div class="crawl-row">
-    <button id="digestBtn">重建全部摘要</button>
-  </div>
+  <details class="crawl-hint">
+    <summary style="cursor:pointer;color:#666;">高级操作 (一般不常用)</summary>
+    <div class="crawl-row">
+      <button id="backtestBtn">仅重新回测</button>
+      <button id="digestUserBtn">仅重建该用户摘要</button>
+      <button id="crawlOnlyBtn">仅抓取</button>
+      <button id="digestBtn">重建全部摘要</button>
+    </div>
+  </details>
 
   <p class="crawl-hint">抓取/更新 B 站专栏作者的全部图文 (需要登录，首次抓取请留意弹出的浏览器窗口扫码)</p>
   <div class="crawl-row">
@@ -793,6 +793,7 @@ document.getElementById('crawlBiliBtn').addEventListener('click', () => submitCr
 document.getElementById('backtestBtn').addEventListener('click', () => submitCrawl('backtest'));
 document.getElementById('digestBtn').addEventListener('click', () => submitCrawl('digest'));
 document.getElementById('digestUserBtn').addEventListener('click', () => submitCrawl('digest_user'));
+document.getElementById('crawlOnlyBtn').addEventListener('click', () => submitCrawl('crawl_only'));
 renderWatchlist();
 loadCrawledUsers();
 
@@ -840,7 +841,16 @@ async function submitCrawl(platform) {
     body = {
       user_id: userId,
       incremental: document.getElementById('xueqiuIncremental').checked,
-      auto_backtest: document.getElementById('xueqiuAutoBacktest').checked,
+      auto_backtest: true,
+    };
+  } else if (platform === 'crawl_only') {
+    const userId = resolveUserId(document.getElementById('xueqiuUserId').value.trim());
+    if (!userId) return;
+    url = '/api/crawl/xueqiu';
+    body = {
+      user_id: userId,
+      incremental: document.getElementById('xueqiuIncremental').checked,
+      auto_backtest: false,
     };
   } else if (platform === 'backtest') {
     const userId = resolveUserId(document.getElementById('xueqiuUserId').value.trim());
