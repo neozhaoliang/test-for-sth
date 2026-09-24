@@ -82,7 +82,7 @@ def _load_posts(paths: List[str], since: Optional[str]) -> List[Dict[str, Any]]:
                 else:
                     by_id[f"idx-{len(by_id)}"] = post
     posts = list(by_id.values())
-    posts.sort(key=lambda p: int(p.get("created_at") or 0))
+    posts.sort(key=lambda p: int(p.get("created_at") or 0), reverse=True)  # 最新在前
     return posts
 
 
