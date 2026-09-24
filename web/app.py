@@ -729,6 +729,18 @@ function renderEvidenceSection(report) {
   html += renderFundamentalsBlock(report.fundamentals);
   html += renderXueqiuBlock(report.xueqiu_stock);
 
+  const se = report.sentiment;
+  if (se) {
+    html += '<div class="evidence-block"><b>雪球讨论区情绪 (反向指标):</b> 收集 ' + se.posts_collected +
+      ' 条表态 (' + se.users + ' 位用户)，看多 ' + se.bullish + ' (有论据 ' + se.reasoned_bullish + ')，' +
+      '看空 ' + se.bearish + ' (有论据 ' + se.reasoned_bearish + ')，中性 ' + se.neutral +
+      '，无关 ' + se.irrelevant + '；看多占方向性表态 ' + (se.bullish_ratio * 100).toFixed(1) + '%';
+    if (se.note) {
+      html += '<br><b style="color:#d33;">' + escapeHtml(se.note) + '</b>';
+    }
+    html += '</div>';
+  }
+
   html += '</div>';
   return html;
 }

@@ -76,6 +76,7 @@ class AnalysisReport(BaseModel):
     fundamentals: Optional[dict] = Field(default=None, description="同花顺 F10 结构性事实 (集中度/海外占比/现金流质量/研发强度/股东人数/公司自述风险)")
     valuation: Optional[dict] = Field(default=None, description="估值快照 (PE/PB/每股指标/股权质押)")
     xueqiu_stock: Optional[dict] = Field(default=None, description="雪球个股维度 (机构持仓/讨论热度，仅聚合数字)")
+    sentiment: Optional[dict] = Field(default=None, description="雪球讨论区情绪聚合 (看多/看空比例, 一致看多预警, 反向指标)")
     summary: StructuredSummary = Field(default_factory=StructuredSummary, description="LLM 生成的结构化分析摘要")
     prompt_version: str = Field(default="", description="生成本报告所用的 prompt 版本号")
     generated_at: int = Field(default=0, description="报告生成时间 (Unix 秒)")

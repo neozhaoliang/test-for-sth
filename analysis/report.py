@@ -37,6 +37,7 @@ from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.realtime_price import get_realtime_quote, get_stock_name
 from analysis.session import AnalysisBrowserSession
+from analysis.sentiment import get_stock_sentiment
 from analysis.shareholder import get_buyback_history, get_dividend_history, get_shareholder_count_trend
 from analysis.xueqiu_stock import get_xueqiu_stock_data
 from backtest.llm_client import call_json_ex
@@ -73,6 +74,7 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 - **禁止声称"外部核实""公开披露""据我所知"等无法溯源的说法**——你只能引用下方数据块给出的数字；数据块里没有的数字一律写"该维度数据暂缺"，不得用"外部数据"的说法为编造或凭记忆补全的数字背书。
 - **管理层评价只能基于"治理与股东回报记录"块的客观事实** (任职年限、薪酬与持股、分红回购、再融资记录、减持/处罚/问询记录)；该块没有的记录一律写"该维度数据暂缺"，禁止凭印象评价管理层人品或美誉度。
 - **知识库优先于模板推断**: 解释股东户数与股价联动、市场风格切换、板块涨跌、资金动向等市场行为时，必须先查知识库背景资料中该时期的真实记录 (如公募调仓、风格切换)；知识库有相关记录时必须引用并以其为准，禁止用"户数增加→筹码派发"这类模板推断覆盖真实背景。知识库没有相关记录时才能用数据块内的模板推断，且要注明这是推断而非事实。
+- **讨论区情绪是反向指标**: 引用雪球讨论区情绪块的数字。一致看多 (看多占方向性表态≥80% 且方向性样本≥10) 必须作为拥挤风险写进结论 (风险提示或关键论据)，一致看空同理提示悲观极点。禁止把多数人的看多当作看多论据。该块暂缺时写"该维度数据暂缺"。
 - 结构性事实块里的比率全部已在 Python 里算好，直接引用，**不要自己重新做算术**。该块里"公司自述的风险"和"公司自己的经营表述"属于利益相关方视角，不能当作客观事实，只能作为"公司自己承认了什么""公司自己想让你相信什么"来引用；公司自述与其披露数字矛盾时以数字为准。严禁把"与头部客户深度绑定""技术领先""行业龙头"这类说法当成护城河证据——除非同一数据块里有可核验的数字支撑。
 
 股票: {stock_code} ({stock_name})
@@ -89,6 +91,9 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 {fx_block}
 
 {xueqiu_block}
+
+雪球讨论区情绪 (反向指标参考, 看多/看空比例):
+{sentiment_block}
 
 历史验证过的高可信度用户观点 (每人历史命中率越高、验证样本越多，参考价值越大):
 {candidates_block}
@@ -209,6 +214,7 @@ class AnalysisInputs:
     executive_profile: Optional[Dict] = None
     governance_alerts: List[Dict] = field(default_factory=list)
     xueqiu_stock: Optional[Dict] = None
+    sentiment: Optional[Dict] = None
     market_context: Optional[Dict] = None
     freight_signal: Optional[Dict] = None
 
@@ -373,6 +379,22 @@ def _build_governance_block(
         lines.append("  高管画像 (客观事实): " + ", ".join(parts))
     else:
         lines.append(f"  高管画像 (董事长/任职/薪酬/持股): {_MISSING_TAIL}")
+    return "\n".join(lines)
+
+
+def _build_sentiment_block(sentiment: Optional[Dict]) -> str:
+    if not sentiment:
+        return f"雪球讨论区情绪: {_MISSING_TAIL}"
+    lines = [
+        f"雪球讨论区情绪 (收集 {sentiment.get('posts_collected')} 条表态, "
+        f"来自 {sentiment.get('users')} 位用户):",
+        f"  看多 {sentiment.get('bullish')} 条 (其中有论据 {sentiment.get('reasoned_bullish')} 条), "
+        f"看空 {sentiment.get('bearish')} 条 (其中有论据 {sentiment.get('reasoned_bearish')} 条), "
+        f"中性 {sentiment.get('neutral')} 条, 无关 {sentiment.get('irrelevant')} 条; "
+        f"看多占方向性表态 {sentiment.get('bullish_ratio')}",
+    ]
+    if sentiment.get("note"):
+        lines.append(f"  {sentiment['note']}")
     return "\n".join(lines)
 
 
@@ -789,6 +811,7 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         ),
         fx_block=_build_fx_block(inputs.rmb_signal, (inputs.fundamentals or {}).get("facts")),
         xueqiu_block=_build_xueqiu_block(inputs.xueqiu_stock),
+        sentiment_block=_build_sentiment_block(inputs.sentiment),
         candidates_block=_build_candidates_block(candidates),
         knowledge_block=_build_knowledge_block(inputs.knowledge_excerpts),
         industry_block=_build_industry_block(inputs.industry_comparison),
@@ -973,6 +996,8 @@ async def generate_report(stock_code: str) -> AnalysisReport:
     try:
         if started:
             inputs.xueqiu_stock = await get_xueqiu_stock_data(session, stock_code)
+            # 讨论区情绪 (反向指标): 收集多条不同用户的表态并聚合多空比例
+            inputs.sentiment = await get_stock_sentiment(session, stock_code)
         for user in candidate_scores:
             stock_score = next(s for s in user.by_stock if s.stock_code == stock_code)
             latest_posts = await _latest_relevant_posts(session, user.user_id) if started else []
@@ -1011,6 +1036,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         fundamentals=inputs.fundamentals,
         valuation=inputs.valuation,
         xueqiu_stock=inputs.xueqiu_stock,
+        sentiment=inputs.sentiment,
         market_context=market_context,
         freight_signal=freight_signal,
         summary=summary,
