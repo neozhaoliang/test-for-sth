@@ -69,6 +69,8 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 - **你的判断只能建立在下述数据块给出的数字上。** 数据块里没有的维度一律写"该维度数据暂缺"，禁止凭记忆、市场印象或"这类公司通常……"来补全。读起来通顺但对不上数据块的结论，比写"暂缺"更糟糕。
 - **重大事项必须正面处理**: 近期重大事项块若包含定增/注资/再融资/股东会等事件，必须点名事件与日期，并评估其对每股净资产、每股收益、ROE 的摊薄或增厚影响及当前进度；认购方是财政部/国资等政策性主体时必须点明其含义。该块标注暂缺时写明"重大事项数据暂缺"，不得凭记忆补全。
 - **输出中禁止出现"六查""第N步""检查项"等内部流程用语**——结论直接陈述事实与判断，不得提及分析流程本身。
+- **正文立场一律用中文表述 (看多/看空/中性)**——bullish/bearish/neutral 这类英文枚举值只允许出现在 JSON 字段值里，禁止写进论述文字。
+- **禁止声称"外部核实""公开披露""据我所知"等无法溯源的说法**——你只能引用下方数据块给出的数字；数据块里没有的数字一律写"该维度数据暂缺"，不得用"外部数据"的说法为编造或凭记忆补全的数字背书。
 - 结构性事实块里的比率全部已在 Python 里算好，直接引用，**不要自己重新做算术**。该块里"公司自述的风险"和"公司自己的经营表述"属于利益相关方视角，不能当作客观事实，只能作为"公司自己承认了什么""公司自己想让你相信什么"来引用；公司自述与其披露数字矛盾时以数字为准。严禁把"与头部客户深度绑定""技术领先""行业龙头"这类说法当成护城河证据——除非同一数据块里有可核验的数字支撑。
 
 股票: {stock_code} ({stock_name})
@@ -747,17 +749,26 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
 
 _PROCESS_TERM_RE = re.compile(r"六查|第[一二三四五六七八九十\d]+步|检查项\d*")
 
+# 立场枚举值泄漏进中文正文时替换为中文
+_ENUM_LABEL_MAP = {"bullish": "看多", "bearish": "看空", "neutral": "中性"}
+
 
 def _scrub_process_terms(text: str, stock_code: str) -> str:
-    """兜底剔除摘要里泄露的内部流程用语 (如"六查""第3步")。prompt 已禁用，
-    这里防模型漏网; 剔除整行并留日志，便于发现模型又写了什么。"""
-    if not text or not _PROCESS_TERM_RE.search(text):
+    """兜底清洗摘要输出: 剔除流程用语行 (如"六查""第3步")，并把泄漏进
+    正文的英文立场枚举值换成中文。prompt 已禁用，这里防模型漏网。"""
+    if not text:
         return text
     kept = [ln for ln in text.split("\n") if not _PROCESS_TERM_RE.search(ln)]
-    utils.logger.warning(
-        f"[analysis.report] {stock_code} 摘要输出包含流程用语，已剔除 {len(text.split(chr(10))) - len(kept)} 行"
-    )
-    return "\n".join(kept).strip()
+    if len(kept) != len(text.split("\n")):
+        utils.logger.warning(
+            f"[analysis.report] {stock_code} 摘要输出包含流程用语，已剔除 "
+            f"{len(text.split(chr(10))) - len(kept)} 行"
+        )
+    text = "\n".join(kept).strip()
+    for en, zh in _ENUM_LABEL_MAP.items():
+        # 中文与英文之间 \b 不生效 (中文也是 word 字符), 用 ASCII 字母边界
+        text = re.sub(rf"(?<![A-Za-z]){en}(?![A-Za-z])", zh, text, flags=re.IGNORECASE)
+    return text
 
 
 async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) -> StructuredSummary:
