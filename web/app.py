@@ -774,6 +774,12 @@ document.getElementById('digestUserBtn').addEventListener('click', () => submitC
 renderWatchlist();
 loadCrawledUsers();
 
+// 聚焦时全选: 输入框里残留上次的选择文本时, datalist 会按它过滤导致
+// 下拉只剩一个用户; 全选后直接输入即可看到全部选项。
+document.getElementById('xueqiuUserId').addEventListener('focus', function () {
+  this.select();
+});
+
 let crawlPollTimer = null;
 
 // 下拉自动补全: 选项值是 "昵称 (ID)", 提交时提取括号里的数字 ID;
@@ -847,6 +853,8 @@ async function submitCrawl(platform) {
   const { task_id } = await res.json();
   statusEl.textContent = '任务已提交, 状态: pending';
   logEl.style.display = 'block';
+  // 清空输入框: 残留的选择文本会让 datalist 只过滤出该用户
+  document.getElementById('xueqiuUserId').value = '';
   crawlPollTimer = setInterval(() => pollCrawlTask(task_id), 2000);
 }
 
@@ -864,6 +872,7 @@ async function pollCrawlTask(taskId) {
 
   if (data.status === 'done' || data.status === 'failed') {
     clearInterval(crawlPollTimer);
+    loadCrawledUsers();  // 抓取/回测可能新增用户, 刷新下拉列表
   }
 }
 
