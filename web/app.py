@@ -106,6 +106,7 @@ async def get_task(task_id: str) -> Dict:
 class CrawlXueqiuRequest(BaseModel):
     user_id: str
     incremental: bool = True
+    auto_backtest: bool = True
 
 
 class CrawlBiliOpusRequest(BaseModel):
@@ -131,9 +132,8 @@ def _decode_subprocess_line(raw: bytes) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
-async def _run_crawler_subprocess(task_id: str, cmd: list) -> None:
-    _crawl_tasks[task_id]["status"] = "running"
-    log_lines: list = _crawl_tasks[task_id]["log_lines"]
+async def _run_cmd(cmd: list, log_lines: list) -> int:
+    """跑一个子进程命令, 输出追加进 log_lines, 返回退出码 (-1 表示启动失败)。"""
     try:
         # 强制子进程输出 UTF-8 (Windows 管道默认 GBK, 父进程解码容易乱码)
         env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
@@ -144,7 +144,6 @@ async def _run_crawler_subprocess(task_id: str, cmd: list) -> None:
             cwd=str(_PROJECT_ROOT),
             env=env,
         )
-        _crawl_tasks[task_id]["process"] = process
         while True:
             line = await process.stdout.readline()
             if not line:
@@ -152,20 +151,35 @@ async def _run_crawler_subprocess(task_id: str, cmd: list) -> None:
             log_lines.append(_decode_subprocess_line(line).rstrip())
             if len(log_lines) > _CRAWL_LOG_TAIL_LINES:
                 del log_lines[: len(log_lines) - _CRAWL_LOG_TAIL_LINES]
-        returncode = await process.wait()
-        _crawl_tasks[task_id]["status"] = "done" if returncode == 0 else "failed"
+        return await process.wait()
     except Exception as e:
-        utils.logger.error(f"[web.app] 抓取任务 {task_id} 失败: {e}")
-        log_lines.append(f"启动/运行抓取进程失败: {e}")
-        _crawl_tasks[task_id]["status"] = "failed"
+        utils.logger.error(f"[web.app] 子进程运行失败: {e}")
+        log_lines.append(f"启动/运行子进程失败: {e}")
+        return -1
 
 
-async def _start_crawl_task(cmd: list) -> str:
+async def _run_crawler_subprocess(task_id: str, cmd: list) -> None:
+    _crawl_tasks[task_id]["status"] = "running"
+    log_lines: list = _crawl_tasks[task_id]["log_lines"]
+    _crawl_tasks[task_id]["process"] = cmd
+
+    returncode = await _run_cmd(cmd, log_lines)
+    chain = _crawl_tasks[task_id].get("chain")
+    if returncode == 0 and chain:
+        # 抓取成功后自动接续: 回测该用户发言并重建摘要 (LLM 分类每条帖子, 耗时较长)
+        log_lines.append("=" * 50)
+        log_lines.append("[web.app] 抓取完成, 自动开始回测与摘要重建")
+        log_lines.append("=" * 50)
+        returncode = await _run_cmd(chain, log_lines)
+    _crawl_tasks[task_id]["status"] = "done" if returncode == 0 else "failed"
+
+
+async def _start_crawl_task(cmd: list, chain: Optional[list] = None) -> str:
     async with _crawl_lock:
         if _crawl_task_is_running():
             raise HTTPException(status_code=400, detail="已有抓取任务在运行，请稍候")
         task_id = str(uuid.uuid4())
-        _crawl_tasks[task_id] = {"status": "pending", "log_lines": [], "process": None}
+        _crawl_tasks[task_id] = {"status": "pending", "log_lines": [], "process": None, "chain": chain}
         asyncio.create_task(_run_crawler_subprocess(task_id, cmd))
         return task_id
 
@@ -176,15 +190,20 @@ async def crawl_xueqiu(req: CrawlXueqiuRequest) -> CrawlTaskResponse:
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id 不能为空")
 
+    uid = normalize_user_id(user_id)
     cmd = [
         sys.executable, "main.py",
         "--platform", "xueqiu",
         "--lt", "qrcode",
         "--type", "creator",
-        "--creator_id", user_id,
+        "--creator_id", uid,
         "--update", "true" if req.incremental else "false",
     ]
-    task_id = await _start_crawl_task(cmd)
+    # 抓取成功后自动回测 (LLM 提取观点与预测 -> 验证 -> 摘要文件自动重建)
+    chain = None
+    if req.auto_backtest:
+        chain = [sys.executable, "backtest_run.py", "--creator_id", uid]
+    task_id = await _start_crawl_task(cmd, chain=chain)
     return CrawlTaskResponse(task_id=task_id)
 
 
@@ -384,6 +403,9 @@ _INDEX_HTML = """<!DOCTYPE html>
     <button id="digestUserBtn">重建该用户摘要</button>
     <label style="font-size:13px;color:#666;display:flex;align-items:center;gap:4px;">
       <input type="checkbox" id="xueqiuIncremental" checked /> 仅增量更新
+    </label>
+    <label style="font-size:13px;color:#666;display:flex;align-items:center;gap:4px;">
+      <input type="checkbox" id="xueqiuAutoBacktest" checked /> 抓取后自动回测
     </label>
   </div>
 
@@ -815,7 +837,11 @@ async function submitCrawl(platform) {
     const userId = resolveUserId(document.getElementById('xueqiuUserId').value.trim());
     if (!userId) return;
     url = '/api/crawl/xueqiu';
-    body = { user_id: userId, incremental: document.getElementById('xueqiuIncremental').checked };
+    body = {
+      user_id: userId,
+      incremental: document.getElementById('xueqiuIncremental').checked,
+      auto_backtest: document.getElementById('xueqiuAutoBacktest').checked,
+    };
   } else if (platform === 'backtest') {
     const userId = resolveUserId(document.getElementById('xueqiuUserId').value.trim());
     if (!userId) return;
