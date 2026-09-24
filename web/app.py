@@ -25,11 +25,13 @@
 """
 
 import asyncio
+import glob
+import json
 import os
 import sys
 import uuid
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -238,11 +240,65 @@ async def backtest_xueqiu(req: BacktestXueqiuRequest) -> CrawlTaskResponse:
     return CrawlTaskResponse(task_id=task_id)
 
 
+class DigestRebuildRequest(BaseModel):
+    user_id: Optional[str] = None
+
+
 @app.post("/api/digest/rebuild", response_model=CrawlTaskResponse)
-async def rebuild_digest() -> CrawlTaskResponse:
-    """从全部历史验证记录全量重建观点摘录文件 (提炼按内容哈希缓存)。"""
-    task_id = await _start_crawl_task([sys.executable, "digest_run.py"])
+async def rebuild_digest(req: DigestRebuildRequest = DigestRebuildRequest()) -> CrawlTaskResponse:
+    """
+    重建观点摘录文件。user_id 给定时只重建该用户的条目 (其他用户保持不变);
+    不给定时全量重建。提炼按内容哈希缓存。
+    """
+    cmd = [sys.executable, "digest_run.py"]
+    if req.user_id and req.user_id.strip():
+        uid = normalize_user_id(req.user_id)
+        if not uid or not uid.isdigit():
+            raise HTTPException(status_code=400, detail=f"无法从输入解析出用户 ID: {req.user_id}")
+        cmd += ["--user_id", uid]
+    task_id = await _start_crawl_task(cmd)
     return CrawlTaskResponse(task_id=task_id)
+
+
+@app.get("/api/crawled/users")
+async def crawled_users() -> List[Dict]:
+    """列出已抓取过的雪球用户 (昵称/ID/发帖数/粉丝数), 按发帖数降序。"""
+    base = _PROJECT_ROOT / "data" / "xueqiu" / "jsonl"
+    users: Dict[str, Dict] = {}
+
+    def _slot(uid: str) -> Dict:
+        return users.setdefault(
+            uid, {"user_id": uid, "user_nickname": "", "followers_count": 0, "post_count": 0}
+        )
+
+    for p in sorted(glob.glob(str(base / "creator_*_creators_*.jsonl"))):
+        uid = os.path.basename(p).split("_")[1]
+        u = _slot(uid)
+        try:
+            with open(p, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if rec.get("user_nickname"):
+                        u["user_nickname"] = rec["user_nickname"]
+                    if rec.get("followers_count"):
+                        u["followers_count"] = int(rec["followers_count"])
+        except OSError:
+            continue
+    for p in sorted(glob.glob(str(base / "creator_*_contents_*.jsonl"))):
+        uid = os.path.basename(p).split("_")[1]
+        u = _slot(uid)
+        try:
+            with open(p, encoding="utf-8") as f:
+                u["post_count"] += sum(1 for l in f if l.strip())
+        except OSError:
+            continue
+    return sorted(users.values(), key=lambda u: -u["post_count"])
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -319,19 +375,16 @@ _INDEX_HTML = """<!DOCTYPE html>
 <div class="crawl-section">
   <h3>数据抓取 / 观点回测</h3>
 
-  <p class="crawl-hint">抓取/更新雪球用户的发帖与回复 (接口需要登录, 弹出的浏览器里登录后自动继续)</p>
+  <p class="crawl-hint">选择已抓取用户 (下拉自动补全, 显示昵称/ID/帖子数) 或直接输入新用户 ID/主页 URL; 抓取需要登录, 弹出的浏览器里登录后自动继续</p>
   <div class="crawl-row">
-    <input id="xueqiuUserId" placeholder="雪球用户 ID 或主页 URL，如 1263638109" />
+    <input id="xueqiuUserId" placeholder="雪球用户 ID 或主页 URL" list="crawledUserList" style="flex:1;max-width:320px;" />
+    <datalist id="crawledUserList"></datalist>
     <button id="crawlXueqiuBtn">抓取/更新</button>
+    <button id="backtestBtn">回测并更新摘要</button>
+    <button id="digestUserBtn">重建该用户摘要</button>
     <label style="font-size:13px;color:#666;display:flex;align-items:center;gap:4px;">
       <input type="checkbox" id="xueqiuIncremental" checked /> 仅增量更新
     </label>
-  </div>
-
-  <p class="crawl-hint">回测某用户的发言: LLM 提取观点与预测 -> 用预测发布后的真实股价验证 -> 验证正确的观点与逻辑写入摘要文件 (耗时长，完成后自动更新摘要)</p>
-  <div class="crawl-row">
-    <input id="backtestUserId" placeholder="雪球用户 ID 或主页 URL，如 1263638109" />
-    <button id="backtestBtn">回测并更新摘要</button>
   </div>
 
   <p class="crawl-hint">全量重建观点摘要文件 (从全部历史验证记录提炼，用于回测后或数据修复)</p>
@@ -717,9 +770,35 @@ document.getElementById('crawlXueqiuBtn').addEventListener('click', () => submit
 document.getElementById('crawlBiliBtn').addEventListener('click', () => submitCrawl('bili'));
 document.getElementById('backtestBtn').addEventListener('click', () => submitCrawl('backtest'));
 document.getElementById('digestBtn').addEventListener('click', () => submitCrawl('digest'));
+document.getElementById('digestUserBtn').addEventListener('click', () => submitCrawl('digest_user'));
 renderWatchlist();
+loadCrawledUsers();
 
 let crawlPollTimer = null;
+
+// 下拉自动补全: 选项值是 "昵称 (ID)", 提交时提取括号里的数字 ID;
+// 用户直接输入 ID/URL 时原样使用。
+function resolveUserId(value) {
+  const m = value.match(/\((\d+)\)\s*$/);
+  return m ? m[1] : value;
+}
+
+async function loadCrawledUsers() {
+  try {
+    const res = await fetch('/api/crawled/users');
+    if (!res.ok) return;
+    const users = await res.json();
+    const dl = document.getElementById('crawledUserList');
+    dl.innerHTML = users.map(u => {
+      const name = u.user_nickname || u.user_id;
+      return '<option value="' + escapeHtml(name) + ' (' + escapeHtml(u.user_id) + ')"' +
+        ' label="' + escapeHtml(name) + ' — 帖子 ' + u.post_count + ' 条, 粉丝 ' + u.followers_count + '">' +
+        '</option>';
+    }).join('');
+  } catch (e) {
+    // 用户列表加载失败不影响页面其余功能
+  }
+}
 
 async function submitCrawl(platform) {
   const statusEl = document.getElementById('crawlStatus');
@@ -727,18 +806,23 @@ async function submitCrawl(platform) {
   let url, body;
 
   if (platform === 'xueqiu') {
-    const userId = document.getElementById('xueqiuUserId').value.trim();
+    const userId = resolveUserId(document.getElementById('xueqiuUserId').value.trim());
     if (!userId) return;
     url = '/api/crawl/xueqiu';
     body = { user_id: userId, incremental: document.getElementById('xueqiuIncremental').checked };
   } else if (platform === 'backtest') {
-    const userId = document.getElementById('backtestUserId').value.trim();
+    const userId = resolveUserId(document.getElementById('xueqiuUserId').value.trim());
     if (!userId) return;
     url = '/api/backtest/xueqiu';
     body = { user_id: userId };
   } else if (platform === 'digest') {
     url = '/api/digest/rebuild';
     body = {};
+  } else if (platform === 'digest_user') {
+    const userId = resolveUserId(document.getElementById('xueqiuUserId').value.trim());
+    if (!userId) return;
+    url = '/api/digest/rebuild';
+    body = { user_id: userId };
   } else {
     const creatorId = document.getElementById('biliCreatorId').value.trim();
     if (!creatorId) return;

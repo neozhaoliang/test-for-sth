@@ -36,8 +36,11 @@ from backtest import digest
 from tools.utils import utils
 
 
-async def run() -> None:
-    entries = await digest.build_digests()
+async def run(user_id: str = None) -> None:
+    if user_id:
+        entries = await digest.build_digests_for_user(user_id)
+    else:
+        entries = await digest.build_digests()
     users = len({e["user_id"] for e in entries})
     utils.logger.info(
         f"[digest_run] 完成: {len(entries)} 个 (用户, 股票) 观点条目, 覆盖 {users} 位用户"
@@ -52,8 +55,9 @@ async def run() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="用户观点摘录 (digest) 构建")
     parser.add_argument("--refresh", action="store_true", help="刷新摘录文件 (保留提炼缓存)")
+    parser.add_argument("--user_id", default=None, help="只重建指定用户的摘录 (默认全部用户)")
     args = parser.parse_args()
-    asyncio.run(run())
+    asyncio.run(run(args.user_id))
 
 
 if __name__ == "__main__":

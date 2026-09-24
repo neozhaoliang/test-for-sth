@@ -332,17 +332,17 @@ async def _distill_group(
     return summary
 
 
-async def build_digests(
-    records: Optional[List[Dict]] = None, include_kb: bool = True
-) -> List[Dict]:
-    """
-    从验证记录聚合出每个 (用户, 股票) 的观点摘录条目并原子写入 digest 文件。
-    records 为 None 时加载全部验证记录；include_kb=True 时把知识库 (B 站直播
-    文字稿等) 提炼文本里检测出的观点作为 view 并入对应用户名下。返回写入的
-    条目列表。
-    """
-    if records is None:
-        records = score.load_records()
+def _write_digest_file(entries: List[Dict]) -> None:
+    os.makedirs(_digest_dir(), exist_ok=True)
+    tmp_path = _digest_path() + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        for e in entries:
+            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+    os.replace(tmp_path, _digest_path())
+
+
+async def _build_entries(records: List[Dict], include_kb: bool) -> List[Dict]:
+    """从验证记录聚合出 (用户, 股票) 观点摘录条目 (不写文件)。"""
     records = list(records)
     if include_kb:
         records.extend(await _detect_kb_views())
@@ -480,17 +480,51 @@ async def build_digests(
     results = await asyncio.gather(*(_one(k) for k in groups))
     entries = [e for e in results if e is not None]
     entries.sort(key=lambda e: (e["user_id"], -e["correct"], e["stock_code"]))
+    return entries
 
-    os.makedirs(_digest_dir(), exist_ok=True)
-    tmp_path = _digest_path() + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        for e in entries:
-            f.write(json.dumps(e, ensure_ascii=False) + "\n")
-    os.replace(tmp_path, _digest_path())
 
+async def build_digests(
+    records: Optional[List[Dict]] = None, include_kb: bool = True
+) -> List[Dict]:
+    """
+    从验证记录聚合出每个 (用户, 股票) 的观点摘录条目并原子写入 digest 文件。
+    records 为 None 时加载全部验证记录；include_kb=True 时把知识库 (B 站直播
+    文字稿等) 提炼文本里检测出的观点作为 view 并入对应用户名下。返回写入的
+    条目列表。
+    """
+    if records is None:
+        records = score.load_records()
+    entries = await _build_entries(records, include_kb=include_kb)
+    _write_digest_file(entries)
     invalidate()
     utils.logger.info(f"[digest] 摘录文件已更新: {len(entries)} 个 (用户, 股票) 条目 -> {_digest_path()}")
     return entries
+
+
+async def build_digests_for_user(user_id: str) -> List[Dict]:
+    """
+    只重建一个用户的摘录条目, 其他用户的既有条目保持不变。
+    知识库观点 (B 站直播稿) 随全量检测一并合入, 不受影响。
+    """
+    existing = {(e["user_id"], e["stock_code"]): e for e in load_digests()}
+    records = score.load_records(user_id)
+    entries = await _build_entries(records, include_kb=True)
+    new_keys = {(e["user_id"], e["stock_code"]) for e in entries}
+    merged = dict(existing)
+    for e in entries:
+        merged[(e["user_id"], e["stock_code"])] = e
+    # 该用户旧有、但新结果中已不存在的条目 (验证记录被删) 要移除
+    for key in list(merged):
+        if key[0] == str(user_id) and key not in new_keys:
+            del merged[key]
+    out = sorted(merged.values(), key=lambda e: (e["user_id"], -e["correct"], e["stock_code"]))
+    _write_digest_file(out)
+    invalidate()
+    utils.logger.info(
+        f"[digest] 用户 {user_id} 摘录已更新: 新增/更新 {len(entries)} 个条目, "
+        f"摘录文件共 {len(out)} 个条目"
+    )
+    return out
 
 
 _cache: Optional[List[Dict]] = None
