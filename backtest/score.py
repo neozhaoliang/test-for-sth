@@ -35,6 +35,7 @@ from typing import Any, Dict, List, Optional
 
 import config
 from model.m_backtest import StockCredibilityScore, UserCredibilityScore
+from tools.utils import utils
 
 _Z_95 = 1.96  # 95% 置信度对应的标准正态分位数
 
