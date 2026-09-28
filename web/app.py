@@ -390,6 +390,7 @@ _INDEX_HTML = """<!DOCTYPE html>
 </div>
 <div id="status"></div>
 <div id="result"></div>
+<div id="radarTip" style="display:none;position:fixed;z-index:10;max-width:260px;padding:6px 10px;background:#333;color:#fff;font-size:12px;border-radius:4px;pointer-events:none;"></div>
 
 <div class="crawl-section">
   <h3>数据抓取 / 观点回测</h3>
@@ -768,6 +769,67 @@ function renderEvidenceSection(report) {
   return html;
 }
 
+// 九维度雷达图 (内联 SVG): 顶点=维度, 值=-10(利空)~+10(利多)。
+// 极性除颜色外还有位置(相对0环)与数字双重编码; 正红负绿沿用本界面方向色。
+function renderDimensionRadar(scores) {
+  const n = scores.length;
+  const cx = 220, cy = 190, R = 140;
+  let grid = '', axes = '', dots = '', labels = '';
+
+  for (const frac of [0.25, 0.5, 0.75, 1]) {
+    const r = R * frac;
+    grid += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' +
+      (frac === 0.5 ? '#b5b5b5' : '#e6e6e6') + '" stroke-width="' + (frac === 0.5 ? 1.5 : 1) + '"/>';
+  }
+  const pts = scores.map((s, i) => {
+    const ang = -Math.PI / 2 + i * 2 * Math.PI / n;
+    const x = cx + R * Math.cos(ang), y = cy + R * Math.sin(ang);
+    axes += '<line x1="' + cx + '" y1="' + cy + '" x2="' + x.toFixed(1) + '" y2="' + y.toFixed(1) +
+      '" stroke="#e6e6e6" stroke-width="1"/>';
+    const r = R * (s.score + 10) / 20;
+    return [cx + r * Math.cos(ang), cy + r * Math.sin(ang)];
+  });
+  const poly = pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+
+  scores.forEach((s, i) => {
+    const ang = -Math.PI / 2 + i * 2 * Math.PI / n;
+    const x = pts[i][0], y = pts[i][1];
+    const color = s.score > 0 ? '#dd3333' : (s.score < 0 ? '#2a9d3f' : '#888888');
+    dots += '<circle class="radar-dot" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) +
+      '" r="5" fill="' + color + '" stroke="#fff" stroke-width="1.5" data-note="' +
+      escapeHtml(s.note || '') + '"/>';
+    const lx = cx + (R + 26) * Math.cos(ang);
+    const ly = cy + (R + 26) * Math.sin(ang);
+    labels += '<text x="' + lx.toFixed(1) + '" y="' + (ly + 3).toFixed(1) +
+      '" text-anchor="middle" font-size="12" fill="#444">' + escapeHtml(s.dimension) + '</text>';
+    labels += '<text x="' + lx.toFixed(1) + '" y="' + (ly + 17).toFixed(1) +
+      '" text-anchor="middle" font-size="11" font-weight="bold" fill="' + color + '">' +
+      (s.score > 0 ? '+' : '') + s.score + '</text>';
+  });
+
+  return '<svg viewBox="0 0 440 395" width="440" height="395" role="img" ' +
+    'aria-label="九维度评分雷达图">' +
+    grid + axes +
+    '<polygon points="' + poly + '" fill="#1a73e8" fill-opacity="0.20" stroke="#1a73e8" stroke-width="2"/>' +
+    dots + labels + '</svg>';
+}
+
+function attachRadarTooltips() {
+  const tip = document.getElementById('radarTip');
+  if (!tip) return;
+  document.querySelectorAll('.radar-dot').forEach(dot => {
+    dot.addEventListener('mousemove', (e) => {
+      const note = dot.getAttribute('data-note') || '';
+      if (!note) return;
+      tip.style.display = 'block';
+      tip.style.left = (e.clientX + 14) + 'px';
+      tip.style.top = (e.clientY + 14) + 'px';
+      tip.textContent = note;
+    });
+    dot.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+  });
+}
+
 function renderResult(report) {
   const el = document.getElementById('result');
   let html = '<h2>' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
@@ -802,6 +864,11 @@ function renderResult(report) {
     html += '<div class="risk-block"><b>风险提示:</b> ' + escapeHtml(summary.risk_notes) + '</div>';
   }
 
+  if (summary.dimension_scores && summary.dimension_scores.length >= 6) {
+    html += '<div class="evidence-block"><b>九维度评分 (-10 利空 ~ +10 利多, 悬停顶点看理由):</b><br>' +
+      renderDimensionRadar(summary.dimension_scores) + '</div>';
+  }
+
   html += renderEvidenceSection(report);
 
   html += '<h3>候选用户 (' + report.candidates.length + ')</h3>';
@@ -820,6 +887,7 @@ function renderResult(report) {
   }
 
   el.innerHTML = html;
+  attachRadarTooltips();
 }
 
 document.getElementById('submitBtn').addEventListener('click', submitAnalysis);

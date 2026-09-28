@@ -55,6 +55,10 @@ class StructuredSummary(BaseModel):
     )
     invalidation_condition: str = Field(default="", description="如果出现什么情况，说明这个判断是错的")
     risk_notes: str = Field(default="", description="风险提示/需要注意的不确定性")
+    dimension_scores: Optional[List[dict]] = Field(
+        default=None,
+        description="九维度评分 (雷达图用): [{dimension: 中文名, score: -10..+10, note: 一句理由}]",
+    )
 
 
 class AnalysisReport(BaseModel):

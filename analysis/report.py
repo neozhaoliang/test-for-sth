@@ -937,6 +937,70 @@ _REPAIR_REQUIREMENTS = (
     "invalidation_condition、risk_notes (后五个均为字符串)"
 )
 
+_DIMENSION_LABELS = {
+    "management": "管理层",
+    "fundamentals": "基本面",
+    "chip_flow": "筹码",
+    "price_position": "股价位置",
+    "cycle_position": "周期",
+    "policy_geopolitics": "政策形势",
+    "retail_sentiment": "散户情绪",
+    "shareholder_returns": "股东回报",
+    "growth_elasticity": "成长弹性",
+}
+
+_SCORE_PROMPT = """以下是对一只股票九个维度的分析。请对每个维度打分: -10 表示极度利空, +10 表示极度利多, 0 表示中性。维度名固定为以下九个: management, fundamentals, chip_flow, price_position, cycle_position, policy_geopolitics, retail_sentiment, shareholder_returns, growth_elasticity。
+
+输出 JSON 数组 (9 个元素, 不要任何其他文字):
+[{{"dimension": "management", "score": -3, "note": "一句理由 (15字以内)"}}]
+
+维度分析:
+{analyses_block}"""
+
+_SCORE_REPAIR = "必须是 JSON 数组且恰有 9 个元素, 每个元素含 dimension (取值限 management/fundamentals/chip_flow/price_position/cycle_position/policy_geopolitics/retail_sentiment/shareholder_returns/growth_elasticity)、score (-10 到 10 的数字)、note (短字符串)"
+
+
+async def _score_dimensions(
+    analyses: Dict[str, str], stock_code: str
+) -> Optional[List[Dict]]:
+    """对九个维度分析打分 (-10 利空 ~ +10 利多), 供雷达图展示。失败返回 None。"""
+    block = "\n\n".join(f"### {name}\n{text}" for name, text in analyses.items() if text)
+    if not block:
+        return None
+    try:
+        parsed, _ = await call_json_ex(
+            _SCORE_PROMPT.format(analyses_block=block),
+            max_tokens=2048,
+            repair_requirements=_SCORE_REPAIR,
+        )
+    except Exception as e:
+        utils.logger.warning(f"[analysis.report] {stock_code} 维度打分失败: {e}")
+        return None
+    if not isinstance(parsed, list):
+        return None
+    scores: List[Dict] = []
+    seen = set()
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        dim = str(item.get("dimension", ""))
+        if dim not in _DIMENSION_LABELS or dim in seen:
+            continue
+        try:
+            score = max(-10.0, min(10.0, float(item.get("score", 0))))
+        except (TypeError, ValueError):
+            continue
+        seen.add(dim)
+        scores.append(
+            {
+                "dimension": _DIMENSION_LABELS[dim],
+                "key": dim,
+                "score": round(score, 1),
+                "note": str(item.get("note", "") or "")[:30],
+            }
+        )
+    return scores if len(scores) >= 6 else None
+
 
 async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) -> StructuredSummary:
     prompt = _build_prompt(inputs, candidates)
@@ -989,6 +1053,7 @@ async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOp
     lynch_category = parsed.get("lynch_category", "")
     if lynch_category not in _VALID_LYNCH_CATEGORIES:
         lynch_category = "unclear"
+    dimension_scores = await _score_dimensions(analyses, inputs.stock_code)
     return StructuredSummary(
         lynch_category=lynch_category,
         stance=parsed.get("stance", ""),
@@ -1000,6 +1065,7 @@ async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOp
             parsed.get("invalidation_condition", "") or "", inputs.stock_code
         ),
         risk_notes=_scrub_process_terms(parsed.get("risk_notes", "") or "", inputs.stock_code),
+        dimension_scores=dimension_scores,
     )
 
 
