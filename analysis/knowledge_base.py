@@ -137,6 +137,27 @@ _SOURCES: List[KnowledgeSource] = [
     ),
 ]
 
+# 雪球用户发帖也作为知识库来源 (其观点摘要与 B 站直播稿同权参与报告分析)
+_XUEQIU_KB_USERS = ["3058599833", "4780688814"]
+
+
+def _build_sources() -> List[KnowledgeSource]:
+    sources = list(_SOURCES)
+    for uid in _XUEQIU_KB_USERS:
+        sources.append(
+            KnowledgeSource(
+                name=f"xueqiu_{uid}",
+                glob_pattern=os.path.join(
+                    "xueqiu", "jsonl", f"creator_{uid}_contents_*.jsonl"
+                ),
+                id_field="status_id",
+                title_field="description",
+                content_field="description",
+                time_field="created_at",
+            )
+        )
+    return sources
+
 
 class KnowledgeEntry(NamedTuple):
     source: str
@@ -173,7 +194,8 @@ def _load_raw_entries(source: KnowledgeSource) -> List[Dict]:
                         {
                             "source": source.name,
                             "entry_id": str(rec.get(source.id_field, "")),
-                            "title": str(rec.get(source.title_field, "")),
+                            # 雪球发帖无标题, 用正文前 80 字当标题 (提炼输出才是实际内容)
+                            "title": str(rec.get(source.title_field, ""))[:80],
                             "content": str(rec.get(source.content_field, "")),
                             "timestamp": int(rec.get(source.time_field) or 0),
                         }
@@ -280,7 +302,7 @@ async def ensure_loaded() -> List[KnowledgeEntry]:
         return _cache
 
     raws: List[Dict] = []
-    for source in _SOURCES:
+    for source in _build_sources():
         raws.extend(_load_raw_entries(source))
 
     disk_cache = _read_distill_cache()
@@ -309,7 +331,7 @@ async def ensure_loaded() -> List[KnowledgeEntry]:
         )
     entries.sort(key=lambda e: e.timestamp, reverse=True)
     _cache = entries
-    utils.logger.info(f"[knowledge_base] 已加载 {len(entries)} 条知识库条目 (来源数: {len(_SOURCES)})")
+    utils.logger.info(f"[knowledge_base] 已加载 {len(entries)} 条知识库条目 (来源数: {len(_build_sources())})")
     return _cache
 
 

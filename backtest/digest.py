@@ -169,7 +169,20 @@ async def _detect_kb_views() -> List[Dict]:
     from backtest.classify import classify_post
 
     entries = await ensure_kb()
-    entries = [e for e in entries if e.source in _KB_USER_MAP and (e.distilled or "").strip()]
+    kb_users = dict(_KB_USER_MAP)
+
+    def _kb_user_for(source: str) -> Optional[tuple]:
+        if source in kb_users:
+            return kb_users[source]
+        if source.startswith("xueqiu_"):
+            uid = source.split("_", 1)[1]
+            return (uid, uid)
+        return None
+
+    entries = [
+        e for e in entries
+        if _kb_user_for(e.source) is not None and (e.distilled or "").strip()
+    ]
     if not entries:
         return []
     cache = _read_kb_views_cache()
@@ -180,7 +193,7 @@ async def _detect_kb_views() -> List[Dict]:
         h = _group_hash(text)
         if h in cache:
             return cache[h]
-        uid, nick = _KB_USER_MAP[e.source]
+        uid, nick = _kb_user_for(e.source)
         async with semaphore:
             try:
                 preds = await classify_post(
@@ -222,7 +235,7 @@ async def _detect_kb_views() -> List[Dict]:
     results = await asyncio.gather(*(_one(e) for e in entries))
     pseudo: List[Dict] = []
     for e, recs in zip(entries, results):
-        uid, nick = _KB_USER_MAP[e.source]
+        uid, nick = _kb_user_for(e.source)
         for r in recs:
             ptype = r.get("prediction_type") or ""
             pseudo.append(

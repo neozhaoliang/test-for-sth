@@ -56,7 +56,9 @@ _crawl_lock = asyncio.Lock()
 
 @app.on_event("startup")
 async def _preload_knowledge_base() -> None:
-    await ensure_knowledge_base_loaded()
+    # 后台提炼 (含雪球用户发帖来源, 首次要逐条过 LLM, 会持续一段时间);
+    # 不阻塞服务启动, 提炼完成的条目逐批进入缓存
+    asyncio.create_task(ensure_knowledge_base_loaded())
 
 
 class AnalyzeRequest(BaseModel):

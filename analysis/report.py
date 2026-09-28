@@ -118,6 +118,9 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 融资盘与流通盘 (流通盘大小 + 融资余额绝对值/占流通市值比例/近期增减趋势; 融资余额快速上升且股价高位=杠杆资金拥挤风险, 持续回落=去杠杆):
 {margin_block}
 
+知识库中该时期的资金与风格真实记录 (老木匠、军师祭咖啡等的专栏与发帖摘要中关于筹码/资金面/风格切换/政策偏好的记录):
+{kb_fund_flow_block}
+
 治理与股东回报记录 (管理层人品/美誉度只能基于这里的客观事实推断: 任职年限、薪酬与持股、分红回购、再融资记录、减持/处罚/问询记录):
 {governance_block}
 
@@ -297,6 +300,29 @@ def _build_major_events_block(major_events: Optional[List[Dict]]) -> str:
     lines = ["近期重大事项 (同花顺 F10 公司大事，倒序排列):"]
     for e in major_events[:8]:
         lines.append(f"  {e.get('date', '')} [{e.get('kind', '')}] {e.get('title', '')}")
+    return "\n".join(lines)
+
+
+_KB_FUND_FLOW_RE = re.compile(
+    r"筹码|资金|风格|调仓|公募|蓝筹|红利|抱团|机构|散户|派发|切换|融资|杠杆|政策"
+)
+
+
+def _build_kb_fund_flow_block(knowledge_excerpts: List[KnowledgeExcerpt]) -> str:
+    """
+    从知识库 (老木匠/军师祭咖啡等的专栏与发帖摘要) 中抽出资金面/筹码/风格/
+    政策相关的真实记录, 单独成块——解释股价与户数联动、板块涨跌时模型必须
+    先引用这里, 而不是套"户数增加=派发"模板。
+    """
+    hits = [e for e in knowledge_excerpts if _KB_FUND_FLOW_RE.search(e.distilled)]
+    if not hits:
+        return "(知识库中无相关的资金/风格/筹码记录)"
+    lines = [
+        "知识库中该时期的资金与风格真实记录 (专栏/发帖摘要原文, 含来源与日期; "
+        "解释股价与户数联动、板块涨跌、风格切换时必须先引用这里的记录, 模板推断仅在其缺位时使用):"
+    ]
+    for e in hits[:10]:
+        lines.append(f"  · [{e.source} {e.title[:50]}] {e.distilled[:400]}")
     return "\n".join(lines)
 
 
@@ -885,6 +911,7 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
             inputs.shareholder_trend, inputs.dividend_history, inputs.buyback_history
         ),
         margin_block=_build_margin_block(inputs.margin_signal, inputs.valuation, inputs.quote),
+        kb_fund_flow_block=_build_kb_fund_flow_block(inputs.knowledge_excerpts),
         profitability_block=_build_profitability_block(inputs.profitability_trend),
         commodity_block=_build_commodity_block(inputs.commodity_signal),
         freight_block=_build_freight_block(inputs.freight_signal),
@@ -955,7 +982,11 @@ _ANALYSIS_TOOLS = [
     ),
     _analysis_tool(
         "analyze_chip_flow",
-        "筹码博弈与散户人数变化: 引用'股东回报与筹码'块的户数序列+同期股价, 判断派发或集中; 判断前必须先对照知识库该时期的真实记录 (公募调仓/风格切换优先于'户数增加=派发'模板), 结论写明来源。必须同时引用'融资盘与流通盘'块: 流通盘大小、融资余额绝对值、占流通市值比例、近期增减趋势——融资余额快速上升且股价高位=杠杆资金拥挤风险, 持续回落=去杠杆; 融资盘动向与户数变化互相印证。",
+        "筹码博弈与散户人数变化: 引用'股东回报与筹码'块的户数序列+同期股价, 判断派发或集中。**必须先引用'知识库中该时期的资金与风格真实记录'块**: 老木匠/军师祭咖啡等记录的当期真实资金与风格动向 (如公募年中评比前集体卖出蓝筹、风格切换) 优先于'户数增加=派发'模板推断, 模板只在其缺位时使用且必须注明是推断。必须同时引用'融资盘与流通盘'块: 流通盘大小、融资余额绝对值、占流通市值比例、近期增减趋势——融资余额快速上升且股价高位=杠杆资金拥挤风险, 持续回落=去杠杆; 融资盘动向与户数变化互相印证。",
+    ),
+    _analysis_tool(
+        "analyze_policy_geopolitics",
+        "国家政策与国际形势 (战争/加息等): 引用'近期重大事项'与'汇率敞口'块, 并查知识库中军师祭咖啡/老木匠等对政策偏好的记录 (A股政策取向、资金面政策意图); 只写与本标的有直接传导路径的变量并点名具体政策/数字, 无关的央行动作一律不写。",
     ),
     _analysis_tool(
         "analyze_price_position",
@@ -964,10 +995,6 @@ _ANALYSIS_TOOLS = [
     _analysis_tool(
         "analyze_cycle_position",
         "行业周期性与周期位置: 判断该股所处行业是否周期性; 是则引用'运价景气度'/'大宗商品价差'块或财务同比 (注明基数效应) 判断当前处于周期什么位置 (景气高位/回落/底部), 禁止凭印象断言; 该数据块暂缺时写明暂缺。",
-    ),
-    _analysis_tool(
-        "analyze_policy_geopolitics",
-        "国家政策与国际形势 (战争/加息等): 引用'近期重大事项'与'汇率敞口'块与知识库宏观判断; 只写与本标的有直接传导路径的变量并点名具体政策/数字, 无关的央行动作一律不写。",
     ),
     _analysis_tool(
         "analyze_retail_sentiment",
