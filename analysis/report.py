@@ -40,7 +40,7 @@ from analysis.debate import derive_sentiment, get_debate
 from analysis.session import AnalysisBrowserSession
 from analysis.shareholder import get_buyback_history, get_dividend_history, get_shareholder_count_trend
 from analysis.xueqiu_stock import get_xueqiu_stock_data
-from backtest.llm_client import call_json_ex
+from backtest.llm_client import call_analysis_with_tools, call_json_ex
 from backtest.score import load_records
 from model.m_analysis import AnalysisReport, CandidateOpinion, KnowledgeExcerpt, StructuredSummary
 from tools.utils import utils
@@ -126,74 +126,22 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 运价景气度 (仅航运/港口类公司适用；运价是集运公司利润的最强领先指标，判断行业景气方向必须引用这里的具体数字，禁止仅凭公司财务同比增速外推景气):
 {freight_block}
 
-按以下顺序分析。**必须依次走完这七步，每一步都要落到具体数字上；后一步不能跳过前一步直接下结论。**
-每份报告都必须针对**这家公司**的核心变量直接展开，禁止任何千篇一律的固定开头 (如逐一点名四大央行的全球央行盘点)。
-
-**一、本标的的核心矛盾与直接相关的宏观环境 (先讲这家公司的关键变量，再讲个股位置)**
-1. **开头直接进入与本标的相关性最高的变量**: 周期股先讲景气位置 (引用运价/商品价格数据块的点位、年内高低点、历史分位、方向)，银行先讲息差与资产质量，成长股先讲增长驱动与研发强度。开头必须让人一眼看出这是哪家公司在什么行业、处于什么周期位置，而不是一份"通用宏观报告"。
-2. **宏观只在有直接传导路径时展开**: 只有当某个央行/政策变量的变动对本标的的收入、成本、需求存在直接传导路径时才提及 (如航运对全球贸易需求与运价、银行对利率与息差、出口企业对汇率)，点名具体变量、数字与传导路径。与本标的无关的央行动作一律不写，禁止把美联储/欧央行/日央行/中国央行的例行状态各报一遍。
-3. **市场生态与该股的相对强弱**: 引用大盘与风格数据块的具体数字——上证指数、沪深300、上证红利、科创50、创业板指与个股的年内/上半年/下半年涨跌幅，判断当前 A 股处于哪种生态 (科技牛、红利补涨、高位回调、普涨普跌等)，以及该股在其中的位置 (领先、滞后、补涨中、还是逆势下跌)；再结合个股 52 周与 2018 年以来高低点，说明它处于自身历史区间的什么位置。该数据块暂缺时写"该维度数据暂缺"，不得凭市场印象补全。
-4. 给出这个阶段的预期持续时间窗口 (到什么时候、看什么信号)。
-> 不确定精确数字时必须标注为"基于知识的粗略估计"，但仍要给出主体和数量级，不能只写"加息预期"四个字。知识库资料里若有对当前宏观周期的判断，优先采用它并注明来自知识库。
-
-**二、业务本质与外部依赖 (公司靠什么赚钱、命门握在谁手里)**
-5. **海外市场依赖**: 引用海外收入占比 / 境外销量占比。占比高时必须评估海外需求波动、关税与贸易政策变化的影响。
-6. **供应链自主性**: 是自主可控的国内供应链，还是关键环节依赖国外？从供应商集中度、公司自述风险原文、公司经营表述里找证据。**数据不足以判断时必须写"暂缺"，不得凭印象断言。**
-7. **汇率对收入的影响**: 结合"汇率敞口"数据块给出方向性判断 (顺风/逆风) 和传导路径 (折算收入 / 报价竞争力 / 汇兑损益)。该块标注暂缺时，这一项写暂缺。
-8. **核心科技与断供/制裁风险**: 用研发强度、发明专利占授权专利比例判断技术壁垒的真实高度；用海外收入占比、公司自述的出口管制/地缘政治风险判断断供与制裁的风险敞口。**"低研发强度 + 高海外依赖"这个组合意味着代工属性与被替代风险，一旦同时出现必须明确指出，不得含糊过去。**
-9. **周期位置与景气度** (仅运价数据块给出具体数字时): 引用运价数据块的最新点位、年内高低点及日期、历史分位，判断行业景气当前处于历史区间的什么位置、方向向上还是向下。**禁止仅凭公司财务指标的同比增速断言"景气见顶/回落"**——同比增速受上一年基数影响，必须同时说明基数水平。若运价处历史高位区间而公司财务同比下滑，必须把"高基数效应"与"景气回落"两种解释都摆出来，用数据块里的数字取舍；数据不足以取舍时写"无法从本次数据确认"，不得二选一硬下结论。
-
-**三、现金流质量 (利润是不是真金白银)**
-10. 引用经营现金流/净利润比值、经营现金流同比方向、每股经营现金流。比值显著小于 1、或现金流同比大幅下滑时，必须说明利润含金量问题，并结合应收账款/存货的可能性给出解释或标注为"原因无法从本次数据确认"。
-
-**四、管理层行为与股东回报 (看行为记录，不做人身评价)**
-11. 用可核验的行为记录评估管理层是否善待股东: 分红是否长期持续、金额多少；回购是否真实执行、金额与进度；**股权质押比例** (高比例质押是治理风险信号，大股东资金链紧张时可能损害中小股东利益)。
-12. 财务上有没有不合理的做法: 结合现金流与利润的背离、质押比例给出判断。**应收账款、存货、商誉、关联交易、大股东减持这几项本次未取到数据，不得凭空评价**——只能写"该维度数据暂缺"。
-
-**五、股价与筹码的联动 (暴涨之后还有没有基本面支撑)**
-13. 若结构性事实块给出了"股东户数 vs 同期股价序列"，引用其中的股价与户数对照，判断是否出现**"股价暴涨 + 股东户数同步暴涨"**的派发特征: 股价大涨的同时户数也大增，通常意味着原有大户/机构在高位把筹码分散卖给了散户。引用具体的股价区间和户数变化。**做这个判断前，必须先对照知识库背景资料中该时期的记录** (知识库条目标题带日期，可按季度/月份对应): 若知识库记录了当期真实的资金与风格动向 (如公募调仓卖出红利蓝筹、风格切换)，必须优先采信并写明来源——"户数增加=派发"只是数据块内的默认模板推断，会被真实背景推翻。
-14. 然后回答本步最关键的问题: **后续基本面能否继续支撑这个涨幅？** 用营收增速、净利增速、经营现金流、当前估值四项来判断。**若股价涨幅远高于同期业绩增速，必须明确写出这是估值扩张而非业绩驱动**，并指出它靠什么继续维持。
-
-**六、结构性反证六查 (整份分析的核心，必须逐条做完再下结论)**
-15. 对下面六项，逐条写明"命中/未命中/数据暂缺"，命中的必须引用具体数字：
-   a. **客户与供应商集中度**: 前五大客户占营业收入 ≥50%，或前五大供应商占总采购额 ≥50% → 命中。集中度高意味着单一客户流失或压价就能重创业绩，这是脆弱性而不是护城河，除非数据块显示该比例在多个报告期持续下降。
-   b. **海外收入/销量占比与地缘风险**: 海外收入占比 ≥50%，或公司自述风险段落里明确提到出口、贸易、关税、地缘政治、出口管制风险 → 命中。必须直接引用公司自述的那句话。
-   c. **利润含金量**: 经营现金流/净利润 <0.8 → 命中。比值显著小于 1 说明账面利润没有同步变成现金，可能依赖应收账款或存货，需要结合盈利数据判断是季节性还是趋势性。
-   d. **研发强度与技术含量**: 研发投入占营业收入 <3%，或发明专利占授权专利比例 <30% → 命中 (银行等本身无研发投入的行业不适用，记为"不适用")。低研发强度意味着低毛利业务或代工属性，技术壁垒有限。
-   e. **筹码结构**: 股东户数环比增幅 >20% (或同比大幅增加) → 命中，说明筹码正在从集中走向分散，通常是内部人/机构派发给散户的信号。
-   f. **估值**: 市盈率(静态) >50 或 市净率 >8 → 命中。同时必须对比动态与静态市盈率的差距：二者差距巨大说明当前估值高度依赖未来利润继续高速增长，一旦增速回落估值会双杀。
-
-**七、综合结论**
-16. 判断这只股票更接近彼得林奇分类中的哪一类: fast_grower(高成长)、stalwart(大盘稳健股)、cyclical(周期股)、turnaround(困境反转)、asset_play(资产价值被低估)、slow_grower(低增长)。证据完全不足以判断时才选 unclear。
-17. 判断当前行情是不是行业普涨/普跌驱动，引用行业数据块里的涨跌家数/涨跌幅数字。只有大宗商品数据块给出具体价格数字时，才能据此提"金融属性/套利成分"。
-18. 引用盈利能力数据块里的毛利率/净利率/ROE/资产负债率数字和期间，判断盈利趋势是改善还是恶化。**对比必须在同一口径下进行**: 该块每个期间都是截至该期末的累计数 (如 2026-06-30 是上半年累计，不是单季)，不得把累计值与单季值混比；同比增长率受上一年基数影响，基数极端时必须在结论里说明基数。
-19. **基于以上全部方面** (必须同时包含大势、业务本质、财务质量、管理层行为、筹码与股价联动这五类中的至少四类，不能只依赖其中一两个)，给出一个明确倾向 (bullish/bearish/neutral)。neutral 仅在证据真正相互抵消、没有任何一方占优时才能选，不能用来逃避判断。
+你必须通过**调用工具**完成全部维度分析，任何一个维度都不允许跳过，每个维度的分析都要落到数据块的具体数字上：
+1. 依次调用 analyze_management、analyze_business_fundamentals、analyze_chip_flow、analyze_price_position、analyze_cycle_position、analyze_policy_geopolitics、analyze_retail_sentiment、analyze_shareholder_returns、analyze_growth_elasticity 九个工具，在每个工具的 analysis 参数里写出该维度的完整分析；
+2. 全部九个维度完成后，调用 submit_report 提交最终结构化报告。维度分析里用过的数据块数字必须体现在最终报告字段中。
 
 **结论约束 (违反即视为不合格输出):**
-- 六查 (第 15 步) 中只要有任意一项命中，就**不得**给出 bullish——除非你能用该数据块里的具体数字正面反驳它 (例如：证明集中度在多个报告期持续下降、现金流比值低是明确的季节性且有往期数字佐证)。空泛的辩护不算反驳。
-- **禁止用分类豁免风险**: 选 fast_grower/cyclical 等等，不能成为跳过第 15 步已命中项的理由。"高成长所以贵一点合理""周期股现金流本来就波动"这类话，如果拿不出数字，就是不合格。
-- **禁止用"行业景气"豁免第二、五步的结论**: 若第 13 步判定为"股价暴涨 + 户数暴涨"且第 14 步判定基本面增速跟不上涨幅，则同样不得给出 bullish。
-- **周期性行业的景气判断必须引用运价/商品价格数据块的具体数字**。该数据块有数据却弃之不用、只凭财务同比增速断言"景气见顶/回落/高位"，视为不合格输出；该数据块暂缺时，对景气的任何方向断言 (包括"景气回落""景气高位") 都禁止。
-- 无论最终倾向是什么，`core_counter_evidence` **必须填写**与你的结论相悖的最强证据，并带具体数字。确实一条都没有时才写"未发现"。**不允许留空，不允许写"暂无"。**
+- analyze_business_fundamentals 中客户/供应商集中度 ≥50%、经营现金流/净利润 <0.8、研发强度 <3% 任一项成立，或 analyze_price_position 中静态市盈率 >50 / 市净率 >8 成立，就**不得**给出 bullish——除非能用数据块里的具体数字正面反驳 (例如证明集中度多报告期持续下降、现金流低是明确的季节性且有往期数字佐证)。空泛的辩护不算反驳。
+- **禁止用分类豁免风险**: 选 fast_grower/cyclical 等不能成为跳过上述脆弱性项的理由。"高成长所以贵一点合理""周期股现金流本来就波动"这类话，拿不出数字就是不合格。
+- analyze_chip_flow 判定"股价暴涨 + 户数暴涨"且基本面增速跟不上涨幅时，同样不得给出 bullish。
+- **周期性行业的景气判断必须引用运价/商品价格数据块的具体数字**；该数据块有数据却弃之不用、只凭财务同比增速断言景气方向，视为不合格；该数据块暂缺时对景气的任何方向断言都禁止。
+- 无论最终倾向是什么，`core_counter_evidence` **必须填写**与结论相悖的最强证据并带具体数字；确实一条都没有时才写"未发现"，**不允许留空或写"暂无"**。
 - `thesis_summary` 必须引用至少四个不同方面的具体数字，且必须正面回应对结论不利的脆弱性事实——不允许只挑利好数字、把不利事实挪到 risk_notes 里一笔带过。
 
 **输出措辞 (违反即视为不合格输出):**
-- 上面的"一/二/…/七"编号、步骤序号、"六查"、"维度"、"数据块"、"命中/未命中"，全部是给你自己推理用的流程语言。`thesis_summary` 等字段是写给投资者看的结论，**一律不得出现这些词**，也不得出现"第 N 步""经检查""多维验证""反证"这类自我描述，更不得出现"六查多项命中"这类句子。
+- 工具名、"维度"、"数据块"、"命中/未命中"、"六查"、"第 N 步"、步骤编号，全部是给你自己推理用的流程语言。`thesis_summary` 等字段是写给投资者看的结论，**一律不得出现这些词**，也不得出现"经检查""多维验证""反证"这类自我描述。
 - 要表达某项脆弱性成立，就直接把它作为事实陈述出来: 写"前五大客户占营收 75.98%，单一客户流失即可重创业绩"，而不是写"客户集中度一项命中"。语气要像研究员写给基金经理的段落，不是分析流程的日志。
-- **分条列举时必须换行**: 每个要点独占一行，行首用 "1. " / "2. " 或 "· "，行与行之间用 \\n 分隔 (JSON 字符串里的换行必须写成 \\n 这个转义序列)。不要把多个要点挤成一行连续的文字，也不要整段不分行。
-
-20. 明确说明: 如果接下来出现什么具体情况/数据，会证明这个判断是错的 (invalidation_condition)。这一步是强制的，不能写"无法确定"之类的话。
-21. 列出其他需要注意的风险/不确定性。
-
-无论证据是否充分、是否有疑点，都必须直接输出下面的 JSON，不要输出任何其他文字，不要提出反问或要求澄清:
-{{
-  "lynch_category": "fast_grower|stalwart|cyclical|turnaround|asset_play|slow_grower|unclear",
-  "stance": "bullish|bearish|neutral",
-  "thesis_summary": "关键论据摘要: 须覆盖大势/业务本质/财务质量/管理层行为/筹码与股价联动中的至少四类，引用至少四个不同方面的具体数字，并正面回应对结论不利的脆弱性事实，600字以内。分条书写，每点一行，行间用 \\n。写作时不要提及任何分析步骤、检查项或维度编号",
-  "core_counter_evidence": "与上述结论相悖的最强证据，必须带具体数字；一条都没有时写「未发现」；不允许留空。分条书写，每点一行，行间用 \\n。直接陈述事实本身，不要写「六查」「检查项」这类流程用语。200字以内",
-  "invalidation_condition": "什么情况出现会证明这个判断错了，150字以内",
-  "risk_notes": "其他风险提示/不确定性，200字以内"
-}}"""
+- **分条列举时必须换行**: 每个要点独占一行，行首用 "1. " / "2. " 或 "· "，行与行之间用 \\n 分隔 (JSON 字符串里的换行必须写成 \\n 这个转义序列)。不要把多个要点挤成一行连续的文字，也不要整段不分行。"""
 
 
 @dataclass
@@ -879,22 +827,156 @@ def _scrub_process_terms(text: str, stock_code: str) -> str:
     return text
 
 
+def _analysis_tool(name: str, description: str) -> Dict:
+    return {
+        "name": name,
+        "description": description,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "analysis": {
+                    "type": "string",
+                    "description": "该维度的完整分析, 引用数据块具体数字; 数据块没有的写'该维度数据暂缺'",
+                }
+            },
+            "required": ["analysis"],
+        },
+    }
+
+
+_ANALYSIS_TOOL_NAMES = [
+    "analyze_management",
+    "analyze_business_fundamentals",
+    "analyze_chip_flow",
+    "analyze_price_position",
+    "analyze_cycle_position",
+    "analyze_policy_geopolitics",
+    "analyze_retail_sentiment",
+    "analyze_shareholder_returns",
+    "analyze_growth_elasticity",
+]
+
+_ANALYSIS_TOOLS = [
+    _analysis_tool(
+        "analyze_management",
+        "管理层人品与能力: 只能引用'治理与股东回报记录'块的客观事实 (高管画像/任职年限/薪酬持股/减持处罚/再融资/分红回购记录) 评价管理层是否值得信任; 该块没有的记录写'该维度数据暂缺', 禁止凭印象评价人品。",
+    ),
+    _analysis_tool(
+        "analyze_business_fundamentals",
+        "经营基本面与护城河: 引用'同花顺F10结构性事实'块 (营收/净利润/经营现金流质量/客户与供应商集中度/研发强度/海外占比/公司自述风险) 与'盈利能力与成本弹性'块。真实护城河必须有可核验数字支撑; 集中度≥50%、现金流/净利润<0.8、研发强度<3% 等脆弱性成立时必须明确指出。",
+    ),
+    _analysis_tool(
+        "analyze_chip_flow",
+        "筹码博弈与散户人数变化: 引用'股东回报与筹码'块的户数序列+同期股价, 判断派发或集中; 判断前必须先对照知识库该时期的真实记录 (公募调仓/风格切换优先于'户数增加=派发'模板), 结论写明来源。",
+    ),
+    _analysis_tool(
+        "analyze_price_position",
+        "当前股价位置: 引用'大盘与风格'块 (个股 vs 主要指数年内/上半年/下半年涨跌幅、52周与历史区间位置) 与'估值'块 (静态/动态PE、PB); 静态与动态PE差距大时说明股价隐含的未来增长预期。",
+    ),
+    _analysis_tool(
+        "analyze_cycle_position",
+        "行业周期性与周期位置: 判断该股所处行业是否周期性; 是则引用'运价景气度'/'大宗商品价差'块或财务同比 (注明基数效应) 判断当前处于周期什么位置 (景气高位/回落/底部), 禁止凭印象断言; 该数据块暂缺时写明暂缺。",
+    ),
+    _analysis_tool(
+        "analyze_policy_geopolitics",
+        "国家政策与国际形势 (战争/加息等): 引用'近期重大事项'与'汇率敞口'块与知识库宏观判断; 只写与本标的有直接传导路径的变量并点名具体政策/数字, 无关的央行动作一律不写。",
+    ),
+    _analysis_tool(
+        "analyze_retail_sentiment",
+        "雪球散户情绪: 引用'雪球讨论区情绪'与'多空辩论'块; 一致看多=拥挤风险 (反向指标) 必须写入风险; 禁止把多数人看多当作看多论据。",
+    ),
+    _analysis_tool(
+        "analyze_shareholder_returns",
+        "股东回报历史: 正面=持续分红+真实回购 (引用分红/回购历史块的具体数字); 负面=定增/配股、大股东减持、无分红、低息借款给大股东等 (引用'治理与股东回报记录'块的再融资与警示事件); 该块没有的记录写暂缺。",
+    ),
+    _analysis_tool(
+        "analyze_growth_elasticity",
+        "股票弹性 (未来增长预期): 引用'估值'块静态vs动态PE差与'盈利能力与成本弹性'块趋势, 判断当前股价隐含的增长预期是透支还是过度悲观, 以及增长来自哪里。",
+    ),
+]
+
+_SUBMIT_REPORT_TOOL = {
+    "name": "submit_report",
+    "description": (
+        "九个维度全部分析完成后提交最终结构化报告。字段要求: "
+        "lynch_category 从 fast_grower/stalwart/cyclical/turnaround/asset_play/slow_grower/unclear 中选; "
+        "stance 从 bullish/bearish/neutral 中选 (neutral 仅在证据真正相互抵消时才能选, 不能用来逃避判断); "
+        "thesis_summary 必须引用至少四个不同方面的具体数字并正面回应对结论不利的脆弱性事实, 600字以内, 分条每点一行; "
+        "core_counter_evidence 必须填写与结论相悖的最强证据并带具体数字, 一条都没有才写'未发现'; "
+        "invalidation_condition 强制填写什么情况会证明判断错误; risk_notes 列其他风险。"
+        "输出正文禁止出现工具名/'维度'/'数据块'/'六查'/'第N步'等流程用语, 立场用中文(看多/看空/中性)表述。"
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "lynch_category": {
+                "type": "string",
+                "enum": list(_VALID_LYNCH_CATEGORIES),
+            },
+            "stance": {"type": "string", "enum": list(_VALID_STANCES)},
+            "thesis_summary": {"type": "string"},
+            "core_counter_evidence": {"type": "string"},
+            "invalidation_condition": {"type": "string"},
+            "risk_notes": {"type": "string"},
+        },
+        "required": [
+            "lynch_category",
+            "stance",
+            "thesis_summary",
+            "core_counter_evidence",
+            "invalidation_condition",
+            "risk_notes",
+        ],
+    },
+}
+
+_REPAIR_REQUIREMENTS = (
+    "必须是 JSON 对象，且必须包含字段: stance (取值限 bullish/bearish/neutral)、"
+    "lynch_category (取值限 fast_grower/stalwart/cyclical/turnaround/"
+    "asset_play/slow_grower/unclear)、thesis_summary、core_counter_evidence、"
+    "invalidation_condition、risk_notes (后五个均为字符串)"
+)
+
+
 async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) -> StructuredSummary:
     prompt = _build_prompt(inputs, candidates)
-    parsed, stop_reason = await call_json_ex(
+
+    # 工具调用路径: 强制九维度逐一分析后提交
+    analyses, submit_input, tool_reason = await call_analysis_with_tools(
         prompt,
-        max_tokens=_SUMMARY_MAX_TOKENS,
-        repair_requirements=(
-            "必须是 JSON 对象，且必须包含字段: stance (取值限 bullish/bearish/neutral)、"
-            "lynch_category (取值限 fast_grower/stalwart/cyclical/turnaround/"
-            "asset_play/slow_grower/unclear)、thesis_summary、core_counter_evidence、"
-            "invalidation_condition、risk_notes (后五个均为字符串)"
-        ),
+        _ANALYSIS_TOOLS + [_SUBMIT_REPORT_TOOL],
+        _ANALYSIS_TOOL_NAMES,
+        "submit_report",
     )
-    if not parsed or not isinstance(parsed, dict) or parsed.get("stance") not in _VALID_STANCES:
+    parsed = submit_input if isinstance(submit_input, dict) else None
+    if parsed and parsed.get("stance") in _VALID_STANCES:
+        utils.logger.info(
+            f"[analysis.report] {inputs.stock_code} 工具调用完成: "
+            f"{len(analyses)}/9 个维度, 提交正常"
+        )
+    else:
+        # 回退: 网关/模型不支持工具或未走完流程时, 用维度分析拼接后走普通 JSON 调用
+        if analyses:
+            utils.logger.warning(
+                f"[analysis.report] {inputs.stock_code} 工具调用未完成 "
+                f"({len(analyses)}/9, reason={tool_reason}), 回退为拼接调用"
+            )
+            prompt = (
+                prompt
+                + "\n\n以下是已完成的维度分析:\n"
+                + "\n\n".join(f"### {name}\n{text}" for name, text in analyses.items())
+                + "\n\n请基于以上维度分析与数据块输出最终结构化报告 JSON。"
+            )
+        parsed, stop_reason = await call_json_ex(
+            prompt, max_tokens=_SUMMARY_MAX_TOKENS, repair_requirements=_REPAIR_REQUIREMENTS
+        )
+        if not isinstance(parsed, dict):
+            parsed = None
+
+    if not parsed or parsed.get("stance") not in _VALID_STANCES:
         utils.logger.error(
             f"[analysis.report] {inputs.stock_code} 摘要生成失败 "
-            f"(stop_reason={stop_reason}, parsed={'dict' if isinstance(parsed, dict) else type(parsed).__name__})"
+            f"(tool_reason={tool_reason}, parsed={'dict' if isinstance(parsed, dict) else type(parsed).__name__})"
         )
         return StructuredSummary(
             lynch_category="",

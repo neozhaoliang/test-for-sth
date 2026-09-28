@@ -310,6 +310,84 @@ async def call_json(prompt: str, max_tokens: int = 1024) -> Optional[Dict[str, A
     return parsed
 
 
+async def call_analysis_with_tools(
+    prompt: str,
+    tools: List[Dict[str, Any]],
+    required_tool_names: List[str],
+    submit_tool_name: str,
+    max_rounds: int = 10,
+    max_tokens: int = 16384,
+) -> tuple:
+    """
+    工具调用循环: 要求模型逐个调用 required_tool_names 里的分析工具 (每个
+    工具的参数会被收集), 全部完成后调用 submit_tool_name 提交。
+
+    返回 (analyses, submit_input, stop_reason): analyses 是 {工具名: 参数},
+    submit_input 是提交工具的输入 (未调用时为 None), stop_reason 为
+    "ok" / "max_rounds" / "error"。模型/网关不支持工具时不会产生 tool_use,
+    循环会在 max_rounds 内空转后返回空结果, 由调用方回退到普通单次调用。
+    """
+    client = _get_client()
+    messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
+    analyses: Dict[str, Any] = {}
+    submit_input: Optional[Dict[str, Any]] = None
+
+    for _ in range(max_rounds):
+        try:
+            async with client.messages.stream(
+                model=_MODEL,
+                max_tokens=max_tokens,
+                tools=tools,
+                messages=messages,
+            ) as stream:
+                response = await stream.get_final_message()
+        except Exception as e:
+            utils.logger.error(f"[llm_client.call_analysis_with_tools] LLM call failed: {e}")
+            return analyses, submit_input, "error"
+
+        stop_reason = getattr(response, "stop_reason", None)
+        tool_uses = [b for b in response.content if getattr(b, "type", "") == "tool_use"]
+
+        if not tool_uses:
+            missing = [t for t in required_tool_names if t not in analyses]
+            if missing and stop_reason != "max_tokens":
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"你还有未完成的维度分析: {'、'.join(missing)}。"
+                            f"必须逐一调用对应工具完成, 全部完成后再调用 {submit_tool_name}。"
+                        ),
+                    }
+                )
+                continue
+            if not missing:
+                return analyses, submit_input, "ok"
+            # 未完成且模型不再调用工具: 放弃
+            return analyses, submit_input, "max_rounds"
+
+        for b in tool_uses:
+            name = getattr(b, "name", "")
+            inp = getattr(b, "input", None) or {}
+            if name in required_tool_names and isinstance(inp, dict) and inp.get("analysis"):
+                analyses[name] = inp["analysis"]
+            elif name == submit_tool_name and isinstance(inp, dict):
+                submit_input = inp
+        tool_results = [
+            {"type": "tool_result", "tool_use_id": getattr(b, "id", ""), "content": "已记录"}
+            for b in tool_uses
+        ]
+        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "user", "content": tool_results})
+
+        missing = [t for t in required_tool_names if t not in analyses]
+        if not missing and submit_input is not None:
+            return analyses, submit_input, "ok"
+
+    return analyses, submit_input, "max_rounds"
+
+
 async def call_text(prompt: str, max_tokens: int = 2048) -> Optional[str]:
     """调用 LLM 生成自由格式文本 (不解析 JSON)，调用异常时返回 None。"""
     return await _call_llm_raw(prompt, max_tokens)
