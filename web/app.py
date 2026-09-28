@@ -1025,6 +1025,21 @@ function renderResult(report) {
     html += '<div class="risk-block"><b>风险提示:</b> ' + escapeHtml(summary.risk_notes) + '</div>';
   }
 
+  if (summary.dimension_analyses && Object.keys(summary.dimension_analyses).length >= 6) {
+    const dimLabels = {
+      management: '管理层', fundamentals: '基本面', chip_flow: '筹码',
+      price_position: '股价位置', cycle_position: '周期', policy_geopolitics: '政策形势',
+      retail_sentiment: '散户情绪', shareholder_returns: '股东回报', growth_elasticity: '成长弹性',
+    };
+    html += '<details class="evidence-block"><summary style="cursor:pointer;">九维度详细分析 (展开)</summary>';
+    Object.keys(summary.dimension_analyses).forEach(k => {
+      html += '<div style="margin:8px 0;white-space:pre-wrap;"><b>' +
+        escapeHtml(dimLabels[k] || k) + ':</b> ' +
+        escapeHtml(summary.dimension_analyses[k]) + '</div>';
+    });
+    html += '</details>';
+  }
+
   if (summary.dimension_scores && summary.dimension_scores.length >= 6) {
     html += '<div class="evidence-block"><b>九维度评分 (-10 利空 ~ +10 利多, 悬停顶点看理由):</b><br>' +
       renderDimensionRadar(summary.dimension_scores) + '</div>';

@@ -16,7 +16,7 @@
 # 详细许可条款请参阅项目根目录下的LICENSE文件。
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -58,6 +58,10 @@ class StructuredSummary(BaseModel):
     dimension_scores: Optional[List[dict]] = Field(
         default=None,
         description="九维度评分 (雷达图用): [{dimension: 中文名, score: -10..+10, note: 一句理由}]",
+    )
+    dimension_analyses: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="九维度详细分析原文 (工具名 -> 该维度完整分析, 供 UI 展开查看)",
     )
 
 
