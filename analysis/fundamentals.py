@@ -659,6 +659,9 @@ def _parse_executive_profile(html: str) -> Optional[Dict]:
     years = re.findall(r"(\d{4})年(?:加入|进入)", text)
     if years:
         profile["joined_year"] = int(years[0])
+    m = re.search(r"\d+\s*岁\s*(博士|硕士|本科)", text)
+    if m:
+        profile["chairman_education"] = m.group(1)
     if not profile:
         return None
     return profile
@@ -786,10 +789,15 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
     if not refinancing_history:
         missing.append("再融资记录(增发/配股)")
 
-    # 高管画像 (公司资料页高管介绍): 董事长姓名/加入年份/薪酬/持股
+    # 高管画像 (公司资料页高管介绍): 董事长姓名/加入年份/薪酬/持股/学历
     executive_profile = _parse_executive_profile(company) if company else None
     if not executive_profile:
         missing.append("高管介绍")
+    if company:
+        company_plain = re.sub(r"\s+", " ", _strip_tags(company))
+        m = re.search(r"员工人数[：:]\s*([\d,]+)", company_plain)
+        if m:
+            facts["employee_count"] = int(m.group(1).replace(",", ""))
 
     # 治理警示事件 (减持/处罚/问询等, 来自公司大事全页扫描)
     governance_alerts = (

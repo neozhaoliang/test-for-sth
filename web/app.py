@@ -1045,7 +1045,7 @@ function renderResult(report) {
 
   if (summary.dimension_analyses && Object.keys(summary.dimension_analyses).length >= 6) {
     const dimLabels = {
-      management: '管理层', fundamentals: '基本面', chip_flow: '筹码',
+      management: '管理层', fundamentals: '基本面', rd: '研发能力', chip_flow: '筹码',
       price_position: '股价位置', cycle_position: '周期', policy_geopolitics: '政策形势',
       retail_sentiment: '散户情绪', shareholder_returns: '股东回报', growth_elasticity: '成长弹性',
     };

@@ -86,6 +86,9 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 
 {fundamentals_block}
 
+研发能力 (科技企业重点维度: 专利/技术护城河/研发投入与强度/员工人数/董事长学历):
+{rd_block}
+
 近期重大事项 (公司公告/股东会等，判断再融资、分红调整等事件的摊薄/增厚影响):
 {major_events_block}
 
@@ -139,6 +142,7 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 
 **结论约束 (违反即视为不合格输出):**
 - analyze_business_fundamentals 中客户/供应商集中度 ≥50%、经营现金流/净利润 <0.8、研发强度 <3% 任一项成立，或 analyze_price_position 中静态市盈率 >50 / 市净率 >8 成立，就**不得**给出 bullish——除非能用数据块里的具体数字正面反驳 (例如证明集中度多报告期持续下降、现金流低是明确的季节性且有往期数字佐证)。空泛的辩护不算反驳。
+- analyze_rd_capability 中"研发强度低 + 发明专利占比低 + 领导层无技术背景"组合出现时，必须在结论中指出技术护城河缺乏证据，不得用"行业龙头""技术领先"等无数字说法充作护城河。
 - **禁止用分类豁免风险**: 选 fast_grower/cyclical 等不能成为跳过上述脆弱性项的理由。"高成长所以贵一点合理""周期股现金流本来就波动"这类话，拿不出数字就是不合格。
 - analyze_chip_flow 判定"股价暴涨 + 户数暴涨"且基本面增速跟不上涨幅时，同样不得给出 bullish。
 - **融资盘拥挤必须提示**: analyze_chip_flow 中融资余额占流通市值比例高 (参考 8% 以上) 或近期快速上升且股价处高位时，结论必须提示杠杆资金拥挤风险；融资盘持续回落则说明去杠杆中。
@@ -150,7 +154,7 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 - 工具名、"维度"、"数据块"、"命中/未命中"、"六查"、"第 N 步"、步骤编号，全部是给你自己推理用的流程语言。`thesis_summary` 等字段是写给投资者看的结论，**一律不得出现这些词**，也不得出现"经检查""多维验证""反证"这类自我描述。
 - 要表达某项脆弱性成立，就直接把它作为事实陈述出来: 写"前五大客户占营收 75.98%，单一客户流失即可重创业绩"，而不是写"客户集中度一项命中"。语气要像研究员写给基金经理的段落，不是分析流程的日志。
 - **分条列举时必须换行**: 每个要点独占一行，行首用 "1. " / "2. " 或 "· "，行与行之间用 \\n 分隔 (JSON 字符串里的换行必须写成 \\n 这个转义序列)。不要把多个要点挤成一行连续的文字，也不要整段不分行。
-- **`thesis_summary` 必须按九个维度逐一展开详细阐述**: 每个维度独立成段 (编号 1-9，顺序与工具一致: 管理层→基本面→筹码→股价位置→周期→政策形势→散户情绪→股东回报→成长弹性)，每段保留该维度分析里的关键数字、判断与推理链，不得把某个维度压缩成一句话带过，也不得跳过任何一个维度。总长 1500 字以内。九个维度都写完后，再加一段综合立场。"""
+- **`thesis_summary` 必须按十个维度逐一展开详细阐述**: 每个维度独立成段 (编号 1-10，顺序与工具一致: 管理层→基本面→研发能力→筹码→股价位置→周期→政策形势→散户情绪→股东回报→成长弹性)，每段保留该维度分析里的关键数字、判断与推理链，不得把某个维度压缩成一句话带过，也不得跳过任何一个维度。总长 1500 字以内。十个维度都写完后，再加一段综合立场。"""
 
 
 @dataclass
@@ -350,6 +354,32 @@ def _build_margin_block(
         ratio = margin_signal.get("latest_balance_yi", 0) / (float_shares * latest_price / 1e8) * 100
         lines.append(f"  融资余额/流通市值 {round(ratio, 2)}%")
     return "融资盘与流通盘:\n" + "\n".join(lines)
+
+
+def _build_rd_block(fundamentals: Optional[Dict], executive_profile: Optional[Dict]) -> str:
+    facts = (fundamentals or {}).get("facts") or {}
+    lines = ["研发能力 (科技企业重点维度, 技术护城河判断必须以这些数字为证据):"]
+    rd = facts.get("rd_investment_yuan")
+    lines.append(
+        f"  研发投入 {rd / 1e8:.2f} 亿" if rd else "  研发投入 暂缺"
+    )
+    lines.append(f"  研发强度(研发投入/营业收入) {facts.get('rd_intensity_pct')}%"
+                 if facts.get("rd_intensity_pct") is not None else "  研发强度 暂缺")
+    lines.append(
+        f"  授权专利 {facts.get('patents_granted')} 件, 其中发明专利 "
+        f"{facts.get('patents_invention')} 件 (发明专利占比 {facts.get('invention_ratio_pct')}%)"
+        if facts.get("patents_granted") is not None else "  专利数据 暂缺"
+    )
+    lines.append(
+        f"  员工人数 {facts.get('employee_count')}" if facts.get("employee_count") else "  员工人数 暂缺"
+    )
+    if executive_profile:
+        lines.append(
+            f"  董事长学历 {executive_profile.get('chairman_education')}"
+            if executive_profile.get("chairman_education") else "  董事长学历 暂缺"
+        )
+    lines.append("  研发队伍组成 (专业/学历构成): 本次未取到, 暂缺")
+    return "\n".join(lines)
 
 
 def _build_governance_block(
@@ -895,6 +925,7 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         quote_line=quote_line,
         valuation_block=_build_valuation_block(inputs.valuation, quote),
         fundamentals_block=_build_fundamentals_block(inputs.fundamentals),
+        rd_block=_build_rd_block(inputs.fundamentals, inputs.executive_profile),
         major_events_block=_build_major_events_block(inputs.major_events),
         governance_block=_build_governance_block(
             inputs.refinancing_history, inputs.executive_profile, inputs.governance_alerts
@@ -962,6 +993,7 @@ def _analysis_tool(name: str, description: str) -> Dict:
 _ANALYSIS_TOOL_NAMES = [
     "analyze_management",
     "analyze_business_fundamentals",
+    "analyze_rd_capability",
     "analyze_chip_flow",
     "analyze_price_position",
     "analyze_cycle_position",
@@ -979,6 +1011,10 @@ _ANALYSIS_TOOLS = [
     _analysis_tool(
         "analyze_business_fundamentals",
         "经营基本面与护城河: 引用'同花顺F10结构性事实'块 (营收/净利润/经营现金流质量/客户与供应商集中度/研发强度/海外占比/公司自述风险) 与'盈利能力与成本弹性'块。真实护城河必须有可核验数字支撑; 集中度≥50%、现金流/净利润<0.8、研发强度<3% 等脆弱性成立时必须明确指出。",
+    ),
+    _analysis_tool(
+        "analyze_rd_capability",
+        "研发能力评估 (科技企业重点维度): 引用'研发能力'块——研发投入与研发强度、授权专利与发明专利占比、员工人数、董事长学历 (技术背景代理)。技术护城河判断必须以这些数字为证据: 研发强度低、发明专利占比低、领导层无技术背景的组合意味着技术壁垒缺乏证据 (代工/组装属性风险), 必须明确指出; 研发队伍组成 (专业/学历构成) 数据未取到时写'该维度数据暂缺'。非科技企业此项权重低, 但仍要如实引用数字。",
     ),
     _analysis_tool(
         "analyze_chip_flow",
@@ -1016,8 +1052,8 @@ _SUBMIT_REPORT_TOOL = {
         "九个维度全部分析完成后提交最终结构化报告。字段要求: "
         "lynch_category 从 fast_grower/stalwart/cyclical/turnaround/asset_play/slow_grower/unclear 中选; "
         "stance 从 bullish/bearish/neutral 中选 (neutral 仅在证据真正相互抵消时才能选, 不能用来逃避判断); "
-        "thesis_summary 必须按九个维度逐一展开详细阐述: 每个维度独立成段 (编号1-9, 顺序同分析工具), "
-        "每段保留该维度的关键数字与推理链, 不得压缩成一句话或跳过; 九个维度写完后加一段综合立场; "
+        "thesis_summary 必须按十个维度逐一展开详细阐述: 每个维度独立成段 (编号1-10, 顺序同分析工具), "
+        "每段保留该维度的关键数字与推理链, 不得压缩成一句话或跳过; 十个维度写完后加一段综合立场; "
         "引用至少四个不同方面的具体数字并正面回应对结论不利的脆弱性事实, 1500字以内, 分条每点一行; "
         "core_counter_evidence 必须填写与结论相悖的最强证据并带具体数字, 一条都没有才写'未发现'; "
         "invalidation_condition 强制填写什么情况会证明判断错误; risk_notes 列其他风险。"
@@ -1057,6 +1093,7 @@ _REPAIR_REQUIREMENTS = (
 _DIMENSION_LABELS = {
     "management": "管理层",
     "fundamentals": "基本面",
+    "rd": "研发能力",
     "chip_flow": "筹码",
     "price_position": "股价位置",
     "cycle_position": "周期",
@@ -1066,15 +1103,15 @@ _DIMENSION_LABELS = {
     "growth_elasticity": "成长弹性",
 }
 
-_SCORE_PROMPT = """以下是对一只股票九个维度的分析。请对每个维度打分: -10 表示极度利空, +10 表示极度利多, 0 表示中性。维度名固定为以下九个: management, fundamentals, chip_flow, price_position, cycle_position, policy_geopolitics, retail_sentiment, shareholder_returns, growth_elasticity。
+_SCORE_PROMPT = """以下是对一只股票十个维度的分析。请对每个维度打分: -10 表示极度利空, +10 表示极度利多, 0 表示中性。维度名固定为以下十个: management, fundamentals, rd, chip_flow, price_position, cycle_position, policy_geopolitics, retail_sentiment, shareholder_returns, growth_elasticity。
 
-输出 JSON 数组 (9 个元素, 不要任何其他文字):
+输出 JSON 数组 (10 个元素, 不要任何其他文字):
 [{{"dimension": "management", "score": -3, "note": "一句理由 (15字以内)"}}]
 
 维度分析:
 {analyses_block}"""
 
-_SCORE_REPAIR = "必须是 JSON 数组且恰有 9 个元素, 每个元素含 dimension (取值限 management/fundamentals/chip_flow/price_position/cycle_position/policy_geopolitics/retail_sentiment/shareholder_returns/growth_elasticity)、score (-10 到 10 的数字)、note (短字符串)"
+_SCORE_REPAIR = "必须是 JSON 数组且恰有 10 个元素, 每个元素含 dimension (取值限 management/fundamentals/rd/chip_flow/price_position/cycle_position/policy_geopolitics/retail_sentiment/shareholder_returns/growth_elasticity)、score (-10 到 10 的数字)、note (短字符串)"
 
 
 async def _score_dimensions(
