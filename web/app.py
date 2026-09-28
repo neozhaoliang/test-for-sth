@@ -572,9 +572,8 @@ function renderFundamentalsBlock(f) {
 
   const series = x.holder_count_series || [];
   if (series.length >= 2) {
-    html += '<div style="margin-top:6px"><b>股东户数 vs 同期股价 (判断股价暴涨是否伴随筹码派发):</b><ul>' +
-      series.slice(0, 8).map(p => '<li>' + escapeHtml(String(p.period)) + ': 股东户数 ' +
-        p.holders + ' 户, 股价 ' + p.price + '</li>').join('') + '</ul></div>';
+    html += '<div style="margin-top:6px"><b>股东户数 vs 同期股价 (判断股价暴涨是否伴随筹码派发):</b><br>' +
+      renderHolderChart(series.slice(0, 8)) + '</div>';
   }
 
   const risks = (f.self_disclosed_risks || '').trim();
@@ -769,6 +768,82 @@ function renderEvidenceSection(report) {
   return html;
 }
 
+// 股东户数(柱,蓝) + 同期股价(线,橙) 走势图。两条序列都以首期=100 指数化、
+// 共用一条 y 轴 (避免双轴混标); 悬停显示原始数值, 图下附原始数据表。
+function renderHolderChart(series) {
+  const n = series.length;
+  const W = 720, H = 250, padL = 52, padR = 16, padT = 30, padB = 36;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const first = series[0];
+  const idxHolders = series.map(p => (p.holders / first.holders) * 100);
+  const idxPrice = series.map(p => (p.price / first.price) * 100);
+  let min = Math.min(...idxHolders, ...idxPrice);
+  let max = Math.max(...idxHolders, ...idxPrice);
+  const spread = (max - min) * 0.15 || 5;
+  min -= spread; max += spread;
+  const yOf = v => padT + plotH - ((v - min) / (max - min)) * plotH;
+  const slot = plotW / n;
+  const barW = Math.min(slot * 0.5, 36);
+
+  let bars = '', linePts = '', dots = '';
+  series.forEach((p, i) => {
+    const xc = padL + slot * i + slot / 2;
+    const yTop = yOf(idxHolders[i]);
+    bars += '<rect class="holder-mark" x="' + (xc - barW / 2).toFixed(1) + '" y="' + yTop.toFixed(1) +
+      '" width="' + barW.toFixed(1) + '" height="' + (padT + plotH - yTop).toFixed(1) +
+      '" fill="#1a73e8" fill-opacity="0.85" data-tip="' +
+      escapeHtml(p.period) + ': 股东户数 ' + p.holders + ' 户 (指数 ' + idxHolders[i].toFixed(1) + ')"/>';
+    const py = yOf(idxPrice[i]);
+    linePts += (linePts ? ' ' : '') + xc.toFixed(1) + ',' + py.toFixed(1);
+    dots += '<circle class="holder-mark" cx="' + xc.toFixed(1) + '" cy="' + py.toFixed(1) +
+      '" r="4.5" fill="#d97706" stroke="#fff" stroke-width="1.5" data-tip="' +
+      escapeHtml(p.period) + ': 股价 ' + p.price + ' 元 (指数 ' + idxPrice[i].toFixed(1) + ')"/>';
+  });
+
+  let xLabels = '';
+  series.forEach((p, i) => {
+    if (n > 6 && i % 2 === 1) return;  // 标签过密时抽稀
+    const xc = padL + slot * i + slot / 2;
+    xLabels += '<text x="' + xc.toFixed(1) + '" y="' + (H - 12).toFixed(1) +
+      '" text-anchor="middle" font-size="11" fill="#444">' +
+      escapeHtml(String(p.period).slice(0, 10)) + '</text>';
+  });
+
+  let grid = '';
+  const steps = 4;
+  for (let s = 0; s <= steps; s++) {
+    const v = min + (max - min) * s / steps;
+    const y = yOf(v);
+    grid += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) +
+      '" stroke="' + (s === 0 || s === steps ? '#d9d9d9' : '#eeeeee') + '" stroke-width="1"/>';
+    grid += '<text x="' + (padL - 8) + '" y="' + (y + 4).toFixed(1) +
+      '" text-anchor="end" font-size="11" fill="#999">' + Math.round(v) + '</text>';
+  }
+
+  const legend = '<g font-size="12" fill="#444">' +
+    '<rect x="' + padL + '" y="10" width="12" height="12" fill="#1a73e8" fill-opacity="0.85"/>' +
+    '<text x="' + (padL + 18) + '" y="20">股东户数 (首期=100)</text>' +
+    '<circle cx="' + (padL + 168) + '" cy="16" r="4.5" fill="#d97706"/>' +
+    '<text x="' + (padL + 180) + '" y="20">股价 (首期=100)</text></g>';
+
+  const table = '<table style="border-collapse:collapse;font-size:12px;margin-top:6px;"><tr>' +
+    '<td style="padding:2px 6px;color:#666;">期间</td>' +
+    series.map(p => '<td style="padding:2px 8px;border-left:1px solid #eee;color:#666;text-align:center;">' +
+      escapeHtml(String(p.period).slice(0, 10)) + '</td>').join('') + '</tr><tr>' +
+    '<td style="padding:2px 6px;color:#666;">股东户数</td>' +
+    series.map(p => '<td style="padding:2px 8px;border-left:1px solid #eee;text-align:center;">' +
+      p.holders + '</td>').join('') + '</tr><tr>' +
+    '<td style="padding:2px 6px;color:#666;">股价(元)</td>' +
+    series.map(p => '<td style="padding:2px 8px;border-left:1px solid #eee;text-align:center;">' +
+      p.price + '</td>').join('') + '</tr></table>';
+
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" style="max-width:100%;"' +
+    ' role="img" aria-label="股东户数与同期股价走势 (首期=100 指数化)">' +
+    grid + bars +
+    '<polyline points="' + linePts + '" fill="none" stroke="#d97706" stroke-width="2"/>' +
+    dots + xLabels + legend + '</svg>' + table;
+}
+
 // 九维度雷达图 (内联 SVG): 顶点=维度, 值=-10(利空)~+10(利多)。
 // 极性除颜色外还有位置(相对0环)与数字双重编码; 正红负绿沿用本界面方向色。
 function renderDimensionRadar(scores) {
@@ -817,16 +892,16 @@ function renderDimensionRadar(scores) {
 function attachRadarTooltips() {
   const tip = document.getElementById('radarTip');
   if (!tip) return;
-  document.querySelectorAll('.radar-dot').forEach(dot => {
-    dot.addEventListener('mousemove', (e) => {
-      const note = dot.getAttribute('data-note') || '';
-      if (!note) return;
+  document.querySelectorAll('.radar-dot, .holder-mark').forEach(mark => {
+    mark.addEventListener('mousemove', (e) => {
+      const text = mark.getAttribute('data-note') || mark.getAttribute('data-tip') || '';
+      if (!text) return;
       tip.style.display = 'block';
       tip.style.left = (e.clientX + 14) + 'px';
       tip.style.top = (e.clientY + 14) + 'px';
-      tip.textContent = note;
+      tip.textContent = text;
     });
-    dot.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+    mark.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
   });
 }
 
