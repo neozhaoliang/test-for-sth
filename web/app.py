@@ -628,6 +628,22 @@ function renderEvidenceSection(report) {
     html += '<div class="evidence-block missing"><b>股东户数:</b> 暂缺</div>';
   }
 
+  const mg = report.margin_signal;
+  if (mg) {
+    const fs = (report.valuation || {}).float_shares;
+    const lp = report.realtime_quote ? report.realtime_quote.latest_price : null;
+    let mgText = '融资余额 ' + mg.latest_balance_yi + ' 亿 (' + mg.latest_date + ')，近 ' + mg.days +
+      ' 个交易日 ' + mg.first_balance_yi + ' → ' + mg.latest_balance_yi + ' 亿 (' +
+      (mg.change_pct >= 0 ? '+' : '') + mg.change_pct + '%)';
+    if (fs && lp) {
+      mgText += '，占流通市值 ' + (mg.latest_balance_yi / (fs * lp / 1e8) * 100).toFixed(2) +
+        '% (流通股本 ' + (fs / 1e8).toFixed(2) + ' 亿股)';
+    }
+    html += '<div class="evidence-block"><b>融资盘与流通盘:</b> ' + escapeHtml(mgText) + '</div>';
+  } else {
+    html += '<div class="evidence-block missing"><b>融资盘与流通盘:</b> 暂缺</div>';
+  }
+
   const pt = report.profitability_trend;
   if (pt) {
     html += '<div class="evidence-block"><b>盈利能力与成本弹性:</b><ul>' +

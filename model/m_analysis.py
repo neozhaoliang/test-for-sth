@@ -82,6 +82,7 @@ class AnalysisReport(BaseModel):
     )
     commodity_signal: Optional[dict] = Field(default=None, description="沪铜/COMEX铜价差 + 人民币汇率趋势 (仅周期性矿业股)")
     freight_signal: Optional[dict] = Field(default=None, description="集运运价景气度 (仅航运/港口类公司)")
+    margin_signal: Optional[dict] = Field(default=None, description="融资盘与流通盘 (融资余额序列/占流通市值比例/近期增减)")
     market_context: Optional[dict] = Field(default=None, description="大盘与风格: 主要指数与个股的年内/上半年/下半年涨跌幅 + 个股历史区间位置")
     rmb_signal: Optional[dict] = Field(default=None, description="人民币汇率趋势 (全部股票，用于判断汇率对海外收入的影响方向)")
     profitability_trend: Optional[dict] = Field(default=None, description="近几个报告期毛利率/净利率/ROE/资产负债率趋势 (盈利能力与成本弹性)")

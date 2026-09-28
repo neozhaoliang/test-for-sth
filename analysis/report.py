@@ -33,6 +33,7 @@ from analysis.freight import get_container_freight_signal
 from analysis.fundamentals import get_ths_fundamentals
 from analysis.industry import get_industry_comparison
 from analysis.knowledge_base import ensure_loaded as ensure_knowledge_base_loaded
+from analysis.margin import get_margin_signal
 from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.realtime_price import get_realtime_quote, get_stock_name
@@ -114,6 +115,9 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 股东回报与筹码 (股东户数变化可作散户情绪/筹码集中度的代理指标——户数增加通常意味着原有大户/机构筹码被拆分卖给了更分散的散户，即"机构派发给散户"；户数减少则是筹码集中。分红回购历史反映管理层对股东的回报态度):
 {shareholder_block}
 
+融资盘与流通盘 (流通盘大小 + 融资余额绝对值/占流通市值比例/近期增减趋势; 融资余额快速上升且股价高位=杠杆资金拥挤风险, 持续回落=去杠杆):
+{margin_block}
+
 治理与股东回报记录 (管理层人品/美誉度只能基于这里的客观事实推断: 任职年限、薪酬与持股、分红回购、再融资记录、减持/处罚/问询记录):
 {governance_block}
 
@@ -134,6 +138,7 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 - analyze_business_fundamentals 中客户/供应商集中度 ≥50%、经营现金流/净利润 <0.8、研发强度 <3% 任一项成立，或 analyze_price_position 中静态市盈率 >50 / 市净率 >8 成立，就**不得**给出 bullish——除非能用数据块里的具体数字正面反驳 (例如证明集中度多报告期持续下降、现金流低是明确的季节性且有往期数字佐证)。空泛的辩护不算反驳。
 - **禁止用分类豁免风险**: 选 fast_grower/cyclical 等不能成为跳过上述脆弱性项的理由。"高成长所以贵一点合理""周期股现金流本来就波动"这类话，拿不出数字就是不合格。
 - analyze_chip_flow 判定"股价暴涨 + 户数暴涨"且基本面增速跟不上涨幅时，同样不得给出 bullish。
+- **融资盘拥挤必须提示**: analyze_chip_flow 中融资余额占流通市值比例高 (参考 8% 以上) 或近期快速上升且股价处高位时，结论必须提示杠杆资金拥挤风险；融资盘持续回落则说明去杠杆中。
 - **周期性行业的景气判断必须引用运价/商品价格数据块的具体数字**；该数据块有数据却弃之不用、只凭财务同比增速断言景气方向，视为不合格；该数据块暂缺时对景气的任何方向断言都禁止。
 - 无论最终倾向是什么，`core_counter_evidence` **必须填写**与结论相悖的最强证据并带具体数字；确实一条都没有时才写"未发现"，**不允许留空或写"暂无"**。
 - `thesis_summary` 必须引用至少四个不同方面的具体数字，且必须正面回应对结论不利的脆弱性事实——不允许只挑利好数字、把不利事实挪到 risk_notes 里一笔带过。
@@ -169,6 +174,7 @@ class AnalysisInputs:
     xueqiu_stock: Optional[Dict] = None
     debate: Optional[Dict] = None
     sentiment: Optional[Dict] = None
+    margin_signal: Optional[Dict] = None
     market_context: Optional[Dict] = None
     freight_signal: Optional[Dict] = None
 
@@ -292,6 +298,32 @@ def _build_major_events_block(major_events: Optional[List[Dict]]) -> str:
     for e in major_events[:8]:
         lines.append(f"  {e.get('date', '')} [{e.get('kind', '')}] {e.get('title', '')}")
     return "\n".join(lines)
+
+
+def _build_margin_block(
+    margin_signal: Optional[Dict], valuation: Optional[Dict], quote: Optional[Dict]
+) -> str:
+    if not margin_signal:
+        return f"融资盘与流通盘: {_MISSING_TAIL}"
+    lines: List[str] = []
+    float_shares = (valuation or {}).get("float_shares")
+    latest_price = (quote or {}).get("latest_price")
+    if float_shares:
+        lines.append(f"  流通股本 {round(float_shares / 1e8, 2)} 亿股")
+        if latest_price:
+            float_mv_yi = float_shares * latest_price / 1e8
+            lines.append(f"  按最新价计流通市值 {round(float_mv_yi, 0)} 亿")
+    lines.append(
+        f"  融资余额 {margin_signal.get('latest_balance_yi')} 亿 "
+        f"({margin_signal.get('latest_date')}), "
+        f"近 {margin_signal.get('days')} 个交易日从 {margin_signal.get('first_balance_yi')} 亿 "
+        f"变为 {margin_signal.get('latest_balance_yi')} 亿 "
+        f"(变化 {margin_signal.get('change_pct'):+}%)"
+    )
+    if float_shares and latest_price:
+        ratio = margin_signal.get("latest_balance_yi", 0) / (float_shares * latest_price / 1e8) * 100
+        lines.append(f"  融资余额/流通市值 {round(ratio, 2)}%")
+    return "融资盘与流通盘:\n" + "\n".join(lines)
 
 
 def _build_governance_block(
@@ -852,6 +884,7 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         shareholder_block=_build_shareholder_block(
             inputs.shareholder_trend, inputs.dividend_history, inputs.buyback_history
         ),
+        margin_block=_build_margin_block(inputs.margin_signal, inputs.valuation, inputs.quote),
         profitability_block=_build_profitability_block(inputs.profitability_trend),
         commodity_block=_build_commodity_block(inputs.commodity_signal),
         freight_block=_build_freight_block(inputs.freight_signal),
@@ -922,7 +955,7 @@ _ANALYSIS_TOOLS = [
     ),
     _analysis_tool(
         "analyze_chip_flow",
-        "筹码博弈与散户人数变化: 引用'股东回报与筹码'块的户数序列+同期股价, 判断派发或集中; 判断前必须先对照知识库该时期的真实记录 (公募调仓/风格切换优先于'户数增加=派发'模板), 结论写明来源。",
+        "筹码博弈与散户人数变化: 引用'股东回报与筹码'块的户数序列+同期股价, 判断派发或集中; 判断前必须先对照知识库该时期的真实记录 (公募调仓/风格切换优先于'户数增加=派发'模板), 结论写明来源。必须同时引用'融资盘与流通盘'块: 流通盘大小、融资余额绝对值、占流通市值比例、近期增减趋势——融资余额快速上升且股价高位=杠杆资金拥挤风险, 持续回落=去杠杆; 融资盘动向与户数变化互相印证。",
     ),
     _analysis_tool(
         "analyze_price_position",
@@ -1151,6 +1184,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         profitability_trend,
         fundamentals,
         market_context,
+        margin_signal,
     ) = await asyncio.gather(
         _load_knowledge_excerpts(),
         get_shareholder_count_trend(stock_code),
@@ -1159,6 +1193,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         get_profitability_trend(stock_code),
         get_ths_fundamentals(stock_code),
         get_market_context(stock_code),
+        get_margin_signal(stock_code),
     )
 
     # 行业反查的起点是 F10 公司概要页里的申万行业名，所以必须等 fundamentals 回来。
@@ -1219,6 +1254,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         governance_alerts=governance_alerts,
         market_context=market_context,
         freight_signal=freight_signal,
+        margin_signal=margin_signal,
     )
 
     # 雪球个股数据必须借道已登录的浏览器会话，且只在会话存活期内可用；
@@ -1281,6 +1317,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         ),
         market_context=market_context,
         freight_signal=freight_signal,
+        margin_signal=margin_signal,
         summary=summary,
         prompt_version=_PROMPT_VERSION,
         generated_at=int(time.time()),
