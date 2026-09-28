@@ -49,7 +49,7 @@ _MAX_LATEST_POSTS = 5
 _MAX_HISTORICAL_THESIS = 5
 _MIN_CORROBORATING_RECORDS = 2  # 历史验证记录 < 该值时提示"参考价值有限"
 
-_PROMPT_VERSION = "v10-freight-market"
+_PROMPT_VERSION = "v11-nine-dimension-tools"
 
 # 实测: 300308 的 v7 prompt 输出 6060 tokens，其中约 5000 花在 thinking 块上。
 # 报告类 prompt 的思考预算随输入维度数量增长，上限必须留足余量，否则截断到 len=0。
