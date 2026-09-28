@@ -351,6 +351,60 @@ def _build_sentiment_block(sentiment: Optional[Dict]) -> str:
     return "\n".join(lines)
 
 
+def _build_dividend_chart(
+    dividend_history: Optional[List[Dict]],
+    buyback_history: Optional[List[Dict]],
+    valuation: Optional[Dict],
+    quote: Optional[Dict],
+) -> Optional[List[Dict]]:
+    """
+    按年度聚合分红与回购 (回购按总股本折算成"元/10股", 与分红同口径相加),
+    并计算按现价折算的股息率, 供柱状图展示。
+    """
+    total_shares = (valuation or {}).get("total_shares")
+    latest_price = (quote or {}).get("latest_price")
+    by_year: Dict[str, Dict] = {}
+    for d in dividend_history or []:
+        y = str(d.get("announce_date", ""))[:4]
+        if not y.isdigit():
+            continue
+        g = by_year.setdefault(y, {"year": y, "div_per_10": 0.0, "buyback_per_10": 0.0})
+        try:
+            g["div_per_10"] += float(d.get("dividend_per_10_shares") or 0)
+        except (TypeError, ValueError):
+            pass
+    for b in buyback_history or []:
+        y = str(b.get("announce_date", ""))[:4]
+        if not y.isdigit():
+            continue
+        g = by_year.setdefault(y, {"year": y, "div_per_10": 0.0, "buyback_per_10": 0.0})
+        try:
+            amount = float(b.get("actual_amount") or 0)
+        except (TypeError, ValueError):
+            continue
+        if total_shares:
+            g["buyback_per_10"] += amount / total_shares * 10
+    if not by_year:
+        return None
+    out = []
+    for y in sorted(by_year):
+        g = by_year[y]
+        total = g["div_per_10"] + g["buyback_per_10"]
+        yield_pct = None
+        if latest_price and total:
+            yield_pct = round(total / 10 / latest_price * 100, 2)
+        out.append(
+            {
+                "year": y,
+                "dividend_per_10": round(g["div_per_10"], 2),
+                "buyback_per_10": round(g["buyback_per_10"], 2),
+                "total_per_10": round(total, 2),
+                "yield_pct": yield_pct,
+            }
+        )
+    return out
+
+
 def _build_debate_block(debate: Optional[Dict]) -> str:
     if not debate:
         return f"雪球多空辩论: {_MISSING_TAIL}"
@@ -1218,6 +1272,9 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         xueqiu_stock=inputs.xueqiu_stock,
         debate=inputs.debate,
         sentiment=inputs.sentiment,
+        dividend_chart=_build_dividend_chart(
+            dividend_history, buyback_history, valuation, quote
+        ),
         market_context=market_context,
         freight_signal=freight_signal,
         summary=summary,

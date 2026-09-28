@@ -72,6 +72,10 @@ class AnalysisReport(BaseModel):
     shareholder_trend: Optional[dict] = Field(default=None, description="股东户数环比变化 (散户情绪/筹码集中度代理)")
     dividend_history: List[dict] = Field(default_factory=list, description="历史分红记录")
     buyback_history: List[dict] = Field(default_factory=list, description="历史回购记录")
+    dividend_chart: Optional[List[dict]] = Field(
+        default=None,
+        description="分红+回购柱状图数据 (按年度, 回购折算元/10股并入, 含按现价股息率)",
+    )
     commodity_signal: Optional[dict] = Field(default=None, description="沪铜/COMEX铜价差 + 人民币汇率趋势 (仅周期性矿业股)")
     freight_signal: Optional[dict] = Field(default=None, description="集运运价景气度 (仅航运/港口类公司)")
     market_context: Optional[dict] = Field(default=None, description="大盘与风格: 主要指数与个股的年内/上半年/下半年涨跌幅 + 个股历史区间位置")

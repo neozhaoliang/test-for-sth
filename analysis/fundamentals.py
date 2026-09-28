@@ -457,6 +457,8 @@ def _parse_profile(html: str) -> Dict[str, Any]:
             out["ocf_per_share"] = _first_number(value)
         elif label == "流通A股":
             out["float_shares"] = _amount_yuan(value.replace("股", ""))
+        elif label == "总股本":
+            out["total_shares"] = _amount_yuan(value.replace("股", ""))
         elif label == "更新日期":
             out["valuation_as_of"] = value.strip()
     return out
