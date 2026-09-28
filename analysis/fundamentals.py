@@ -461,11 +461,12 @@ def _parse_profile(html: str) -> Dict[str, Any]:
             out["total_shares"] = _amount_yuan(value.replace("股", ""))
         elif label == "更新日期":
             out["valuation_as_of"] = value.strip()
-    # 总股本与申万行业一样是单 span 标记, 走 _PROFILE_LABEL_RE 抓不到, 单独匹配
+    # 总股本的值 span 里有隐藏 input (<input id="stockzgb" value="76.30" />),
+    # 走 _PROFILE_LABEL_RE 抓不到, 直接匹配该隐藏字段
     if "total_shares" not in out:
-        m = re.search(r"总股本[：:]\s*([\d.]+\s*亿)股", html)
+        m = re.search(r'id="stockzgb"\s*value="([\d.]+)"', html)
         if m:
-            out["total_shares"] = _amount_yuan(m.group(1))
+            out["total_shares"] = float(m.group(1)) * 1e8
     return out
 
 
