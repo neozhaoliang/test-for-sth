@@ -739,11 +739,11 @@ function renderEvidenceSection(report) {
       ' 条 (正确 ' + db.bear.correct + ', 错误 ' + db.bear.incorrect + '), 未验证 ' + db.bear.unverified + ' 条</li></ul>';
     if (db.bull_core) {
       dbHtml += '<div><b>多方核心论点:</b><br>' +
-        db.bull_core.split('\n').filter(s => s.trim()).map(escapeHtml).join('<br>') + '</div>';
+        db.bull_core.split('\\n').filter(s => s.trim()).map(escapeHtml).join('<br>') + '</div>';
     }
     if (db.bear_core) {
       dbHtml += '<div><b>空方核心论点:</b><br>' +
-        db.bear_core.split('\n').filter(s => s.trim()).map(escapeHtml).join('<br>') + '</div>';
+        db.bear_core.split('\\n').filter(s => s.trim()).map(escapeHtml).join('<br>') + '</div>';
     }
     if (db.verdict) {
       dbHtml += '<div><b>哪方更合理: ' + escapeHtml(db.verdict) + '</b> — ' + escapeHtml(db.reason) + '</div>';
