@@ -24,7 +24,6 @@
 import asyncio
 import re
 import time
-from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from analysis.a_share_structure import get_a_share_structure
@@ -47,6 +46,7 @@ from analysis.valuation_history import get_valuation_history
 from analysis.evidence import ResearchQuality, build_evidence_ledger, evaluate_research_quality
 from analysis.research_profile import ResearchProfile, classify_research_profile
 from analysis.report_contract import _PROMPT_VERSION
+from analysis.report_inputs import AnalysisInputs
 from analysis.report_validation import validate_report
 from analysis.research_context import ResearchMode, ResearchRequest, assert_request_supported
 from analysis.snapshot_store import save_report_snapshot
@@ -61,45 +61,6 @@ from analysis.report_social import (
 from analysis.shareholder import get_buyback_history, get_dividend_history, get_shareholder_count_trend
 from model.m_analysis import AnalysisReport, CandidateOpinion, KnowledgeExcerpt
 from tools.utils import utils
-
-@dataclass
-class AnalysisInputs:
-    """报告的全部输入维度。用 dataclass 收敛是为了避免拆成十几个位置参数——
-    加维度时漏传一个参数在位置参数下会静默串位，不会报错。"""
-    stock_code: str
-    stock_name: str = ""
-    quote: Dict = field(default_factory=dict)
-    knowledge_excerpts: List[KnowledgeExcerpt] = field(default_factory=list)
-    industry_comparison: Optional[Dict] = None
-    shareholder_trend: Optional[Dict] = None
-    dividend_history: List[Dict] = field(default_factory=list)
-    buyback_history: List[Dict] = field(default_factory=list)
-    profitability_trend: Optional[Dict] = None
-    commodity_signal: Optional[Dict] = None
-    rmb_signal: Optional[Dict] = None
-    macro_rates: Optional[Dict] = None
-    policy_events: Optional[Dict] = None
-    fundamentals: Optional[Dict] = None
-    valuation: Optional[Dict] = None
-    valuation_history: Optional[Dict] = None
-    rd_team: Optional[Dict] = None
-    major_events: List[Dict] = field(default_factory=list)
-    refinancing_history: List[Dict] = field(default_factory=list)
-    executive_profile: Optional[Dict] = None
-    governance_alerts: List[Dict] = field(default_factory=list)
-    xueqiu_stock: Optional[Dict] = None
-    debate: Optional[Dict] = None
-    sentiment: Optional[Dict] = None
-    margin_signal: Optional[Dict] = None
-    market_context: Optional[Dict] = None
-    freight_signal: Optional[Dict] = None
-    primary_evidence: List[Dict] = field(default_factory=list)
-    a_share_structure: Optional[Dict] = None
-    management_capital: Optional[Dict] = None
-    filing_calendar: List[Dict] = field(default_factory=list)
-    research_profile: Optional[ResearchProfile] = None
-    research_quality: Optional[ResearchQuality] = None
-
 
 def _resolve_stock_name(stock_code: str, candidate_scores) -> str:
     for user in candidate_scores:
