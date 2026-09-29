@@ -92,7 +92,7 @@ class AnalysisReport(BaseModel):
         default=None,
         description="分红+回购柱状图数据 (按年度, 回购折算元/10股并入, 含按现价股息率)",
     )
-    commodity_signal: Optional[dict] = Field(default=None, description="沪铜/COMEX铜价差 + 人民币汇率趋势 (仅周期性矿业股)")
+    commodity_signal: Optional[dict] = Field(default=None, description="与公司产品匹配的周期商品期货代理 (20/60日方向、1年位置；铜产业可含内外盘背景)")
     freight_signal: Optional[dict] = Field(default=None, description="集运运价景气度 (仅航运/港口类公司)")
     margin_signal: Optional[dict] = Field(default=None, description="融资盘与流通盘 (融资余额序列/占流通市值比例/近期增减)")
     market_context: Optional[dict] = Field(default=None, description="大盘与风格: 主要指数与个股的年内/上半年/下半年涨跌幅 + 个股历史区间位置")
