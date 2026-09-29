@@ -16,8 +16,8 @@ from typing import Dict, List, Tuple
 
 
 _DIVIDEND_PATTERNS = (
-    re.compile(r"每s*10s*股[^\d]{0,20}派(?:发)?(?:现金红利)?s*([\d.]+)s*元"),
-    re.compile(r"10s*派s*([\d.]+)s*元?"),
+    re.compile(r"每\s*10\s*股[^\d]{0,20}派(?:发)?(?:现金红利)?\s*([\d.]+)\s*元"),
+    re.compile(r"10\s*派\s*([\d.]+)\s*元?"),
 )
 
 _BUYBACK_RE = re.compile(r"回购")
