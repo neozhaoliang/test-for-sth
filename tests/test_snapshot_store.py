@@ -166,6 +166,8 @@ def test_frozen_research_inputs_rebuild_analysis_inputs(tmp_path):
 
     assert inputs.stock_code == "600000"
     assert inputs.stock_name == "测试股份"
+    assert inputs.research_mode == "live"
+    assert inputs.as_of == report.as_of
     assert candidates == []
     assert len(evidence) == 2
     assert evidence[0].category == "valuation_history"
