@@ -65,6 +65,7 @@ analysis.research_context.SOURCE_TEMPORAL_CAPABILITIES
 | primary_evidence | AS_OF_SAFE | 巨潮公告查询以 `as_of` 为截止日期，并再次本地过滤发布日期 |
 | macro_rates | AS_OF_SAFE | Fed目标利率、美债10Y、LPR先截到 `as_of`，再相对该日判断新鲜度 |
 | margin | AS_OF_SAFE | 交易所融资明细从 `as_of` 向前回溯最近交易日 |
+| kol_knowledge | AS_OF_SAFE | 雪球/B站原始发布时间统一为 epoch 秒，历史模式排除未来和未知时间条目 |
 
 当前仍阻断 historical：
 
@@ -77,7 +78,6 @@ analysis.research_context.SOURCE_TEMPORAL_CAPABILITIES
 | a_share_structure | 机构季度持仓必须按披露日而不是季度末判断 |
 | industry_cycle | 商品/运价/行业数据尚未统一接受 as_of |
 | xueqiu_live | 当前浏览器抓的是今天讨论区 |
-| kol_knowledge | 知识卡尚未统一过滤原始发布日期 <= as_of |
 | candidate_credibility | 当前命中率可能包含 as_of 之后才验证出来的结果 |
 
 可通过 API 查看实时能力：
