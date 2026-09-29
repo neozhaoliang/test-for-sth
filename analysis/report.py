@@ -140,7 +140,12 @@ async def generate_report(
         )
     assert_request_supported(request)
 
-    candidate_scores = find_candidates(stock_code)
+    candidate_scores = find_candidates(
+        stock_code,
+        as_of=request.as_of
+        if request.mode == ResearchMode.HISTORICAL
+        else None,
+    )
 
     stock_name = _resolve_stock_name(stock_code, candidate_scores)
     quote = (
