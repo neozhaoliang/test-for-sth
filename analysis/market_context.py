@@ -25,6 +25,7 @@
 """
 
 import asyncio
+import logging
 import time
 from datetime import date
 from typing import Dict, List, Optional, Tuple
@@ -33,7 +34,6 @@ import akshare as ak
 import pandas as pd
 
 from backtest.price_source import get_price_history
-from tools.utils import utils
 
 # 风格覆盖: 大盘 (上证/沪深300)、科技成长 (科创50/创业板指)、红利 (上证红利)。
 _INDEX_UNIVERSE: List[Tuple[str, str]] = [
@@ -43,6 +43,8 @@ _INDEX_UNIVERSE: List[Tuple[str, str]] = [
     ("sh000688", "科创50"),
     ("sz399006", "创业板指"),
 ]
+
+logger = logging.getLogger("MediaCrawler")
 
 _TTL_SECONDS = 6 * 3600
 _index_cache: Optional[Tuple[float, Dict[str, pd.Series]]] = None
@@ -64,7 +66,7 @@ async def _get_index_series() -> Dict[str, pd.Series]:
         try:
             df = await asyncio.to_thread(ak.stock_zh_index_daily, symbol=symbol)
         except Exception as e:
-            utils.logger.error(f"[market_context] stock_zh_index_daily({symbol}) failed: {e}")
+            logger.error(f"[market_context] stock_zh_index_daily({symbol}) failed: {e}")
             continue
         if df is None or df.empty:
             continue
@@ -126,7 +128,7 @@ async def get_market_context(
     try:
         stock_df = await get_price_history(stock_code, start, end=as_of)
     except Exception as e:
-        utils.logger.error(f"[market_context] get_price_history({stock_code}) failed: {e}")
+        logger.error(f"[market_context] get_price_history({stock_code}) failed: {e}")
         stock_df = pd.DataFrame(columns=["date", "close"])
 
     stock: Optional[Dict] = None
