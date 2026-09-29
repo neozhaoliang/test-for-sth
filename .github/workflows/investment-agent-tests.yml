@@ -45,6 +45,8 @@ jobs:
             analysis/rd_team.py \
             analysis/primary_sources.py \
             analysis/policy_context.py \
+            analysis/candidates.py \
+            backtest/score.py \
             analysis/report_contract.py \
             analysis/report_validation.py \
             analysis/research_context.py \
@@ -104,6 +106,7 @@ jobs:
             tests/test_realtime_price_asof.py \
             tests/test_margin_asof.py \
             tests/test_knowledge_asof.py \
+            tests/test_score_asof.py \
             tests/test_management_capital.py \
             tests/test_macro_rates.py \
             tests/test_commodity_cycle.py \
