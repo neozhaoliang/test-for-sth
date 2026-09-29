@@ -336,4 +336,5 @@ def to_historical_profitability(data: Optional[Dict]) -> Optional[Dict]:
         "point_in_time": True,
         "as_of": data.get("as_of"),
         "source_tier": "S",
+        "available_at": data.get("latest_published_at"),
     }
