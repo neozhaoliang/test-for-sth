@@ -39,11 +39,14 @@ import asyncio
 import glob
 import hashlib
 import json
+import logging
 import os
 import re
+from datetime import date, datetime, time
 from typing import Dict, List, NamedTuple, Optional
+from zoneinfo import ZoneInfo
 
-from tools.utils import utils
+logger = logging.getLogger("MediaCrawler")
 
 _ROOT_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 _CACHE_PATH = os.path.join(_ROOT_DATA_DIR, "knowledge_base", "distilled_cache.jsonl")
@@ -268,7 +271,7 @@ def _load_raw_entries(source: KnowledgeSource) -> List[Dict]:
                         }
                     )
         except (OSError, json.JSONDecodeError) as e:
-            utils.logger.error(f"[knowledge_base] 加载知识库文件失败 {path}: {e}")
+            logger.error(f"[knowledge_base] 加载知识库文件失败 {path}: {e}")
     return raws
 
 
@@ -286,7 +289,7 @@ def _read_distill_cache() -> Dict[str, Dict]:
                 rec = json.loads(line)
                 cache[rec["cache_key"]] = rec
     except (OSError, json.JSONDecodeError) as e:
-        utils.logger.error(f"[knowledge_base] 读取提炼缓存失败: {e}")
+        logger.error(f"[knowledge_base] 读取提炼缓存失败: {e}")
     return cache
 
 
@@ -309,14 +312,14 @@ async def _distill_one(raw: Dict) -> str:
     content = raw["content"][:_MAX_DISTILL_CHARS]
     content, dropped = _strip_raw_injection(content)
     if dropped:
-        utils.logger.warning(
+        logger.warning(
             f"[knowledge_base] {raw.get('entry_id')} 原文剔除疑似注入文本 {dropped} 行: {raw.get('title', '')[:40]}"
         )
     prompt = _DISTILL_PROMPT.format(title=raw["title"], content=content)
     result = await call_text(prompt, max_tokens=768)
     distilled = _strip_self_intro((result or "").strip())
     if len(distilled) < len((result or "").strip()):
-        utils.logger.warning(
+        logger.warning(
             f"[knowledge_base] {raw.get('entry_id')} 提炼输出剥离开头非要点段落: {raw.get('title', '')[:40]}"
         )
     return distilled
@@ -336,7 +339,7 @@ async def _distill_missing(raws: List[Dict], cache: Dict[str, Dict]) -> Dict[str
     if not to_distill:
         return cache
 
-    utils.logger.info(f"[knowledge_base] 需要提炼 {len(to_distill)} 条知识库条目 (新增/内容变化)")
+    logger.info(f"[knowledge_base] 需要提炼 {len(to_distill)} 条知识库条目 (新增/内容变化)")
     semaphore = asyncio.Semaphore(_DISTILL_CONCURRENCY)
 
     async def _run(raw: Dict) -> Dict:
@@ -381,7 +384,7 @@ async def ensure_loaded() -> List[KnowledgeEntry]:
         if old is None or raw.get("timestamp", 0) >= old.get("timestamp", 0):
             deduped[key] = raw
     if len(deduped) != len(raws):
-        utils.logger.info(
+        logger.info(
             f"[knowledge_base] 原始条目 {len(raws)} 条，按来源+ID去重后 {len(deduped)} 条"
         )
     raws = list(deduped.values())
@@ -397,7 +400,7 @@ async def ensure_loaded() -> List[KnowledgeEntry]:
         # 模型自报家门文本 (蒸馏模型行为异常导致)，不重蒸馏也能清理掉。
         distilled = _strip_self_intro(rec.get("distilled", "") or "")
         if len(distilled) < len(rec.get("distilled", "") or ""):
-            utils.logger.warning(
+            logger.warning(
                 f"[knowledge_base] {raw['entry_id']} 缓存条目剥离开头非要点段落: {raw['title'][:40]}"
             )
         entries.append(
@@ -413,8 +416,33 @@ async def ensure_loaded() -> List[KnowledgeEntry]:
         )
     entries.sort(key=lambda e: e.timestamp, reverse=True)
     _cache = entries
-    utils.logger.info(f"[knowledge_base] 已加载 {len(entries)} 条知识库条目 (来源数: {len(_build_sources())})")
+    logger.info(f"[knowledge_base] 已加载 {len(entries)} 条知识库条目 (来源数: {len(_build_sources())})")
     return _cache
+
+
+def filter_entries_as_of(
+    entries: List[KnowledgeEntry],
+    as_of: Optional[date],
+) -> List[KnowledgeEntry]:
+    """
+    Historical knowledge filter.
+
+    Unknown publication time is excluded in historical mode because it cannot prove the
+    item was available by as_of. Live mode (as_of=None) keeps all entries.
+    """
+    if as_of is None:
+        return list(entries)
+    cutoff = int(
+        datetime.combine(
+            as_of,
+            time(23, 59, 59),
+            tzinfo=ZoneInfo("Asia/Shanghai"),
+        ).timestamp()
+    )
+    return [
+        e for e in entries
+        if e.timestamp > 0 and e.timestamp <= cutoff
+    ]
 
 
 def invalidate_cache() -> None:
