@@ -10,6 +10,7 @@ and freshness flag; stale data is never presented as "current".
 from __future__ import annotations
 
 import asyncio
+import logging
 import csv
 import io
 from datetime import date, datetime
@@ -17,7 +18,9 @@ from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 
-from tools.utils import utils
+
+
+logger = logging.getLogger("MediaCrawler")
 
 
 _FRED_TIMEOUT_S = 20
@@ -73,7 +76,7 @@ async def _fetch_fred_series(series_id: str) -> List[Dict]:
             resp.raise_for_status()
             text = resp.text
     except Exception as e:
-        utils.logger.warning(
+        logger.warning(
             f"[macro_rates] FRED {series_id} failed: {type(e).__name__}: {str(e)[:140]}"
         )
         return []
@@ -86,7 +89,7 @@ async def _fetch_fred_series(series_id: str) -> List[Dict]:
             if dt is not None and value is not None:
                 rows.append({"date": dt, "value": value})
     except Exception as e:
-        utils.logger.warning(f"[macro_rates] FRED {series_id} parse failed: {e}")
+        logger.warning(f"[macro_rates] FRED {series_id} parse failed: {e}")
         return []
     rows.sort(key=lambda x: x["date"])
     return rows
@@ -155,7 +158,7 @@ async def _fetch_china_lpr() -> Optional[Dict]:
             timeout=_LPR_TIMEOUT_S,
         )
     except Exception as e:
-        utils.logger.warning(
+        logger.warning(
             f"[macro_rates] China LPR failed: {type(e).__name__}: {str(e)[:140]}"
         )
         return None
