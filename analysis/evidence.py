@@ -164,7 +164,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         tier="B",
         kind="fact",
         value=fundamentals,
-        tags=("financials", "customers", "suppliers", "cashflow"),
+        tags=("financials", "customers", "suppliers", "cashflow", "working_capital", "receivables", "inventory"),
         url=source_map.get("finance") or source_map.get("operate"),
     )
     rd_payload = {
