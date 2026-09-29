@@ -102,14 +102,14 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
     ),
     "shareholder_count": TemporalCapability(
         source="shareholder_count",
-        capability=SourceTemporalCapability.SNAPSHOT_ONLY,
-        reason="adapter filters by disclosure date <= as_of, but today's third-party history may contain later corrections; exact backtests require a contemporaneous snapshot/original disclosure version",
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="historical mode parses shareholder count only from exact CNINFO periodic-report PDF versions published by as_of",
         implemented=True,
     ),
     "dividend_buyback": TemporalCapability(
         source="dividend_buyback",
-        capability=SourceTemporalCapability.SNAPSHOT_ONLY,
-        reason="date filtering removes obvious future events, but current aggregate rows can reflect later progress/amount updates; exact historical use requires frozen/versioned disclosures",
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="historical mode builds dividend/buyback events only from CNINFO announcements published by as_of and never backfills later implementation progress",
         implemented=True,
     ),
     "a_share_structure": TemporalCapability(
