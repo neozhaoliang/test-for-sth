@@ -897,6 +897,19 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
         if facts.get("inventory_yuan") is not None and facts.get("revenue")
         else None
     )
+    ar_yoy = facts.get("accounts_receivable_yoy_pct")
+    inv_yoy = facts.get("inventory_yoy_pct")
+    rev_yoy = facts.get("revenue_yoy_pct")
+    facts["receivable_growth_minus_revenue_pp"] = (
+        round(ar_yoy - rev_yoy, 2)
+        if ar_yoy is not None and rev_yoy is not None
+        else None
+    )
+    facts["inventory_growth_minus_revenue_pp"] = (
+        round(inv_yoy - rev_yoy, 2)
+        if inv_yoy is not None and rev_yoy is not None
+        else None
+    )
 
     valuation = _parse_profile(profile) if profile else {}
     if not valuation:
