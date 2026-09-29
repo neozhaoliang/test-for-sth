@@ -16,72 +16,20 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict
 
-from analysis.evidence import EvidenceItem, ResearchQuality
-from analysis.report_inputs import AnalysisInputs
+from analysis.evidence import ResearchQuality
 from analysis.report_contract import _PROMPT_VERSION
 from analysis.report_synthesis import _generate_summary
 from analysis.report_validation import validate_report
 from analysis.research_profile import ResearchProfile
 from analysis.snapshot_store import (
+    frozen_research_inputs_to_analysis_inputs,
     load_snapshot_manifest,
     load_snapshot_research_inputs,
     verify_snapshot_integrity,
 )
-from model.m_analysis import AnalysisReport, CandidateOpinion, KnowledgeExcerpt
-
-
-def _inputs_from_frozen(payload: Dict) -> Tuple[AnalysisInputs, list[CandidateOpinion], list[EvidenceItem]]:
-    candidates = [
-        CandidateOpinion.model_validate(x)
-        for x in payload.get("candidates") or []
-    ]
-    evidence = [
-        EvidenceItem.model_validate(x)
-        for x in payload.get("evidence") or []
-    ]
-    knowledge = [
-        KnowledgeExcerpt.model_validate(x)
-        for x in payload.get("knowledge_excerpts") or []
-    ]
-
-    inputs = AnalysisInputs(
-        stock_code=str(payload.get("stock_code") or ""),
-        stock_name=str(payload.get("stock_name") or ""),
-        quote=payload.get("realtime_quote") or {},
-        knowledge_excerpts=knowledge,
-        industry_comparison=payload.get("industry_comparison"),
-        shareholder_trend=payload.get("shareholder_trend"),
-        dividend_history=payload.get("dividend_history") or [],
-        buyback_history=payload.get("buyback_history") or [],
-        profitability_trend=payload.get("profitability_trend"),
-        commodity_signal=payload.get("commodity_signal"),
-        rmb_signal=payload.get("rmb_signal"),
-        macro_rates=payload.get("macro_rates"),
-        policy_events=payload.get("policy_events"),
-        fundamentals=payload.get("fundamentals"),
-        valuation=payload.get("valuation"),
-        valuation_history=payload.get("valuation_history"),
-        rd_team=payload.get("rd_team"),
-        xueqiu_stock=payload.get("xueqiu_stock"),
-        debate=payload.get("debate"),
-        sentiment=payload.get("sentiment"),
-        margin_signal=payload.get("margin_signal"),
-        market_context=payload.get("market_context"),
-        freight_signal=payload.get("freight_signal"),
-        primary_evidence=payload.get("primary_evidence") or [],
-        a_share_structure=payload.get("a_share_structure"),
-        management_capital=payload.get("management_capital"),
-        filing_calendar=payload.get("filing_calendar") or [],
-        research_profile=ResearchProfile.model_validate(
-            payload.get("research_profile") or {}
-        ),
-        research_quality=ResearchQuality.model_validate(
-            payload.get("research_quality") or {}
-        ),
-    )
-    return inputs, candidates, evidence
+from model.m_analysis import AnalysisReport
 
 
 async def replay_snapshot(
@@ -99,7 +47,7 @@ async def replay_snapshot(
 
     manifest = load_snapshot_manifest(path)
     frozen = load_snapshot_research_inputs(path)
-    inputs, candidates, evidence = _inputs_from_frozen(frozen)
+    inputs, candidates, evidence = frozen_research_inputs_to_analysis_inputs(frozen)
 
     summary, review = await _generate_summary(inputs, candidates, evidence)
 
