@@ -113,9 +113,9 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
     ),
     "a_share_structure": TemporalCapability(
         source="a_share_structure",
-        capability=SourceTemporalCapability.LIVE_ONLY,
-        reason="quarter holdings must respect disclosure date, not only quarter-end date",
-        implemented=False,
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="historical mode reads identifiable top holders only from the exact CNINFO periodic-report PDF version published by as_of; live mode may use richer reconstructed databases",
+        implemented=True,
     ),
     "market_context": TemporalCapability(
         source="market_context",
