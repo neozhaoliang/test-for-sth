@@ -62,6 +62,7 @@ jobs:
             analysis/fundamentals.py \
             analysis/filing_calendar.py \
             analysis/filing_archive.py \
+            analysis/point_in_time_financials.py \
             model/m_analysis.py \
             config/bilibili_config.py \
             media_platform/bilibili/client.py \
@@ -120,5 +121,6 @@ jobs:
             tests/test_primary_sources.py \
             tests/test_filing_calendar.py \
             tests/test_filing_archive.py \
+            tests/test_point_in_time_financials.py \
             tests/test_policy_context.py \
             tests/test_rd_team.py
