@@ -73,7 +73,7 @@ _FACTOR_RULES = {
         },
     },
     "盈利/现金流": {
-        "patterns": (r"经营现金流", r"现金流", r"ROE", r"净利率", r"毛利率", r"负债率"),
+        "patterns": (r"经营现金流", r"现金流", r"ROE", r"净利率", r"毛利率", r"负债率", r"应收", r"存货", r"库存"),
         "expected": {
             "analyze_business_fundamentals",
             "analyze_growth_elasticity",
