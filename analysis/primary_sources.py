@@ -17,8 +17,6 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
-import akshare as ak
-import httpx
 
 from tools.utils import utils
 
@@ -125,7 +123,7 @@ def _announcement_url(item: Dict) -> Optional[str]:
     return None
 
 
-async def _get_org_id(client: httpx.AsyncClient, code6: str) -> Optional[str]:
+async def _get_org_id(client, code6: str) -> Optional[str]:
     try:
         resp = await client.get(
             "https://www.cninfo.com.cn/new/data/szse_stock.json",
@@ -144,7 +142,7 @@ async def _get_org_id(client: httpx.AsyncClient, code6: str) -> Optional[str]:
 
 
 async def _fetch_category_direct(
-    client: httpx.AsyncClient,
+    client,
     code6: str,
     org_id: str,
     category: str,
@@ -224,6 +222,8 @@ async def _fetch_category_fallback(
     semaphore: asyncio.Semaphore,
 ) -> List[Dict]:
     """AkShare fallback; timeout is defensive but a running thread cannot be force-cancelled."""
+    import akshare as ak
+
     async with semaphore:
         try:
             df = await asyncio.wait_for(
@@ -294,6 +294,8 @@ async def get_cninfo_primary_evidence(
     start_date = start.strftime("%Y%m%d")
     end_date = now.strftime("%Y%m%d")
     semaphore = asyncio.Semaphore(_CONCURRENCY)
+
+    import httpx
 
     async with httpx.AsyncClient(
         headers=_CNINFO_HEADERS,
