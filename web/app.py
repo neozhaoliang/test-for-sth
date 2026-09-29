@@ -436,7 +436,10 @@ _INDEX_HTML = """<!DOCTYPE html>
   header { margin-bottom: 24px; }
   header h1 { margin: 0 0 4px; font-size: 24px; }
   header p { margin: 0; color: #666; font-size: 14px; }
-  .search-bar { display: flex; gap: 8px; margin: 20px 0; }
+  .search-bar { display: flex; gap: 8px; margin: 20px 0 8px; }
+  .research-options { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin:0 0 14px; color:#666; font-size:12px; }
+  .research-options label { display:flex; align-items:center; gap:5px; }
+  .temporal-status { padding:6px 9px; border-radius:4px; background:#f5f7fa; border:1px solid #e0e4e8; }
   input { padding: 8px; font-size: 14px; width: 200px; border: 1px solid #ccc; border-radius: 4px; }
   button { padding: 8px 20px; font-size: 14px; cursor: pointer; background: #1a73e8; color: #fff; border: none; border-radius: 4px; }
   button:hover { background: #1558b0; }
@@ -484,6 +487,10 @@ _INDEX_HTML = """<!DOCTYPE html>
 <div class="search-bar">
   <input id="stockCode" placeholder="股票代码或名称，如 SH603408 / 洛阳钼业" />
   <button id="submitBtn">分析</button>
+</div>
+<div class="research-options">
+  <label><input type="checkbox" id="saveSnapshot" /> 保存标准研究快照</label>
+  <span id="temporalStatus" class="temporal-status">检查 historical/as-of 能力...</span>
 </div>
 <div class="watchlist">
   <p>常用股票 (点击可快速填入分析):</p>
@@ -561,6 +568,28 @@ function renderWatchlist() {
   });
 }
 
+async function loadTemporalCapabilities() {
+  const el = document.getElementById('temporalStatus');
+  try {
+    const res = await fetch('/api/research/time-capabilities');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const safe = data.safe_sources || [];
+    const blocking = data.blocking_sources || [];
+    if (data.historical_ready) {
+      el.textContent = 'Historical/as-of 已就绪：' + safe.length + ' 路数据源通过 point-in-time 校验';
+      el.title = '历史模式已具备全部必要 point-in-time 数据源';
+    } else {
+      el.textContent = 'Historical/as-of 尚未开放：' + safe.length + ' 路已安全，' +
+        blocking.length + ' 路仍阻塞';
+      el.title = blocking.map(x => x + ': ' + ((data.reasons || {})[x] || '')).join('\n');
+    }
+  } catch (e) {
+    el.textContent = 'Historical/as-of 能力状态读取失败';
+    el.title = String(e);
+  }
+}
+
 async function submitAnalysis() {
   const stockCode = document.getElementById('stockCode').value.trim();
   if (!stockCode) return;
@@ -579,7 +608,11 @@ async function submitAnalysis() {
   const res = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stock_code: stockCode }),
+    body: JSON.stringify({
+      stock_code: stockCode,
+      mode: 'live',
+      save_snapshot: document.getElementById('saveSnapshot').checked,
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -1874,6 +1907,7 @@ document.getElementById('digestBtn').addEventListener('click', () => submitCrawl
 document.getElementById('digestUserBtn').addEventListener('click', () => submitCrawl('digest_user'));
 document.getElementById('crawlOnlyBtn').addEventListener('click', () => submitCrawl('crawl_only'));
 renderWatchlist();
+loadTemporalCapabilities();
 loadCrawledUsers();
 
 // 聚焦时全选: 输入框里残留上次的选择文本时, datalist 会按它过滤导致
