@@ -125,9 +125,8 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
     ),
     "macro_rates": TemporalCapability(
         source="macro_rates",
-        capability=SourceTemporalCapability.LIVE_ONLY,
-        reason="current macro context returns latest releases and lacks vintage-date filtering",
-        implemented=False,
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="Fed target, Treasury 10Y and LPR observations are truncated to as_of and freshness is evaluated relative to as_of",
     ),
     "industry_cycle": TemporalCapability(
         source="industry_cycle",
