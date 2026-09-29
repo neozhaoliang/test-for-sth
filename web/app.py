@@ -683,6 +683,69 @@ function renderRdTeamBlock(rd) {
   return html;
 }
 
+function renderManagementCapitalBlock(mc) {
+  if (!mc) {
+    return '<div class="evidence-block missing"><b>管理层与长期资本分配:</b> 暂缺</div>';
+  }
+  let html = '<div class="evidence-block"><b>管理层与长期资本分配:</b>';
+
+  const a = mc.alignment || {};
+  const alignment = [];
+  if (a.chairman) alignment.push('董事长 ' + escapeHtml(a.chairman));
+  if (a.joined_year) {
+    alignment.push(a.joined_year + '年加入' +
+      (a.tenure_years !== null && a.tenure_years !== undefined ? '，约 ' + a.tenure_years + ' 年' : ''));
+  }
+  if (a.chairman_salary_wan !== null && a.chairman_salary_wan !== undefined) {
+    alignment.push('年薪 ' + a.chairman_salary_wan + ' 万元');
+  }
+  if (a.chairman_shares) alignment.push('持股 ' + escapeHtml(a.chairman_shares));
+  html += '<div><b>利益绑定:</b> ' + (alignment.length ? alignment.join('；') : '暂缺') + '</div>';
+
+  const ex = mc.execution || {};
+  if (Object.keys(ex).length) {
+    const parts = [];
+    if (ex.period_start || ex.period_end) parts.push('观察期 ' + escapeHtml(ex.period_start || '') + '~' + escapeHtml(ex.period_end || ''));
+    if (ex.roe_avg_pct !== null && ex.roe_avg_pct !== undefined) {
+      parts.push('ROE均值 ' + ex.roe_avg_pct + '%，最低 ' + ex.roe_min_pct + '%，最新 ' + ex.roe_latest_pct + '%');
+    }
+    if (ex.net_profit_growth_observations) {
+      parts.push('净利润增速为正 ' + ex.net_profit_growth_positive_periods + '/' + ex.net_profit_growth_observations + ' 个观察期');
+    }
+    if (ex.net_margin_change_pp !== null && ex.net_margin_change_pp !== undefined) {
+      parts.push('净利率较起点 ' + (ex.net_margin_change_pp >= 0 ? '+' : '') + ex.net_margin_change_pp + 'pct');
+    }
+    html += '<div><b>经营执行:</b> ' + parts.join('；') + '</div>';
+  }
+
+  const renderWindow = (row, label) => {
+    if (!row) return '';
+    const buybackYi = ((row.buyback_actual_amount_yuan || 0) / 1e8).toFixed(2);
+    return '<li><b>' + label + ':</b> 分红覆盖 ' + row.dividend_years_count + '/' + row.window_years +
+      ' 个日历年，累计每10股现金分红 ' + row.cash_dividend_per_10_total + ' 元；' +
+      '回购 ' + row.buyback_records + ' 次，已回购约 ' + buybackYi + ' 亿元；' +
+      '再融资 ' + row.refinancing_records + ' 次；减持公告 ' + row.insider_reduction_announcements +
+      ' 条；处罚/警示/问询等公告 ' + row.governance_negative_announcements + ' 条</li>';
+  };
+  html += '<ul>' + renderWindow(mc.five_year, '近5年') + renderWindow(mc.ten_year, '近10年') + '</ul>';
+
+  const bad = mc.recent_governance_negative_events || [];
+  if (bad.length) {
+    html += '<details><summary style="cursor:pointer;">查看近期治理负面公告</summary><ul>' +
+      bad.slice(0, 5).map(x => '<li>' + escapeHtml(x.published_at || '') + ' ' +
+        safeExternalLink(x.url, x.title || '公告') + '</li>').join('') + '</ul></details>';
+  }
+  const reductions = mc.recent_insider_reduction_events || [];
+  if (reductions.length) {
+    html += '<details><summary style="cursor:pointer;">查看近期减持公告</summary><ul>' +
+      reductions.slice(0, 5).map(x => '<li>' + escapeHtml(x.published_at || '') + ' ' +
+        safeExternalLink(x.url, x.title || '公告') + '</li>').join('') + '</ul></details>';
+  }
+  html += '<div class="credibility-note">这里只展示长期行为记录，不把单个事实直接等同于“人品”；管理层判断需同时看利益绑定、经营兑现和资本分配。</div>';
+  html += '</div>';
+  return html;
+}
+
 function renderXueqiuBlock(x) {
   if (!x) {
     return '<div class="evidence-block missing"><b>雪球个股维度:</b> 暂缺 (本次未能取到机构持仓/讨论热度)</div>';
@@ -808,7 +871,7 @@ function renderEvidenceSection(report) {
     const div = report.dividend_history || [];
     if (div.length) {
       html += '<div class="evidence-block"><b>历史分红:</b><ul>' +
-        div.map(d => '<li>' + escapeHtml(d.announce_date) + ': 每10股派息 ' + d.dividend_per_10_shares + ' 元 (' + escapeHtml(d.progress) + ')</li>').join('') +
+        div.slice(0, 12).map(d => '<li>' + escapeHtml(d.announce_date) + ': 每10股派息 ' + d.dividend_per_10_shares + ' 元 (' + escapeHtml(d.progress) + ')</li>').join('') +
         '</ul></div>';
     } else {
       html += '<div class="evidence-block missing"><b>历史分红:</b> 暂缺</div>';
@@ -818,7 +881,7 @@ function renderEvidenceSection(report) {
   const bb = report.buyback_history || [];
   if (bb.length) {
     html += '<div class="evidence-block"><b>历史回购:</b><ul>' +
-      bb.map(b => '<li>' + escapeHtml(b.announce_date) + ': 计划金额区间 [' + b.planned_amount_range[0] + ', ' + b.planned_amount_range[1] +
+      bb.slice(0, 10).map(b => '<li>' + escapeHtml(b.announce_date) + ': 计划金额区间 [' + b.planned_amount_range[0] + ', ' + b.planned_amount_range[1] +
         ']，已回购 ' + b.actual_amount + ' (' + escapeHtml(b.progress) + ')</li>').join('') +
       '</ul></div>';
   } else {
@@ -918,6 +981,7 @@ function renderEvidenceSection(report) {
 
   html += renderFundamentalsBlock(report.fundamentals);
   html += renderRdTeamBlock(report.rd_team);
+  html += renderManagementCapitalBlock(report.management_capital);
   html += renderXueqiuBlock(report.xueqiu_stock);
 
   const db = report.debate;
