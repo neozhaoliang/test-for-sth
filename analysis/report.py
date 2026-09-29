@@ -40,6 +40,7 @@ from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.primary_sources import get_cninfo_primary_evidence
 from analysis.realtime_price import get_realtime_quote, get_stock_name
+from analysis.rd_team import get_rd_team_composition
 from analysis.valuation_history import get_valuation_history
 from analysis.debate import derive_sentiment, get_debate
 from analysis.evidence import EvidenceItem, build_evidence_ledger, evaluate_research_quality
@@ -192,6 +193,7 @@ class AnalysisInputs:
     fundamentals: Optional[Dict] = None
     valuation: Optional[Dict] = None
     valuation_history: Optional[Dict] = None
+    rd_team: Optional[Dict] = None
     major_events: List[Dict] = field(default_factory=list)
     refinancing_history: List[Dict] = field(default_factory=list)
     executive_profile: Optional[Dict] = None
@@ -381,29 +383,88 @@ def _build_margin_block(
     return "融资盘与流通盘:\n" + "\n".join(lines)
 
 
-def _build_rd_block(fundamentals: Optional[Dict], executive_profile: Optional[Dict]) -> str:
+def _build_rd_block(
+    fundamentals: Optional[Dict],
+    executive_profile: Optional[Dict],
+    rd_team: Optional[Dict],
+) -> str:
     facts = (fundamentals or {}).get("facts") or {}
     lines = ["研发能力 (科技企业重点维度, 技术护城河判断必须以这些数字为证据):"]
     rd = facts.get("rd_investment_yuan")
     lines.append(
         f"  研发投入 {rd / 1e8:.2f} 亿" if rd else "  研发投入 暂缺"
     )
-    lines.append(f"  研发强度(研发投入/营业收入) {facts.get('rd_intensity_pct')}%"
-                 if facts.get("rd_intensity_pct") is not None else "  研发强度 暂缺")
+    lines.append(
+        f"  研发强度(研发投入/营业收入) {facts.get('rd_intensity_pct')}%"
+        if facts.get("rd_intensity_pct") is not None else "  研发强度 暂缺"
+    )
     lines.append(
         f"  授权专利 {facts.get('patents_granted')} 件, 其中发明专利 "
         f"{facts.get('patents_invention')} 件 (发明专利占比 {facts.get('invention_ratio_pct')}%)"
         if facts.get("patents_granted") is not None else "  专利数据 暂缺"
     )
     lines.append(
-        f"  员工人数 {facts.get('employee_count')}" if facts.get("employee_count") else "  员工人数 暂缺"
+        f"  员工人数 {facts.get('employee_count')}"
+        if facts.get("employee_count") else "  员工人数 暂缺"
     )
+
+    if rd_team and rd_team.get("parse_status") == "ok":
+        lines.append(
+            f"  研发人员 {rd_team.get('rd_headcount')} 人，占员工总数 "
+            f"{rd_team.get('rd_staff_ratio_pct')}% "
+            f"(来源: {rd_team.get('title') or '最新年报'}, 巨潮资讯)"
+        )
+        education = rd_team.get("education") or {}
+        if education:
+            labels = {
+                "doctor": "博士",
+                "master": "硕士",
+                "bachelor": "本科",
+                "college": "专科",
+                "high_school_or_below": "高中及以下",
+            }
+            lines.append(
+                "  研发人员学历结构: "
+                + "，".join(
+                    f"{labels.get(k, k)} {v} 人"
+                    for k, v in education.items()
+                    if v is not None
+                )
+            )
+        else:
+            lines.append("  研发人员学历结构: 年报相关页未解析出")
+        age = rd_team.get("age") or {}
+        if age:
+            labels = {
+                "under_30": "30岁以下",
+                "30_to_40": "30-40岁",
+                "40_to_50": "40-50岁",
+                "50_to_60": "50-60岁",
+                "60_or_above": "60岁及以上",
+            }
+            lines.append(
+                "  研发人员年龄结构: "
+                + "，".join(
+                    f"{labels.get(k, k)} {v} 人"
+                    for k, v in age.items()
+                    if v is not None
+                )
+            )
+        if rd_team.get("pdf_url"):
+            lines.append(f"  年报原文: {rd_team['pdf_url']}")
+    elif rd_team:
+        lines.append(
+            f"  研发队伍组成: 已定位 {rd_team.get('title') or '最新年报'}，"
+            f"但解析状态为 {rd_team.get('parse_status')}，不得猜测人员结构"
+        )
+    else:
+        lines.append("  研发队伍组成: 本次未取得最新年报研发人员表, 暂缺")
+
     if executive_profile:
         lines.append(
             f"  董事长学历 {executive_profile.get('chairman_education')}"
             if executive_profile.get("chairman_education") else "  董事长学历 暂缺"
         )
-    lines.append("  研发队伍组成 (专业/学历构成): 本次未取到, 暂缺")
     return "\n".join(lines)
 
 
@@ -1043,7 +1104,7 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         valuation_block=_build_valuation_block(inputs.valuation, quote),
         valuation_history_block=_build_valuation_history_block(inputs.valuation_history),
         fundamentals_block=_build_fundamentals_block(inputs.fundamentals),
-        rd_block=_build_rd_block(inputs.fundamentals, inputs.executive_profile),
+        rd_block=_build_rd_block(inputs.fundamentals, inputs.executive_profile, inputs.rd_team),
         primary_evidence_block=_build_primary_evidence_block(inputs.primary_evidence),
         major_events_block=_build_major_events_block(inputs.major_events),
         governance_block=_build_governance_block(
@@ -1136,7 +1197,7 @@ _ANALYSIS_TOOLS = [
     ),
     _analysis_tool(
         "analyze_rd_capability",
-        "研发能力评估 (科技企业重点维度): 引用'研发能力'块——研发投入与研发强度、授权专利与发明专利占比、员工人数、董事长学历 (技术背景代理)。技术护城河判断必须以这些数字为证据: 研发强度低、发明专利占比低、领导层无技术背景的组合意味着技术壁垒缺乏证据 (代工/组装属性风险), 必须明确指出; 研发队伍组成 (专业/学历构成) 数据未取到时写'该维度数据暂缺'。非科技企业此项权重低, 但仍要如实引用数字。",
+        "研发能力评估 (科技企业重点维度): 引用'研发能力'块——研发投入与研发强度、授权专利与发明专利占比、员工人数、董事长学历 (技术背景代理)。技术护城河判断必须以这些数字为证据: 研发强度低、发明专利占比低、领导层无技术背景的组合意味着技术壁垒缺乏证据 (代工/组装属性风险), 必须明确指出; 研发人员数量/占比/学历结构若有巨潮年报数据必须优先引用；只有官方年报解析未取得时才能写'该维度数据暂缺'。不要用学历结构单独推断人才优劣，必须结合研发强度、专利与业务兑现。非科技企业此项权重低, 但仍要如实引用数字。",
     ),
     _analysis_tool(
         "analyze_chip_flow",
@@ -1450,6 +1511,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         primary_evidence,
         a_share_structure,
         valuation_history,
+        rd_team,
     ) = await asyncio.gather(
         _load_knowledge_excerpts(),
         get_shareholder_count_trend(stock_code),
@@ -1462,6 +1524,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         get_cninfo_primary_evidence(stock_code),
         get_a_share_structure(stock_code),
         get_valuation_history(stock_code),
+        get_rd_team_composition(stock_code),
     )
 
     # 行业反查的起点是 F10 公司概要页里的申万行业名，所以必须等 fundamentals 回来。
@@ -1517,6 +1580,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         fundamentals=fundamentals,
         valuation=valuation,
         valuation_history=valuation_history,
+        rd_team=rd_team,
         major_events=major_events,
         refinancing_history=refinancing_history,
         executive_profile=executive_profile,
@@ -1593,6 +1657,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         fundamentals=inputs.fundamentals,
         valuation=inputs.valuation,
         valuation_history=valuation_history,
+        rd_team=rd_team,
         xueqiu_stock=inputs.xueqiu_stock,
         a_share_structure=a_share_structure,
         debate=inputs.debate,
