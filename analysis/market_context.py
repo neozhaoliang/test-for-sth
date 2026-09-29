@@ -101,17 +101,30 @@ def _summary(series: pd.Series) -> Dict:
     }
 
 
-async def get_market_context(stock_code: str) -> Optional[Dict]:
+async def get_market_context(
+    stock_code: str,
+    *,
+    as_of: Optional[date] = None,
+) -> Optional[Dict]:
     """
     返回 {indices: [{name, latest, ytd_pct, h1_pct, h2_pct}], stock: {...}}。
     stock 额外带 52 周高低点与 2018 年以来高低点 (用于判断"相对历史区间的位置")。
     指数与个股都取不到时返回 None。
     """
     index_series = await _get_index_series()
+    cutoff = pd.Timestamp(as_of) if as_of is not None else None
+    if cutoff is not None:
+        index_series = {
+            name: s[s.index <= cutoff]
+            for name, s in index_series.items()
+            if not s[s.index <= cutoff].empty
+        }
 
     start = _STOCK_HISTORY_START
+    if as_of is not None and as_of < _STOCK_HISTORY_START:
+        start = date(max(1990, as_of.year - 5), 1, 1)
     try:
-        stock_df = await get_price_history(stock_code, start)
+        stock_df = await get_price_history(stock_code, start, end=as_of)
     except Exception as e:
         utils.logger.error(f"[market_context] get_price_history({stock_code}) failed: {e}")
         stock_df = pd.DataFrame(columns=["date", "close"])
