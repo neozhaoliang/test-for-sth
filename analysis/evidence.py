@@ -53,7 +53,7 @@ _DIMENSION_REQUIREMENTS: Dict[str, tuple[str, ...]] = {
     "chip_flow": ("shareholder_count", "margin"),
     "price_position": ("valuation_history", "valuation", "market_context"),
     "cycle_position": ("industry", "cycle_signal"),
-    "policy_geopolitics": ("fx", "major_events", "knowledge"),
+    "policy_geopolitics": ("macro_rates", "fx", "major_events", "knowledge"),
     "retail_sentiment": ("sentiment", "debate"),
     "shareholder_returns": ("management_capital", "shareholder_return", "governance"),
     "growth_elasticity": ("profitability", "valuation_history", "valuation"),
@@ -377,6 +377,19 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         kind="derived",
         value=margin,
         tags=("margin_financing", "leverage", "chip"),
+    )
+
+    macro_rates = _get(inputs, "macro_rates")
+    _add(
+        out,
+        category="macro_rates",
+        label="中美利率环境",
+        source="analysis.macro_rates",
+        tier="A",
+        kind="fact",
+        value=macro_rates,
+        as_of=str((macro_rates or {}).get("as_of") or "") or None,
+        tags=("rates", "fed", "treasury", "lpr", "macro"),
     )
 
     rmb = _get(inputs, "rmb_signal")
