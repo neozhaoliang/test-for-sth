@@ -101,6 +101,7 @@ jobs:
             tests/test_valuation_history_asof.py \
             tests/test_market_context_asof.py \
             tests/test_realtime_price_asof.py \
+            tests/test_margin_asof.py \
             tests/test_management_capital.py \
             tests/test_macro_rates.py \
             tests/test_commodity_cycle.py \
