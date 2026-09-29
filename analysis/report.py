@@ -176,9 +176,9 @@ async def generate_report(
             if request.mode == ResearchMode.HISTORICAL
             else None
         ),
-        get_shareholder_count_trend(stock_code),
-        get_dividend_history(stock_code),
-        get_buyback_history(stock_code),
+        get_shareholder_count_trend(stock_code, as_of=request.as_of),
+        get_dividend_history(stock_code, as_of=request.as_of),
+        get_buyback_history(stock_code, as_of=request.as_of),
         get_profitability_trend(stock_code),
         get_ths_fundamentals(stock_code),
         get_market_context(stock_code, as_of=request.as_of),
