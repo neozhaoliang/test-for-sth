@@ -31,8 +31,8 @@ from tools.utils import utils
 _BUYBACK_CACHE_TTL_SECONDS = 3600
 _buyback_cache: Optional[Tuple[float, "object"]] = None
 
-_MAX_DIVIDEND_RECORDS = 5
-_MAX_BUYBACK_RECORDS = 5
+_MAX_DIVIDEND_RECORDS = 30
+_MAX_BUYBACK_RECORDS = 20
 
 
 def _bare_code(stock_code: str) -> str:
