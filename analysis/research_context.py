@@ -119,9 +119,8 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
     ),
     "margin": TemporalCapability(
         source="margin",
-        capability=SourceTemporalCapability.LIVE_ONLY,
-        reason="latest financing snapshot is not truncated to as_of",
-        implemented=False,
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="exchange margin detail is queried backwards from as_of for the latest six trading days",
     ),
     "macro_rates": TemporalCapability(
         source="macro_rates",
