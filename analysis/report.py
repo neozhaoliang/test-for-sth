@@ -1011,6 +1011,37 @@ def _build_fundamentals_block(fundamentals: Optional[Dict]) -> str:
         f"  经营现金流/净利润 {facts.get('cash_to_profit_ratio') if facts.get('cash_to_profit_ratio') is not None else '暂缺'}"
         " (显著小于 1 说明账面利润没有同步变成现金)"
     )
+    ar = facts.get("accounts_receivable_yuan")
+    inv = facts.get("inventory_yuan")
+    ar_yoy = facts.get("accounts_receivable_yoy_pct")
+    inv_yoy = facts.get("inventory_yoy_pct")
+    ar_gap = facts.get("receivable_growth_minus_revenue_pp")
+    inv_gap = facts.get("inventory_growth_minus_revenue_pp")
+    lines.append(
+        f"  应收账款 {_yi(ar)}"
+        + (f" (同比 {ar_yoy:+}%)" if ar_yoy is not None else "")
+        + (
+            f"，应收增速较营收高 {ar_gap:+} 个百分点"
+            if ar_gap is not None else ""
+        )
+        + (
+            f"，应收/营收 {facts.get('receivable_to_revenue_pct')}%"
+            if facts.get("receivable_to_revenue_pct") is not None else ""
+        )
+    )
+    lines.append(
+        f"  存货 {_yi(inv)}"
+        + (f" (同比 {inv_yoy:+}%)" if inv_yoy is not None else "")
+        + (
+            f"，存货增速较营收高 {inv_gap:+} 个百分点"
+            if inv_gap is not None else ""
+        )
+        + (
+            f"，存货/营收 {facts.get('inventory_to_revenue_pct')}%"
+            if facts.get("inventory_to_revenue_pct") is not None else ""
+        )
+        + " (季报营收为累计流量，该比率只作营运资金压力代理)"
+    )
     lines.append(
         f"  研发投入 {_yi(facts.get('rd_investment_yuan'))}, 研发强度(研发投入/营业收入) "
         f"{_pct_str(facts.get('rd_intensity_pct'))}"
@@ -1478,7 +1509,7 @@ _ANALYSIS_TOOLS = [
     ),
     _analysis_tool(
         "analyze_risk_quality",
-        "财务质量与尾部风险: 优先检查'一手公告证据'中的风险提示/补充更正/股权变动，再综合经营现金流质量、应收/存货/负债/盈利率趋势、客户供应商集中度、再融资、质押、处罚问询、重大事项等。区分正常经营波动和可能永久损害股东价值的风险；没有数据的风险不得反向断言为不存在。",
+        "财务质量与尾部风险: 优先检查'一手公告证据'中的风险提示/补充更正/股权变动，再综合经营现金流质量、应收账款/存货增速相对营收的偏离、负债/盈利率趋势、客户供应商集中度、再融资、质押、处罚问询、重大事项等。若应收或存货增速显著快于营收，必须解释其现金回收/库存积压含义，不能只看净利润；区分正常经营波动和可能永久损害股东价值的风险；没有数据的风险不得反向断言为不存在。",
     ),
 ]
 
