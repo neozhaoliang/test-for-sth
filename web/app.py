@@ -706,8 +706,10 @@ function renderManagementCapitalBlock(mc) {
   if (Object.keys(ex).length) {
     const parts = [];
     if (ex.period_start || ex.period_end) parts.push('观察期 ' + escapeHtml(ex.period_start || '') + '~' + escapeHtml(ex.period_end || ''));
-    if (ex.roe_avg_pct !== null && ex.roe_avg_pct !== undefined) {
-      parts.push('ROE均值 ' + ex.roe_avg_pct + '%，最低 ' + ex.roe_min_pct + '%，最新 ' + ex.roe_latest_pct + '%');
+    if (ex.roe_latest_pct !== null && ex.roe_latest_pct !== undefined) {
+      parts.push('ROE ' + ex.roe_start_pct + '% → ' + ex.roe_latest_pct + '% (' +
+        (ex.roe_change_pp >= 0 ? '+' : '') + ex.roe_change_pp + 'pct；区间 ' +
+        ex.roe_min_pct + '%~' + ex.roe_max_pct + '%)');
     }
     if (ex.net_profit_growth_observations) {
       parts.push('净利润增速为正 ' + ex.net_profit_growth_positive_periods + '/' + ex.net_profit_growth_observations + ' 个观察期');
@@ -724,7 +726,8 @@ function renderManagementCapitalBlock(mc) {
     return '<li><b>' + label + ':</b> 分红覆盖 ' + row.dividend_years_count + '/' + row.window_years +
       ' 个日历年，累计每10股现金分红 ' + row.cash_dividend_per_10_total + ' 元；' +
       '回购 ' + row.buyback_records + ' 次，已回购约 ' + buybackYi + ' 亿元；' +
-      '再融资 ' + row.refinancing_records + ' 次；减持公告 ' + row.insider_reduction_announcements +
+      'F10再融资 ' + row.refinancing_records + ' 次，巨潮再融资公告 ' +
+      row.primary_refinancing_announcements + ' 条；减持公告 ' + row.insider_reduction_announcements +
       ' 条；处罚/警示/问询等公告 ' + row.governance_negative_announcements + ' 条</li>';
   };
   html += '<ul>' + renderWindow(mc.five_year, '近5年') + renderWindow(mc.ten_year, '近10年') + '</ul>';
