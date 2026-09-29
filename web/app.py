@@ -895,6 +895,50 @@ function renderEvidenceSection(report) {
         '</li>';
     });
     ashHtml += '</ul></div>';
+
+    const funds = ash.fund_details || [];
+    if (funds.length) {
+      ashHtml += '<details><summary style="cursor:pointer;">主要公募基金持仓</summary><ul>' +
+        funds.slice(0, 8).map(f => {
+          let s = escapeHtml(f.name || '') +
+            (f.latest_float_ratio_pct !== null && f.latest_float_ratio_pct !== undefined
+              ? '：占流通股 ' + f.latest_float_ratio_pct + '%' : '');
+          if (f.float_ratio_change_pct !== null && f.float_ratio_change_pct !== undefined) {
+            s += '，较前期 ' + (f.float_ratio_change_pct >= 0 ? '+' : '') + f.float_ratio_change_pct + '%';
+          }
+          return '<li>' + s + '</li>';
+        }).join('') + '</ul></details>';
+    }
+
+    const etfs = ash.etf_details || [];
+    ashHtml += '<details><summary style="cursor:pointer;">可识别ETF持仓 (' + etfs.length + ')</summary>' +
+      (etfs.length
+        ? '<ul>' + etfs.slice(0, 8).map(f => {
+            let s = escapeHtml(f.name || '') +
+              (f.latest_float_ratio_pct !== null && f.latest_float_ratio_pct !== undefined
+                ? '：占流通股 ' + f.latest_float_ratio_pct + '%' : '');
+            if (f.float_ratio_change_pct !== null && f.float_ratio_change_pct !== undefined) {
+              s += '，较前期 ' + (f.float_ratio_change_pct >= 0 ? '+' : '') + f.float_ratio_change_pct + '%';
+            }
+            return '<li>' + s + '</li>';
+          }).join('') + '</ul>'
+        : '<div class="credibility-note">本期机构明细中未识别到ETF名称。</div>') +
+      '</details>';
+
+    const unlock = ash.unlock_supply || {};
+    const upcoming = unlock.upcoming_12m || [];
+    if (upcoming.length) {
+      ashHtml += '<details open><summary style="cursor:pointer;"><b>未来12个月限售解禁 (' + upcoming.length + '批)</b></summary><ul>' +
+        upcoming.slice(0, 8).map(x =>
+          '<li>' + escapeHtml(x.date || '') + '：解禁 ' +
+          (x.unlock_shares === null || x.unlock_shares === undefined ? '暂缺' : (x.unlock_shares / 1e8).toFixed(2) + ' 亿股') +
+          (x.float_market_ratio_pct === null || x.float_market_ratio_pct === undefined
+            ? '' : '，约占解禁前流通市值 ' + x.float_market_ratio_pct + '%') +
+          (x.type ? '，' + escapeHtml(x.type) : '') +
+          '</li>'
+        ).join('') + '</ul></details>';
+    }
+
     (ash.notes || []).forEach(n => {
       ashHtml += '<div class="credibility-note">· ' + escapeHtml(n) + '</div>';
     });
