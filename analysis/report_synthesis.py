@@ -129,7 +129,7 @@ async def _score_dimensions(
                 "note": str(item.get("note", "") or "")[:30],
             }
         )
-    return scores if len(scores) >= 8 else None
+    return scores if len(scores) == len(_DIMENSION_LABELS) else None
 
 
 async def _generate_summary(
