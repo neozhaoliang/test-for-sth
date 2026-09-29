@@ -109,6 +109,7 @@ def _add(
     as_of: Optional[str] = None,
     summary: str = "",
     tags: Optional[Iterable[str]] = None,
+    url: Optional[str] = None,
 ) -> None:
     if value in (None, "", [], {}):
         return
@@ -123,6 +124,7 @@ def _add(
             as_of=as_of,
             summary=summary,
             value=value,
+            url=url,
             tags=list(tags or ()),
         )
     )
@@ -153,6 +155,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
 
     fundamentals = _get(inputs, "fundamentals") or {}
     facts = fundamentals.get("facts") or {}
+    source_map = fundamentals.get("source_map") or {}
     _add(
         out,
         category="fundamentals",
@@ -162,6 +165,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         kind="fact",
         value=fundamentals,
         tags=("financials", "customers", "suppliers", "cashflow"),
+        url=source_map.get("finance") or source_map.get("operate"),
     )
     rd_payload = {
         k: facts.get(k)
@@ -184,6 +188,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         kind="fact",
         value=rd_payload,
         tags=("rd", "patent", "technology"),
+        url=source_map.get("operate"),
     )
 
     valuation = _get(inputs, "valuation")
@@ -197,6 +202,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         value=valuation,
         as_of=str((valuation or {}).get("valuation_as_of") or "") or None,
         tags=("valuation", "shares"),
+        url=source_map.get("profile"),
     )
 
     profitability = _get(inputs, "profitability_trend")
@@ -262,6 +268,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         value=shareholder_count,
         as_of=str((shareholder_count or {}).get("as_of") or "") or None,
         tags=("holders", "chip"),
+        url=source_map.get("holder"),
     )
 
     shareholder_return = {
@@ -298,6 +305,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         if any(v not in (None, [], {}) for v in governance.values())
         else None,
         tags=("governance", "refinancing", "insider", "events"),
+        url=source_map.get("event") or source_map.get("capital") or source_map.get("company"),
     )
     _add(
         out,
@@ -308,6 +316,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         kind="fact",
         value=_get(inputs, "major_events"),
         tags=("events", "policy"),
+        url=source_map.get("event"),
     )
 
     margin = _get(inputs, "margin_signal")
@@ -385,6 +394,25 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
             kind="opinion",
             value=normalized,
             tags=("kol", "experience", "market_lore"),
+        )
+
+    primary = _get(inputs, "primary_evidence") or []
+    for item in primary:
+        _add(
+            out,
+            category="primary",
+            label=item.get("title") or "一手公告",
+            source=item.get("source_name") or "巨潮资讯",
+            tier=item.get("source_tier") or "S",
+            kind=item.get("kind") or "fact",
+            value={
+                "category": item.get("category"),
+                "stock_name": item.get("stock_name"),
+            },
+            as_of=item.get("published_at") or None,
+            summary=item.get("category") or "",
+            tags=("primary", "announcement", item.get("category") or ""),
+            url=item.get("url"),
         )
 
     if candidates:
