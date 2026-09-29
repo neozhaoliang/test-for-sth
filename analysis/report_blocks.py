@@ -496,13 +496,42 @@ def _build_shareholder_block(
 
 def _build_commodity_block(commodity_signal: Optional[Dict]) -> str:
     if not commodity_signal:
-        return "暂缺 (非周期性矿业股，或行业归属数据未能取到，本维度不适用/暂缺)"
-    return (
-        f"沪铜最新价 {commodity_signal.get('sh_copper_price')} {commodity_signal.get('sh_copper_unit')}, "
-        f"COMEX铜最新价 {commodity_signal.get('comex_copper_price')} {commodity_signal.get('comex_copper_unit')}, "
-        f"人民币汇率趋势: {commodity_signal.get('rmb_trend') or '暂缺'}。"
-        f"{commodity_signal.get('note', '')}"
-    )
+        return (
+            "暂缺 (当前公司未匹配到可靠的产品级商品锚，或对应期货数据获取失败；"
+            "不得用其他商品价格替代)"
+        )
+
+    lines = [
+        f"周期商品路由: {commodity_signal.get('route') or '未知'}",
+        f"数据截止: {commodity_signal.get('as_of') or '未知'}",
+    ]
+    anchors = commodity_signal.get("anchors") or []
+    for item in anchors:
+        seg = (
+            f"  · {item.get('name')} ({item.get('symbol')}): "
+            f"{item.get('latest')} {item.get('unit')}"
+        )
+        if item.get("change_20d_pct") is not None:
+            seg += f"，20交易日 {item.get('change_20d_pct'):+}%"
+        if item.get("change_60d_pct") is not None:
+            seg += f"，60交易日 {item.get('change_60d_pct'):+}%"
+        if item.get("position_1y_pct") is not None:
+            seg += f"，1年区间位置 {item.get('position_1y_pct')}%"
+        lines.append(seg)
+
+    copper = commodity_signal.get("copper_cross_market") or {}
+    if copper:
+        lines.append(
+            f"铜产业额外内外盘背景: 沪铜 {copper.get('sh_copper_price')} "
+            f"{copper.get('sh_copper_unit')}；COMEX铜 {copper.get('comex_copper_price')} "
+            f"{copper.get('comex_copper_unit')}；人民币趋势 {copper.get('rmb_trend') or '暂缺'}"
+        )
+        if copper.get("note"):
+            lines.append(f"注: {copper.get('note')}")
+
+    if commodity_signal.get("note"):
+        lines.append(f"注: {commodity_signal.get('note')}")
+    return "\n".join(lines)
 
 
 def _build_macro_rates_block(data: Optional[Dict]) -> str:
