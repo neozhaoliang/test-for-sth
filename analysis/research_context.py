@@ -151,9 +151,8 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
     ),
     "candidate_credibility": TemporalCapability(
         source="candidate_credibility",
-        capability=SourceTemporalCapability.LIVE_ONLY,
-        reason="current Wilson/hit-rate score may include predictions resolved after historical as_of",
-        implemented=False,
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="historical Wilson score only uses posts published by as_of and correct/incorrect outcomes verified by as_of",
     ),
 }
 
