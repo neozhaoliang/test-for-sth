@@ -875,6 +875,57 @@ function renderEvidenceSection(report) {
         return '<li>' + s + '</li>';
       }).join('') + '</ul>';
     }
+    const qoq = ash.institution_qoq || [];
+    if (qoq.length) {
+      ashHtml += '<details open><summary style="cursor:pointer;"><b>机构季度变化 ' +
+        escapeHtml((ash.previous_report_period || '前期') + ' → ' + (ash.report_period || '本期')) +
+        '</b></summary><ul>' +
+        qoq.map(x => {
+          const parts = [];
+          if (x.float_ratio_change_pp !== null && x.float_ratio_change_pp !== undefined) {
+            parts.push('占流通股 ' + (x.float_ratio_change_pp >= 0 ? '+' : '') + x.float_ratio_change_pp + 'pct');
+          }
+          if (x.shares_change_pct !== null && x.shares_change_pct !== undefined) {
+            parts.push('持股数 ' + (x.shares_change_pct >= 0 ? '+' : '') + x.shares_change_pct + '%');
+          }
+          if (x.institution_count_change !== null && x.institution_count_change !== undefined) {
+            parts.push('机构数 ' + (x.institution_count_change >= 0 ? '+' : '') + x.institution_count_change);
+          }
+          return '<li>' + escapeHtml(x.type || '') + ': ' + escapeHtml(parts.join('，') || '可比数据不足') + '</li>';
+        }).join('') + '</ul></details>';
+    }
+
+    const fundQoq = ash.fund_qoq || {};
+    const fundInc = fundQoq.increased || [];
+    const fundDec = fundQoq.decreased || [];
+    const fundNew = fundQoq.newly_seen || [];
+    const fundExit = fundQoq.exited_top_list || [];
+    if (fundInc.length || fundDec.length || fundNew.length || fundExit.length) {
+      const renderFundMove = x => {
+        let move = '';
+        if (x.float_ratio_change_pp !== null && x.float_ratio_change_pp !== undefined) {
+          move = (x.float_ratio_change_pp >= 0 ? '+' : '') + x.float_ratio_change_pp + 'pct流通股';
+        } else if (x.shares_change_pct !== null && x.shares_change_pct !== undefined) {
+          move = '持股数 ' + (x.shares_change_pct >= 0 ? '+' : '') + x.shares_change_pct + '%';
+        }
+        return escapeHtml(x.name || '') + (move ? ' (' + escapeHtml(move) + ')' : '');
+      };
+      ashHtml += '<details><summary style="cursor:pointer;"><b>公募基金季度变化</b></summary>';
+      if (fundInc.length) {
+        ashHtml += '<div>增持较多：' + fundInc.slice(0, 6).map(renderFundMove).join('；') + '</div>';
+      }
+      if (fundDec.length) {
+        ashHtml += '<div>减持较多：' + fundDec.slice(0, 6).map(renderFundMove).join('；') + '</div>';
+      }
+      if (fundNew.length) {
+        ashHtml += '<div>本期新见：' + fundNew.slice(0, 6).map(x => escapeHtml(x.name || '')).join('；') + '</div>';
+      }
+      if (fundExit.length) {
+        ashHtml += '<div>本期明细未再见：' + fundExit.slice(0, 6).map(x => escapeHtml(x.name || '')).join('；') + '</div>';
+      }
+      ashHtml += '<div class="credibility-note">“新见/未再见”只表示本次机构明细中的披露变化，不等于首次买入或全部卖出。</div></details>';
+    }
+
     const special = ash.special_holders || {};
     const labels = {
       national_team: '汇金/证金/国新/诚通等国家资本',
