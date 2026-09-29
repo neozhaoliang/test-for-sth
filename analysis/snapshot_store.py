@@ -223,6 +223,8 @@ def frozen_research_inputs_to_analysis_inputs(
     inputs = AnalysisInputs(
         stock_code=str(payload.get("stock_code") or ""),
         stock_name=str(payload.get("stock_name") or ""),
+        research_mode=str(payload.get("research_mode") or "live"),
+        as_of=str(payload.get("as_of") or ""),
         quote=payload.get("realtime_quote") or {},
         knowledge_excerpts=knowledge,
         industry_comparison=payload.get("industry_comparison"),
