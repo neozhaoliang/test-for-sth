@@ -40,6 +40,7 @@ from analysis.macro_rates import get_macro_rate_context
 from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.primary_sources import get_cninfo_primary_evidence
+from analysis.policy_context import get_policy_event_context
 from analysis.realtime_price import get_realtime_quote, get_stock_name
 from analysis.rd_team import get_rd_team_composition
 from analysis.valuation_history import get_valuation_history
@@ -78,6 +79,7 @@ class AnalysisInputs:
     commodity_signal: Optional[Dict] = None
     rmb_signal: Optional[Dict] = None
     macro_rates: Optional[Dict] = None
+    policy_events: Optional[Dict] = None
     fundamentals: Optional[Dict] = None
     valuation: Optional[Dict] = None
     valuation_history: Optional[Dict] = None
@@ -300,13 +302,29 @@ async def generate_report(stock_code: str) -> AnalysisReport:
     industry_name = None
     if industry_comparison:
         industry_name = industry_comparison.get("industry_name") or industry_comparison.get("sw_industry")
+    preliminary_profile = classify_research_profile(
+        fundamentals=fundamentals,
+        evidence=[],
+    )
     commodity_signal, rmb_signal = await asyncio.gather(
         get_cycle_commodity_signal(stock_code, industry_name, fundamentals),
         get_rmb_trend_signal(),
     )
-    # 运价景气度同样依赖申万行业名做触发判断，与铜价信号并行获取。
-    sw_industry = (fundamentals or {}).get("facts", {}).get("sw_industry")
-    freight_signal = await get_container_freight_signal(stock_code, sw_industry)
+    # 运价与近期政策/地缘事件线索都依赖已经识别出的行业/暴露路径。
+    # 新闻只作为低权重线索，不替代巨潮公告、官方政策或市场数据。
+    facts_for_exposure = (fundamentals or {}).get("facts") or {}
+    sw_industry = facts_for_exposure.get("sw_industry")
+    freight_signal, policy_events = await asyncio.gather(
+        get_container_freight_signal(stock_code, sw_industry),
+        get_policy_event_context(
+            stock_code,
+            stock_name,
+            archetype=preliminary_profile.archetype,
+            industry=str(sw_industry or industry_name or ""),
+            commodity_route=(commodity_signal or {}).get("route"),
+            overseas_revenue_pct=facts_for_exposure.get("overseas_revenue_pct"),
+        ),
+    )
     knowledge_excerpts = await _filter_relevant_knowledge(
         knowledge_excerpts, stock_code, stock_name, industry_name
     )
@@ -349,6 +367,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         commodity_signal=commodity_signal,
         rmb_signal=rmb_signal,
         macro_rates=macro_rates,
+        policy_events=policy_events,
         fundamentals=fundamentals,
         valuation=valuation,
         valuation_history=valuation_history,
@@ -440,6 +459,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         commodity_signal=commodity_signal,
         rmb_signal=rmb_signal,
         macro_rates=macro_rates,
+        policy_events=policy_events,
         fundamentals=inputs.fundamentals,
         valuation=inputs.valuation,
         valuation_history=valuation_history,
