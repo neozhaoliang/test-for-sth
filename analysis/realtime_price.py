@@ -22,6 +22,7 @@
 """
 
 import re
+import logging
 import time
 from datetime import date, timedelta
 from typing import Dict, Optional, Tuple
@@ -30,7 +31,8 @@ import akshare as ak
 import pandas as pd
 
 from backtest.price_source import get_price_history
-from tools.utils import utils
+
+logger = logging.getLogger("MediaCrawler")
 
 _CACHE_TTL_SECONDS = 180
 _cache: Dict[str, Tuple[float, pd.DataFrame]] = {}
@@ -56,7 +58,7 @@ async def _get_spot_df() -> Optional[pd.DataFrame]:
     try:
         df = await asyncio.to_thread(ak.stock_zh_a_spot)
     except Exception as e:
-        utils.logger.error(f"[realtime_price] stock_zh_a_spot failed: {e}")
+        logger.error(f"[realtime_price] stock_zh_a_spot failed: {e}")
         return None
 
     _cache["all"] = (time.time(), df)
@@ -157,7 +159,7 @@ async def get_historical_quote(
     try:
         df = await get_price_history(stock_code, start, end=as_of)
     except Exception as e:
-        utils.logger.error(
+        logger.error(
             f"[realtime_price] historical quote {stock_code}@{as_of} failed: {e}"
         )
         return None
