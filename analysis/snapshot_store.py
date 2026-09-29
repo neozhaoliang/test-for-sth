@@ -41,6 +41,9 @@ class SnapshotManifest(BaseModel):
     llm_model: str = ""
     report_sha256: str
     evidence_sha256: str
+    request_sha256: str = ""
+    research_inputs_sha256: str = ""
+    file_sha256: Dict[str, str] = Field(default_factory=dict)
     source_vintages: Dict[str, str] = Field(default_factory=dict)
     stale_categories: List[str] = Field(default_factory=list)
     files: Dict[str, str] = Field(default_factory=dict)
@@ -58,6 +61,32 @@ def _json_bytes(value) -> bytes:
 
 def _sha256(value) -> str:
     return hashlib.sha256(_json_bytes(value)).hexdigest()
+
+
+def _research_inputs_payload(report: AnalysisReport) -> Dict:
+    """
+    Freeze the data that existed *before* final synthesis.
+
+    This intentionally excludes summary/review/validation so a future model or prompt can
+    be evaluated on the same frozen research inputs without reusing the old conclusion.
+    """
+    excluded = {
+        "summary",
+        "review",
+        "validation",
+        "prompt_version",
+        "generated_at",
+    }
+    payload = report.model_dump(mode="json")
+    return {k: v for k, v in payload.items() if k not in excluded}
+
+
+def _write_json(path: Path, value) -> str:
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _source_vintages(report: AnalysisReport) -> Dict[str, str]:
@@ -82,9 +111,13 @@ def save_report_snapshot(
     as_of = str(request.as_of)
     report_payload = report.model_dump(mode="json")
     evidence_payload = [x.model_dump(mode="json") for x in report.evidence]
+    request_payload = request.model_dump(mode="json")
+    research_inputs_payload = _research_inputs_payload(report)
 
     report_hash = _sha256(report_payload)
     evidence_hash = _sha256(evidence_payload)
+    request_hash = _sha256(request_payload)
+    research_inputs_hash = _sha256(research_inputs_payload)
     snapshot_id = f"{report.stock_code}_{as_of}_{report_hash[:12]}"
 
     target = base / report.stock_code / as_of / snapshot_id
@@ -92,16 +125,16 @@ def save_report_snapshot(
 
     report_path = target / "report.json"
     evidence_path = target / "evidence.json"
+    request_path = target / "request.json"
+    research_inputs_path = target / "research_inputs.json"
     manifest_path = target / "manifest.json"
 
-    report_path.write_text(
-        json.dumps(report_payload, ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8",
-    )
-    evidence_path.write_text(
-        json.dumps(evidence_payload, ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8",
-    )
+    file_sha256 = {
+        "report": _write_json(report_path, report_payload),
+        "evidence": _write_json(evidence_path, evidence_payload),
+        "request": _write_json(request_path, request_payload),
+        "research_inputs": _write_json(research_inputs_path, research_inputs_payload),
+    }
 
     manifest = SnapshotManifest(
         snapshot_id=snapshot_id,
@@ -120,6 +153,9 @@ def save_report_snapshot(
         ),
         report_sha256=report_hash,
         evidence_sha256=evidence_hash,
+        request_sha256=request_hash,
+        research_inputs_sha256=research_inputs_hash,
+        file_sha256=file_sha256,
         source_vintages=_source_vintages(report),
         stale_categories=[
             str(x.get("category"))
@@ -129,6 +165,8 @@ def save_report_snapshot(
         files={
             "report": report_path.name,
             "evidence": evidence_path.name,
+            "request": request_path.name,
+            "research_inputs": research_inputs_path.name,
             "manifest": manifest_path.name,
         },
     )
@@ -159,3 +197,87 @@ def load_snapshot_manifest(path: str | Path) -> SnapshotManifest:
     if p.is_dir():
         p = p / "manifest.json"
     return SnapshotManifest.model_validate_json(p.read_text(encoding="utf-8"))
+
+
+
+def load_snapshot_report(path: str | Path) -> AnalysisReport:
+    p = Path(path)
+    manifest = load_snapshot_manifest(p)
+    base = p if p.is_dir() else p.parent
+    report_name = manifest.files.get("report", "report.json")
+    return AnalysisReport.model_validate_json(
+        (base / report_name).read_text(encoding="utf-8")
+    )
+
+
+def load_snapshot_research_inputs(path: str | Path) -> Dict:
+    p = Path(path)
+    manifest = load_snapshot_manifest(p)
+    base = p if p.is_dir() else p.parent
+    name = manifest.files.get("research_inputs", "research_inputs.json")
+    return json.loads((base / name).read_text(encoding="utf-8"))
+
+
+def verify_snapshot_integrity(path: str | Path) -> Dict[str, object]:
+    """
+    Verify both semantic hashes (canonical JSON) and stored file hashes.
+
+    Returns a structured result instead of raising so CI/tools can show exactly which
+    artifact was corrupted.
+    """
+    p = Path(path)
+    manifest = load_snapshot_manifest(p)
+    base = p if p.is_dir() else p.parent
+
+    checks: Dict[str, bool] = {}
+    errors: List[str] = []
+
+    for logical, filename in manifest.files.items():
+        if logical == "manifest":
+            continue
+        file_path = base / filename
+        if not file_path.exists():
+            checks[logical] = False
+            errors.append(f"missing file: {filename}")
+            continue
+
+        expected_file_hash = manifest.file_sha256.get(logical)
+        if expected_file_hash:
+            actual_file_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+            ok = actual_file_hash == expected_file_hash
+            checks[f"{logical}_file"] = ok
+            if not ok:
+                errors.append(f"file hash mismatch: {filename}")
+
+    semantic_specs = {
+        "report": (manifest.report_sha256, manifest.files.get("report", "report.json")),
+        "evidence": (manifest.evidence_sha256, manifest.files.get("evidence", "evidence.json")),
+        "request": (manifest.request_sha256, manifest.files.get("request", "request.json")),
+        "research_inputs": (
+            manifest.research_inputs_sha256,
+            manifest.files.get("research_inputs", "research_inputs.json"),
+        ),
+    }
+    for logical, (expected, filename) in semantic_specs.items():
+        if not expected:
+            continue
+        file_path = base / filename
+        if not file_path.exists():
+            continue
+        try:
+            payload = json.loads(file_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            checks[f"{logical}_semantic"] = False
+            errors.append(f"invalid json: {filename}: {exc}")
+            continue
+        ok = _sha256(payload) == expected
+        checks[f"{logical}_semantic"] = ok
+        if not ok:
+            errors.append(f"semantic hash mismatch: {filename}")
+
+    return {
+        "ok": not errors and all(checks.values()) if checks else False,
+        "snapshot_id": manifest.snapshot_id,
+        "checks": checks,
+        "errors": errors,
+    }
