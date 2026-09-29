@@ -30,8 +30,13 @@ _PRIMARY_CATEGORIES = (
     "配股",
     "股权激励",
     "股权变动",
+    "可转债",
+    "其他融资",
+    "解禁",
     "风险提示",
     "补充更正",
+    "澄清致歉",
+    "特别处理和退市",
 )
 
 _CNINFO_CATEGORY_IDS = {
@@ -41,8 +46,13 @@ _CNINFO_CATEGORY_IDS = {
     "配股": "category_pg_szsh",
     "股权激励": "category_gqjl_szsh",
     "股权变动": "category_gqbd_szsh",
+    "可转债": "category_kzzq_szsh",
+    "其他融资": "category_qtrz_szsh",
+    "解禁": "category_jj_szsh",
     "风险提示": "category_fxts_szsh",
     "补充更正": "category_bcgz_szsh",
+    "澄清致歉": "category_cqdq_szsh",
+    "特别处理和退市": "category_tbclts_szsh",
 }
 
 _MAX_PER_CATEGORY = 20
@@ -211,10 +221,12 @@ async def _fetch_category_fallback(
     category: str,
     start_date: str,
     end_date: str,
+    semaphore: asyncio.Semaphore,
 ) -> List[Dict]:
     """AkShare fallback; timeout is defensive but a running thread cannot be force-cancelled."""
-    try:
-        df = await asyncio.wait_for(
+    async with semaphore:
+        try:
+            df = await asyncio.wait_for(
             asyncio.to_thread(
                 ak.stock_zh_a_disclosure_report_cninfo,
                 symbol=code6,
@@ -224,14 +236,14 @@ async def _fetch_category_fallback(
                 start_date=start_date,
                 end_date=end_date,
             ),
-            timeout=_FALLBACK_TIMEOUT_S,
-        )
-    except Exception as e:
-        utils.logger.warning(
-            f"[primary_sources] AkShare fallback {code6} {category} failed: "
-            f"{type(e).__name__}: {str(e)[:160]}"
-        )
-        return []
+                timeout=_FALLBACK_TIMEOUT_S,
+            )
+        except Exception as e:
+            utils.logger.warning(
+                f"[primary_sources] AkShare fallback {code6} {category} failed: "
+                f"{type(e).__name__}: {str(e)[:160]}"
+            )
+            return []
 
     if df is None or df.empty:
         return []
@@ -308,16 +320,26 @@ async def get_cninfo_primary_evidence(
         else:
             direct_results = [(False, []) for _ in _PRIMARY_CATEGORIES]
 
-    groups: List[List[Dict]] = []
-    for category, (success, records) in zip(_PRIMARY_CATEGORIES, direct_results):
+    groups: List[List[Dict]] = [[] for _ in _PRIMARY_CATEGORIES]
+    fallback_sem = asyncio.Semaphore(3)
+    fallback_jobs = []
+    fallback_indices = []
+    for idx, (category, (success, records)) in enumerate(
+        zip(_PRIMARY_CATEGORIES, direct_results)
+    ):
         if success:
-            groups.append(records)
+            groups[idx] = records
         else:
-            groups.append(
-                await _fetch_category_fallback(
-                    code6, category, start_date, end_date
+            fallback_indices.append(idx)
+            fallback_jobs.append(
+                _fetch_category_fallback(
+                    code6, category, start_date, end_date, fallback_sem
                 )
             )
+    if fallback_jobs:
+        fallback_results = await asyncio.gather(*fallback_jobs)
+        for idx, records in zip(fallback_indices, fallback_results):
+            groups[idx] = records
 
     dedup: Dict[str, Dict] = {}
     for group in groups:
