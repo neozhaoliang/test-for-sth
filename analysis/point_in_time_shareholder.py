@@ -2,9 +2,8 @@
 """
 Point-in-time shareholder-count trend from exact CNINFO periodic-report PDFs.
 
-The live shareholder adapter can query a reconstructed historical table, but strict historical
-research should prefer the exact report version that existed at the cutoff date.  This module
-extracts "报告期末普通股股东总数" from original filings and builds a small trend series.
+Strict historical research reads "报告期末普通股股东总数" only from original filing versions
+published by the cutoff date, rather than from today's reconstructed historical database.
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ from analysis.filing_calendar import (
     get_financial_filing_calendar,
     latest_available_filing_by_period,
 )
-
 
 _PARSE_TIMEOUT_S = 45
 
@@ -48,19 +46,18 @@ def _extract_relevant_text(pdf_bytes: bytes) -> str:
             text = ""
         if "股东总数" in text or "普通股股东" in text:
             pages.append(text)
-    return "
-".join(pages)
+    return "\n".join(pages)
 
 
 def parse_shareholder_count_text(text: str) -> Optional[int]:
     if not text:
         return None
-    normalized = text.replace("　", " ")
-    normalized = re.sub(r"[ 	]+", " ", normalized)
+    normalized = text.replace("\u3000", " ")
+    normalized = re.sub(r"[ \t]+", " ", normalized)
     patterns = (
-        r"报告期末普通股股东总数(?:（户）|(户)|（如有）)?s*[：:]?s*([d,，]+)",
-        r"期末普通股股东总数(?:（户）|(户))?s*[：:]?s*([d,，]+)",
-        r"普通股股东总数s*[：:]?s*([d,，]+)",
+        r"报告期末普通股股东总数(?:（户）|\(户\)|（如有）)?\s*[：:]?\s*([\d,，]+)",
+        r"期末普通股股东总数(?:（户）|\(户\))?\s*[：:]?\s*([\d,，]+)",
+        r"普通股股东总数\s*[：:]?\s*([\d,，]+)",
     )
     for pattern in patterns:
         m = re.search(pattern, normalized)
@@ -88,10 +85,11 @@ async def _fetch_count(item: Dict) -> Optional[Dict]:
     count = parse_shareholder_count_text(text)
     if count is None:
         return None
+    published_at = str(item.get("published_at") or "")
     return {
         "period": str(item.get("period") or ""),
-        "published_at": str(item.get("published_at") or ""),
-        "available_at": str(item.get("published_at") or ""),
+        "published_at": published_at,
+        "available_at": published_at,
         "holders": count,
         "url": url,
         "title": str(item.get("title") or ""),
