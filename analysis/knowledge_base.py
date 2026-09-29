@@ -231,7 +231,9 @@ def _load_raw_entries(source: KnowledgeSource) -> List[Dict]:
                         actual = str(rec.get(source.filter_field, "") or "").strip()
                         if actual != source.filter_value:
                             continue
-                    entry_id = str(rec.get(source.id_field, ""))
+                    entry_id = str(rec.get(source.id_field, "") or "").strip()
+                    if not entry_id:
+                        continue
                     source_url = ""
                     if source.url_field:
                         source_url = _normalize_source_url(str(rec.get(source.url_field, "") or ""))
@@ -356,6 +358,20 @@ async def ensure_loaded() -> List[KnowledgeEntry]:
     raws: List[Dict] = []
     for source in _build_sources():
         raws.extend(_load_raw_entries(source))
+
+    # 增量抓取会跨日期生成多个 JSONL，同一帖子/视频可能重复出现。
+    # 知识库按 source+entry_id 去重，保留时间戳更新的一份，避免同一观点被重复注入。
+    deduped: Dict[str, Dict] = {}
+    for raw in raws:
+        key = _cache_key(raw["source"], raw["entry_id"])
+        old = deduped.get(key)
+        if old is None or raw.get("timestamp", 0) >= old.get("timestamp", 0):
+            deduped[key] = raw
+    if len(deduped) != len(raws):
+        utils.logger.info(
+            f"[knowledge_base] 原始条目 {len(raws)} 条，按来源+ID去重后 {len(deduped)} 条"
+        )
+    raws = list(deduped.values())
 
     disk_cache = _read_distill_cache()
     disk_cache = await _distill_missing(raws, disk_cache)
