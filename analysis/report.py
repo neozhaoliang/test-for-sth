@@ -1065,8 +1065,8 @@ _SUBMIT_REPORT_TOOL = {
         "lynch_category 从 fast_grower/stalwart/cyclical/turnaround/asset_play/slow_grower/unclear 中选; "
         "stance 从 bullish/bearish/neutral 中选; company_quality_stance 与 current_odds_stance 也从同一枚举中选，分别表示企业长期质量和当前股票赔率; "
         "thesis_summary 必须按十二个维度逐一展开详细阐述: 每个维度独立成段 (编号1-12, 顺序同分析工具), "
-        "每段保留该维度的关键数字与推理链, 不得压缩成一句话或跳过; 十个维度写完后加一段综合立场; "
-        "引用至少四个不同方面的具体数字并正面回应对结论不利的脆弱性事实, 1500字以内, 分条每点一行; "
+        "每段保留该维度的关键数字与推理链, 不得压缩成一句话或跳过; 十二个维度写完后加一段综合立场; "
+        "引用至少四个不同方面的具体数字并正面回应对结论不利的脆弱性事实, 1800字以内, 分条每点一行; "
         "core_counter_evidence 必须填写与结论相悖的最强证据并带具体数字, 一条都没有才写'未发现'; "
         "invalidation_condition 强制填写什么情况会证明判断错误; risk_notes 列其他风险。"
         "输出正文禁止出现工具名/'维度'/'数据块'/'六查'/'第N步'等流程用语, 立场用中文(看多/看空/中性)表述。"
@@ -1125,7 +1125,7 @@ _DIMENSION_LABELS = {
 
 _SCORE_PROMPT = """以下是对一只股票十二个维度的分析。请对每个维度打分: -10 表示极度利空, +10 表示极度利多, 0 表示中性。维度名固定为: management, fundamentals, rd, chip_flow, price_position, cycle_position, policy_geopolitics, retail_sentiment, shareholder_returns, growth_elasticity, a_share_structure, risk_quality。
 
-输出 JSON 数组 (10 个元素, 不要任何其他文字):
+输出 JSON 数组 (12 个元素, 不要任何其他文字):
 [{{"dimension": "management", "score": -3, "note": "一句理由 (15字以内)"}}]
 
 维度分析:
@@ -1179,7 +1179,7 @@ async def _score_dimensions(
 async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) -> StructuredSummary:
     prompt = _build_prompt(inputs, candidates)
 
-    # 工具调用路径: 强制九维度逐一分析后提交
+    # 工具调用路径: 强制十二维度逐一分析后提交
     analyses, submit_input, tool_reason = await call_analysis_with_tools(
         prompt,
         _ANALYSIS_TOOLS + [_SUBMIT_REPORT_TOOL],
