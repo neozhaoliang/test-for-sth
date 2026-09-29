@@ -652,6 +652,52 @@ function renderEvidenceSection(report) {
     html += '<div class="evidence-block missing"><b>融资盘与流通盘:</b> 暂缺</div>';
   }
 
+  const ash = report.a_share_structure;
+  if (ash) {
+    let ashHtml = '<div class="evidence-block"><b>A股公开资金结构 (' +
+      escapeHtml(ash.report_period || '报告期未知') + '):</b>';
+    const inst = ash.institution_summary || [];
+    if (inst.length) {
+      ashHtml += '<ul>' + inst.map(x => {
+        let s = escapeHtml(x.type || '') + ': ' + (x.institutions || 0) + ' 家';
+        if (x.latest_float_ratio_pct !== null && x.latest_float_ratio_pct !== undefined) {
+          s += '，合计占流通股 ' + x.latest_float_ratio_pct + '%';
+        }
+        if (x.float_ratio_change_pct !== null && x.float_ratio_change_pct !== undefined) {
+          s += '，较前期 ' + (x.float_ratio_change_pct >= 0 ? '+' : '') + x.float_ratio_change_pct + '%';
+        }
+        return '<li>' + s + '</li>';
+      }).join('') + '</ul>';
+    }
+    const special = ash.special_holders || {};
+    const labels = {
+      national_team: '汇金/证金/国新/诚通等国家资本',
+      social_security: '社保基金',
+      insurance: '保险资金',
+      foreign: '香港中央结算/QFII等境外资金',
+      public_fund: '公募基金',
+    };
+    ashHtml += '<div><b>前十大流通股东中特殊资金:</b><ul>';
+    Object.keys(labels).forEach(k => {
+      const holders = special[k] || [];
+      ashHtml += '<li>' + labels[k] + ': ' +
+        (holders.length
+          ? holders.slice(0, 5).map(h => escapeHtml(h.name || '') +
+              (h.float_ratio_pct !== null && h.float_ratio_pct !== undefined
+                ? ' (' + h.float_ratio_pct + '%)' : '')).join('；')
+          : '本期前十大未见') +
+        '</li>';
+    });
+    ashHtml += '</ul></div>';
+    (ash.notes || []).forEach(n => {
+      ashHtml += '<div class="credibility-note">· ' + escapeHtml(n) + '</div>';
+    });
+    ashHtml += '</div>';
+    html += ashHtml;
+  } else {
+    html += '<div class="evidence-block missing"><b>A股公开资金结构:</b> 暂缺；不能据此推断国家队、公募、险资或外资动向</div>';
+  }
+
   const pt = report.profitability_trend;
   if (pt) {
     html += '<div class="evidence-block"><b>盈利能力与成本弹性:</b><ul>' +
