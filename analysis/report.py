@@ -22,6 +22,7 @@
 """
 
 import asyncio
+import json
 import re
 import time
 from dataclasses import dataclass, field
@@ -79,6 +80,7 @@ _PROMPT_TEMPLATE = """你是一名证券研究助手。你的任务不是预测�
 - **管理层评价只能基于"一手公告证据"与"治理与股东回报记录"块的客观事实** (任职年限、薪酬与持股、分红回购、再融资记录、减持/处罚/问询记录)；一手公告优先于第三方聚合页，二者冲突时必须指出冲突，不得凭印象评价管理层人品或美誉度。
 - **知识库优先于模板推断**: 解释股东户数与股价联动、市场风格切换、板块涨跌、资金动向等市场行为时，必须先查知识库背景资料中该时期的真实记录 (如公募调仓、风格切换)；知识库有相关记录时必须引用并以其为准，禁止用"户数增加→筹码派发"这类模板推断覆盖真实背景。知识库没有相关记录时才能用数据块内的模板推断，且要注明这是推断而非事实。
 - **讨论区情绪是反向指标**: 引用雪球讨论区情绪块的数字。一致看多 (看多占方向性表态≥80% 且方向性样本≥10) 必须作为拥挤风险写进结论 (风险提示或关键论据)，一致看空同理提示悲观极点。禁止把多数人的看多当作看多论据。该块暂缺时写"该维度数据暂缺"。
+- **禁止重复计分**: 同一底层事实即使同时出现在多个分析方向，也只能在综合结论里计一次影响。例如同一组融资余额既出现在筹码分析又出现在A股资金结构时，不能当成两份独立利空/利好证据。
 - **多空辩论必须正面处理**: 结论必须回应"多空辩论"块——引用双方核心论点与历史验证统计 (哪一方有时间范围的股价预测被验证过、命中率如何)，说明你的结论接受了哪方论据、驳斥或保留哪方论据；辩论块标注哪方更合理时，与其相反的方向判断必须额外给出反驳理由。该块暂缺时写"该维度数据暂缺"。
 - 结构性事实块里的比率全部已在 Python 里算好，直接引用，**不要自己重新做算术**。该块里"公司自述的风险"和"公司自己的经营表述"属于利益相关方视角，不能当作客观事实，只能作为"公司自己承认了什么""公司自己想让你相信什么"来引用；公司自述与其披露数字矛盾时以数字为准。严禁把"与头部客户深度绑定""技术领先""行业龙头"这类说法当成护城河证据——除非同一数据块里有可核验的数字支撑。
 
@@ -1121,6 +1123,52 @@ _SUBMIT_REPORT_TOOL = {
     },
 }
 
+_REVIEW_SYNTHESIS_PROMPT = """下面是一份股票研究初稿 JSON，以及确定性审查器发现的问题。
+你的任务不是重新研究股票，也不是新增事实，而是修正最终综合判断：
+
+1. 同一底层事实被多个分析方向重复引用时，只能计一次影响。
+2. 若审查器指出方向冲突且初稿无法用日期/口径明确化解，应降低置信度或把综合立场收缩为中性；不得自行编造解释。
+3. 若某个方向缺少对应证据，不能让它成为推动最终立场的核心理由。
+4. 保留企业长期质量与当前股票赔率的区分。
+5. 只能使用初稿中已经出现的事实和数字；禁止添加任何新事实。
+6. 输出与原初稿完全相同 schema 的 JSON，不要解释。
+
+初稿:
+{draft_json}
+
+审查:
+{review_json}
+"""
+
+
+async def _apply_review_to_draft(
+    parsed: Dict,
+    review: ResearchReview,
+    stock_code: str,
+) -> Dict:
+    if not (review.possible_conflicts or review.weak_links):
+        return parsed
+    try:
+        revised, _ = await call_json_ex(
+            _REVIEW_SYNTHESIS_PROMPT.format(
+                draft_json=json.dumps(parsed, ensure_ascii=False),
+                review_json=json.dumps(review.model_dump(), ensure_ascii=False),
+            ),
+            max_tokens=4096,
+            repair_requirements=_REPAIR_REQUIREMENTS,
+        )
+    except Exception as e:
+        utils.logger.warning(f"[analysis.report] {stock_code} 二次审查综合失败: {e}")
+        return parsed
+
+    if not isinstance(revised, dict) or revised.get("stance") not in _VALID_STANCES:
+        return parsed
+    for key in ("company_quality_stance", "current_odds_stance"):
+        if revised.get(key) not in _VALID_STANCES:
+            revised[key] = parsed.get(key, "")
+    return revised
+
+
 _REPAIR_REQUIREMENTS = (
     "必须是 JSON 对象，且必须包含字段: stance、company_quality_stance、current_odds_stance (三者取值限 bullish/bearish/neutral)、confidence (0到1)、"
     "lynch_category (取值限 fast_grower/stalwart/cyclical/turnaround/"
@@ -1251,11 +1299,13 @@ async def _generate_summary(
             ),
             ResearchReview(),
         )
+    review = review_dimension_analyses(analyses, evidence)
+    parsed = await _apply_review_to_draft(parsed, review, inputs.stock_code)
+
     lynch_category = parsed.get("lynch_category", "")
     if lynch_category not in _VALID_LYNCH_CATEGORIES:
         lynch_category = "unclear"
     dimension_scores = await _score_dimensions(analyses, inputs.stock_code)
-    review = review_dimension_analyses(analyses, evidence)
     summary = StructuredSummary(
         lynch_category=lynch_category,
         stance=parsed.get("stance", ""),
