@@ -987,7 +987,7 @@ function renderDimensionRadar(scores) {
   });
 
   return '<svg viewBox="0 0 440 395" width="440" height="395" role="img" ' +
-    'aria-label="九维度评分雷达图">' +
+    'aria-label="十二维度评分雷达图">' +
     grid + axes +
     '<polygon points="' + poly + '" fill="#1a73e8" fill-opacity="0.20" stroke="#1a73e8" stroke-width="2"/>' +
     dots + labels + '</svg>';
