@@ -1500,6 +1500,26 @@ function renderResult(report) {
     html += ' <span class="prompt-version">(prompt ' + escapeHtml(report.prompt_version) + ')</span>';
   }
   html += '</p>';
+  const profile = report.research_profile || {};
+  if (profile.archetype) {
+    html += '<div class="evidence-block"><b>公司研究画像:</b> ' +
+      escapeHtml(profile.label || profile.archetype) +
+      (profile.industry ? ' ｜ 申万行业 ' + escapeHtml(profile.industry) : '') +
+      ' ｜ 重点证据准备度 ' + Math.round((profile.readiness || 0) * 100) + '%';
+    if (profile.priority_dimensions && profile.priority_dimensions.length) {
+      html += '<br><b>优先研究:</b> ' + profile.priority_dimensions.map(escapeHtml).join('、');
+    }
+    if (profile.missing_priority_evidence && profile.missing_priority_evidence.length) {
+      html += '<br><b>重点证据缺口:</b> ' +
+        profile.missing_priority_evidence.map(escapeHtml).join('、');
+    }
+    if (profile.rationale && profile.rationale.length) {
+      html += '<br><span class="credibility-note">' +
+        profile.rationale.map(escapeHtml).join('；') + '</span>';
+    }
+    html += '</div>';
+  }
+
   const rq = report.research_quality || {};
   if (rq.total_dimensions) {
     html += '<div class="evidence-block"><b>证据质量:</b> 覆盖 ' +
