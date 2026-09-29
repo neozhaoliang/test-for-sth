@@ -17,26 +17,30 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 """
-沪铜/COMEX铜价差 + 人民币汇率趋势。
+周期行业商品锚 + 人民币汇率趋势。
 
-铜价差部分仅对周期性矿业股触发，用于判断是否存在进口套利/囤货驱动的金融属性行情
-(而非真实供需)。汇率趋势部分 (get_rmb_trend_signal) 不设行业门槛——汇率敞口取决于
-海外收入占比，与行业无关。
+周期信号必须与公司的真实产品/行业匹配：
+- 煤炭不能拿铜价代替；
+- 黄金不能拿铜价代替；
+- 油气、钢铁、锂等分别使用对应期货代理；
+- 找不到可靠映射时返回 None，而不是硬塞一个“资源品指数”。
 
-akshare 不提供 LME 伦铜数据，用 COMEX 纽约铜代替 (同属反映内外盘套利的信号，
-但不是同一交易所)。沪铜单位人民币元/吨，COMEX铜单位美元/磅，两者不直接可比，
-价差计算需要磅->吨换算 + 人民币汇率。人民币汇率额外给出近期升贬值趋势，因为
-汇率趋势本身也是独立于价差数值的信号 (人民币升值会单独影响进口套利经济性)。
+期货价格只是行业景气代理，不等同于公司实际结算价/现货价。报告必须同时结合公司
+销量、成本、库存、资本开支和财务兑现。
+
+铜产业额外保留沪铜/COMEX 铜的内外盘信息；汇率趋势则独立于行业提供。
 """
 
+import asyncio
+import re
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import akshare as ak
 
 from tools.utils import utils
 
-_CYCLICAL_MINING_KEYWORDS = ("有色", "金属", "采掘", "矿业", "钢铁", "煤炭")
+_COPPER_KEYWORDS = ("铜矿", "铜冶炼", "铜加工", "电解铜", "阴极铜")
 
 # 汇率趋势对所有有海外收入的公司都适用 (不只是矿业股)，独立于铜价单独取一份。
 _RMB_TTL_SECONDS = 6 * 3600
@@ -44,14 +48,229 @@ _rmb_cache: Dict[str, object] = {}
 
 _LB_PER_TON = 2204.62
 
+# Ordered from specific products to broader categories.  Each route can expose more than one
+# futures anchor; these are proxies for cycle direction, not the company's realized price.
+_CYCLE_ROUTES: List[Dict[str, Any]] = [
+    {
+        "name": "lithium",
+        "keywords": ("碳酸锂", "锂盐", "锂矿", "盐湖提锂"),
+        "anchors": (("碳酸锂", "LC0", "元/吨"),),
+    },
+    {
+        "name": "coal",
+        "keywords": ("煤炭", "动力煤", "焦煤", "煤矿", "煤业"),
+        "anchors": (
+            ("动力煤期货代理", "ZC0", "元/吨"),
+            ("焦煤", "JM0", "元/吨"),
+        ),
+    },
+    {
+        "name": "crude_oil",
+        "keywords": ("原油", "油气", "石油开采", "石油天然气", "油田"),
+        "anchors": (("INE原油", "SC0", "元/桶"),),
+    },
+    {
+        "name": "gold_precious",
+        "keywords": ("黄金", "金矿", "贵金属"),
+        "anchors": (
+            ("沪金", "AU0", "元/克"),
+            ("沪银", "AG0", "元/千克"),
+        ),
+    },
+    {
+        "name": "steel",
+        "keywords": ("钢铁", "钢材", "螺纹钢", "特钢"),
+        "anchors": (
+            ("螺纹钢", "RB0", "元/吨"),
+            ("铁矿石", "I0", "元/吨"),
+        ),
+    },
+    {
+        "name": "copper",
+        "keywords": ("铜矿", "铜冶炼", "电解铜", "阴极铜", "铜加工"),
+        "anchors": (("沪铜", "CU0", "元/吨"),),
+    },
+    {
+        "name": "aluminum",
+        "keywords": ("铝业", "电解铝", "氧化铝", "铝加工"),
+        "anchors": (("沪铝", "AL0", "元/吨"),),
+    },
+    {
+        "name": "zinc",
+        "keywords": ("锌矿", "锌冶炼", "锌业"),
+        "anchors": (("沪锌", "ZN0", "元/吨"),),
+    },
+    {
+        "name": "nickel",
+        "keywords": ("镍矿", "镍业", "电解镍"),
+        "anchors": (("沪镍", "NI0", "元/吨"),),
+    },
+    {
+        "name": "silicon",
+        "keywords": ("工业硅", "多晶硅", "硅料"),
+        "anchors": (
+            ("工业硅", "SI0", "元/吨"),
+            ("多晶硅", "PS0", "元/吨"),
+        ),
+    },
+    {
+        "name": "glass",
+        "keywords": ("玻璃",),
+        "anchors": (("玻璃", "FG0", "元/吨"),),
+    },
+    {
+        "name": "soda_ash",
+        "keywords": ("纯碱",),
+        "anchors": (("纯碱", "SA0", "元/吨"),),
+    },
+    {
+        "name": "hog",
+        "keywords": ("生猪", "养猪", "生猪养殖"),
+        "anchors": (("生猪", "LH0", "元/吨"),),
+    },
+]
+
+
+def _cycle_context(industry_name: Optional[str], fundamentals: Optional[Dict]) -> str:
+    parts = [industry_name or ""]
+    if fundamentals:
+        facts = fundamentals.get("facts") or {}
+        parts.extend(
+            str(x or "")
+            for x in (
+                facts.get("sw_industry"),
+                fundamentals.get("management_narrative"),
+                fundamentals.get("self_disclosed_risks"),
+            )
+        )
+    return " ".join(parts)
+
+
+def _select_cycle_route(
+    industry_name: Optional[str],
+    fundamentals: Optional[Dict] = None,
+) -> Optional[Dict[str, Any]]:
+    text = _cycle_context(industry_name, fundamentals)
+    if not text.strip():
+        return None
+    for route in _CYCLE_ROUTES:
+        if any(keyword in text for keyword in route["keywords"]):
+            return route
+    return None
+
+
+def _series_stats(dates: List[str], closes: List[float]) -> Dict[str, Any]:
+    if not closes:
+        return {}
+    latest = float(closes[-1])
+
+    def change(periods: int) -> Optional[float]:
+        if len(closes) <= periods:
+            return None
+        old = float(closes[-periods - 1])
+        if not old:
+            return None
+        return round((latest - old) / old * 100, 2)
+
+    year = [float(x) for x in closes[-250:] if x is not None]
+    position = None
+    if year:
+        lo, hi = min(year), max(year)
+        if hi > lo:
+            position = round((latest - lo) / (hi - lo) * 100, 1)
+
+    return {
+        "as_of": dates[-1] if dates else None,
+        "latest": latest,
+        "change_20d_pct": change(20),
+        "change_60d_pct": change(60),
+        "position_1y_pct": position,
+        "observations": len(closes),
+    }
+
+
+async def _get_futures_anchor(name: str, symbol: str, unit: str) -> Optional[Dict]:
+    try:
+        df = await asyncio.to_thread(ak.futures_main_sina, symbol=symbol)
+    except Exception as e:
+        utils.logger.warning(f"[commodity] futures_main_sina({symbol}) failed: {e}")
+        return None
+    if df is None or df.empty or "收盘价" not in df.columns:
+        return None
+
+    dates: List[str] = []
+    closes: List[float] = []
+    date_col = "日期" if "日期" in df.columns else None
+    for _, row in df.tail(300).iterrows():
+        try:
+            value = float(row["收盘价"])
+        except (TypeError, ValueError):
+            continue
+        if value != value:
+            continue
+        closes.append(value)
+        dates.append(str(row.get(date_col) or "") if date_col else "")
+
+    stats = _series_stats(dates, closes)
+    if not stats:
+        return None
+    return {
+        "name": name,
+        "symbol": symbol,
+        "unit": unit,
+        **stats,
+    }
+
+
+async def get_cycle_commodity_signal(
+    stock_code: str,
+    industry_name: Optional[str],
+    fundamentals: Optional[Dict] = None,
+) -> Optional[Dict]:
+    """
+    Return product-matched futures proxies for cyclical industries.
+
+    A missing route is a deliberate "no reliable commodity mapping" outcome.  It should
+    lower cycle-evidence readiness rather than trigger a generic commodity guess.
+    """
+    route = _select_cycle_route(industry_name, fundamentals)
+    if not route:
+        return None
+
+    anchors = await asyncio.gather(
+        *(
+            _get_futures_anchor(name, symbol, unit)
+            for name, symbol, unit in route["anchors"]
+        )
+    )
+    anchors = [x for x in anchors if x]
+    if not anchors:
+        return None
+
+    result: Dict[str, Any] = {
+        "route": route["name"],
+        "anchors": anchors,
+        "as_of": max((x.get("as_of") or "") for x in anchors) or None,
+        "note": (
+            "期货主力连续合约仅作周期方向代理，不等同于公司现货结算价。"
+            "20/60交易日涨跌与1年位置用于识别景气方向，仍需结合公司销量、成本、库存和资本开支。"
+        ),
+    }
+
+    # Copper gets the extra domestic/COMEX context; other resource industries do not.
+    if route["name"] == "copper":
+        spread = await _get_copper_cross_market_context()
+        if spread:
+            result["copper_cross_market"] = spread
+    return result
+
 
 def is_cyclical_mining_industry(industry_name: str) -> bool:
-    return any(kw in industry_name for kw in _CYCLICAL_MINING_KEYWORDS)
+    """Backward-compatible name: now means specifically a copper-related context."""
+    return any(kw in (industry_name or "") for kw in _COPPER_KEYWORDS)
 
 
 async def _get_sh_copper_price() -> Optional[float]:
-    import asyncio
-
     try:
         df = await asyncio.to_thread(ak.futures_main_sina, symbol="CU0")
     except Exception as e:
@@ -63,8 +282,6 @@ async def _get_sh_copper_price() -> Optional[float]:
 
 
 async def _get_comex_copper_price() -> Optional[float]:
-    import asyncio
-
     try:
         df = await asyncio.to_thread(ak.futures_global_spot_em)
     except Exception as e:
@@ -80,8 +297,6 @@ async def _get_comex_copper_price() -> Optional[float]:
 
 async def _get_rmb_trend() -> Optional[str]:
     """近 30 个交易日美元/人民币中间价趋势 (报价为每 100 美元兑人民币)。"""
-    import asyncio
-
     try:
         df = await asyncio.to_thread(ak.currency_boc_safe)
     except Exception as e:
@@ -128,6 +343,27 @@ async def get_rmb_trend_signal() -> Optional[Dict]:
     _rmb_cache["value"] = value
     _rmb_cache["expire_at"] = time.time() + _RMB_TTL_SECONDS
     return value
+
+
+async def _get_copper_cross_market_context() -> Optional[Dict]:
+    sh_price, comex_price, rmb_trend = await asyncio.gather(
+        _get_sh_copper_price(),
+        _get_comex_copper_price(),
+        _get_rmb_trend(),
+    )
+    if sh_price is None and comex_price is None:
+        return None
+    return {
+        "sh_copper_price": sh_price,
+        "sh_copper_unit": "元/吨",
+        "comex_copper_price": comex_price,
+        "comex_copper_unit": "美元/磅",
+        "rmb_trend": rmb_trend,
+        "note": (
+            "沪铜与COMEX铜单位不同，不能直接相减；这里只提供内外盘背景，"
+            "任何套利/囤货判断都需要额外证据。"
+        ),
+    }
 
 
 async def get_copper_spread_signal(stock_code: str, industry_name: Optional[str]) -> Optional[Dict]:
