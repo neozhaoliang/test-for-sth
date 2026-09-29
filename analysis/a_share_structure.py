@@ -17,7 +17,6 @@ from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
-import akshare as ak
 
 from tools.utils import utils
 
@@ -78,6 +77,8 @@ def _num(value) -> Optional[float]:
 
 
 async def _fetch_institute_detail(code6: str, quarter_code: str):
+    import akshare as ak
+
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(
@@ -96,6 +97,8 @@ async def _fetch_institute_detail(code6: str, quarter_code: str):
 
 
 async def _fetch_unlock_queue(code6: str):
+    import akshare as ak
+
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(
@@ -113,6 +116,8 @@ async def _fetch_unlock_queue(code6: str):
 
 
 async def _fetch_top10(code6: str, report_date: str):
+    import akshare as ak
+
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(
