@@ -42,6 +42,7 @@ class KnowledgeExcerpt(BaseModel):
     source: str = Field(default="", description="知识库来源标识，如 bili_laomujiang")
     title: str = Field(default="", description="资料标题")
     distilled: str = Field(default="", description="LLM 提炼后的投资观点摘要 (已去除闲聊)")
+    source_url: str = Field(default="", description="原帖/专栏/视频来源链接")
 
 
 class StructuredSummary(BaseModel):
