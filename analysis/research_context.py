@@ -101,15 +101,13 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
     ),
     "shareholder_count": TemporalCapability(
         source="shareholder_count",
-        capability=SourceTemporalCapability.LIVE_ONLY,
-        reason="historical rows exist but disclosure availability has not been enforced",
-        implemented=False,
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="stock-specific holder-count history is filtered by disclosure date <= as_of; historical mode fails closed if the detail endpoint is unavailable",
     ),
     "dividend_buyback": TemporalCapability(
         source="dividend_buyback",
-        capability=SourceTemporalCapability.LIVE_ONLY,
-        reason="events are not yet filtered by announcement availability date",
-        implemented=False,
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="dividend and buyback events are filtered by announcement/latest-announcement date <= as_of",
     ),
     "a_share_structure": TemporalCapability(
         source="a_share_structure",
