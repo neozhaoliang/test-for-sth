@@ -12,7 +12,9 @@ That separation is important for:
 
 from __future__ import annotations
 
+from datetime import date, datetime, time
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 from analysis.debate import derive_sentiment, get_debate
 from analysis.knowledge_base import ensure_loaded as ensure_knowledge_base_loaded
@@ -78,18 +80,45 @@ async def latest_relevant_posts(
     return texts
 
 
-async def load_knowledge_excerpts() -> List[KnowledgeExcerpt]:
+async def load_knowledge_excerpts(
+    *,
+    as_of: Optional[date] = None,
+) -> List[KnowledgeExcerpt]:
     entries = await ensure_knowledge_base_loaded()
-    return [
-        KnowledgeExcerpt(
-            source=e.source,
-            title=e.title,
-            distilled=e.distilled,
-            source_url=e.source_url,
+    cutoff_ts = None
+    if as_of is not None:
+        cutoff_ts = int(
+            datetime.combine(
+                as_of,
+                time(23, 59, 59),
+                tzinfo=ZoneInfo("Asia/Shanghai"),
+            ).timestamp()
         )
-        for e in entries
-        if e.distilled
-    ]
+
+    out: List[KnowledgeExcerpt] = []
+    for e in entries:
+        if not e.distilled:
+            continue
+        if cutoff_ts is not None:
+            # Historical mode is conservative: unknown publication time is excluded.
+            if e.timestamp <= 0 or e.timestamp > cutoff_ts:
+                continue
+        published_at = ""
+        if e.timestamp > 0:
+            published_at = datetime.fromtimestamp(
+                e.timestamp,
+                tz=ZoneInfo("Asia/Shanghai"),
+            ).strftime("%Y-%m-%d %H:%M:%S")
+        out.append(
+            KnowledgeExcerpt(
+                source=e.source,
+                title=e.title,
+                distilled=e.distilled,
+                source_url=e.source_url,
+                published_at=published_at,
+            )
+        )
+    return out
 
 
 _RELEVANCE_FILTER_PROMPT = """以下是知识库中若干条投资观点摘要的编号、标题和摘要开头片段。
