@@ -105,7 +105,7 @@ _REQUIRED_CATEGORIES = {
     "analyze_chip_flow": {"shareholder_count", "margin"},
     "analyze_price_position": {"valuation_history", "valuation", "market_context"},
     "analyze_cycle_position": {"cycle_signal", "industry"},
-    "analyze_policy_geopolitics": {"fx", "major_events", "primary", "knowledge"},
+    "analyze_policy_geopolitics": {"macro_rates", "fx", "major_events", "primary", "knowledge"},
     "analyze_retail_sentiment": {"sentiment", "debate"},
     "analyze_shareholder_returns": {"management_capital", "shareholder_return", "governance", "primary"},
     "analyze_growth_elasticity": {"profitability", "valuation_history", "valuation"},
