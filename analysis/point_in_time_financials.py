@@ -249,3 +249,91 @@ async def get_point_in_time_financials(
         "source_tier": "S",
         "source": "CNINFO original periodic-report PDFs",
     }
+
+
+
+def to_historical_fundamentals(data: Optional[Dict]) -> Optional[Dict]:
+    """Map point-in-time filing facts into the report's fundamentals contract."""
+    if not data:
+        return None
+    latest = data.get("latest") or {}
+    facts = {
+        "finance_period": latest.get("period"),
+        "revenue": latest.get("revenue"),
+        "net_profit": latest.get("net_profit"),
+        "operating_cash_flow": latest.get("operating_cash_flow"),
+        "cash_to_profit_ratio": latest.get("cash_to_profit_ratio"),
+        # Historical PDF parser intentionally does not pretend to know fields it did not
+        # extract from the exact filing version.
+        "rd_investment_yuan": None,
+        "rd_intensity_pct": None,
+        "accounts_receivable_yuan": None,
+        "inventory_yuan": None,
+        "sw_industry": None,
+    }
+    missing = []
+    for field, label in (
+        ("revenue", "营业收入"),
+        ("net_profit", "归母净利润"),
+        ("operating_cash_flow", "经营现金流"),
+    ):
+        if facts.get(field) is None:
+            missing.append(label)
+    missing.extend(
+        [
+            "客户/供应商集中度(历史原始财报解析暂未覆盖)",
+            "专利/研发结构(历史原始财报解析暂未覆盖)",
+            "申万行业(历史原始财报解析暂未覆盖)",
+        ]
+    )
+    url = latest.get("url")
+    return {
+        "facts": facts,
+        "valuation": None,
+        "management_narrative": "",
+        "self_disclosed_risks": "",
+        "top_customers": [],
+        "top_suppliers": [],
+        "major_events": [],
+        "refinancing_history": [],
+        "executive_profile": None,
+        "governance_alerts": [],
+        "missing": missing,
+        "sources": [url] if url else [],
+        "source_map": {"finance": url} if url else {},
+        "point_in_time": True,
+        "available_at": latest.get("published_at"),
+    }
+
+
+def _trend_note(periods: List[Dict], key: str, label: str) -> str:
+    usable = [x for x in periods if x.get(key) is not None]
+    if len(usable) < 2:
+        return f"{label}数据不足"
+    first, last = usable[0], usable[-1]
+    a, b = float(first[key]), float(last[key])
+    diff = b - a
+    direction = "上升" if diff > 0.5 else ("下降" if diff < -0.5 else "基本持平")
+    return (
+        f"{label}从 {a:.2f}% {direction}至 {b:.2f}% "
+        f"(区间 {first['period']}~{last['period']})"
+    )
+
+
+def to_historical_profitability(data: Optional[Dict]) -> Optional[Dict]:
+    """Map exact filing metrics into the existing profitability-trend contract."""
+    if not data:
+        return None
+    periods = data.get("periods") or []
+    if not periods:
+        return None
+    return {
+        "periods": periods,
+        "gross_margin_trend_note": "毛利率历史原始财报解析暂未覆盖",
+        "net_margin_trend_note": _trend_note(periods, "net_margin_pct", "净利率"),
+        "roe_trend_note": _trend_note(periods, "roe_pct", "ROE"),
+        "debt_ratio_trend_note": _trend_note(periods, "debt_ratio_pct", "资产负债率"),
+        "point_in_time": True,
+        "as_of": data.get("as_of"),
+        "source_tier": "S",
+    }
