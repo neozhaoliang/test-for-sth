@@ -446,13 +446,21 @@ def evaluate_research_quality(evidence: List[EvidenceItem]) -> ResearchQuality:
             missing.append(dim)
 
     coverage = len(covered) / len(_DIMENSION_REQUIREMENTS)
-    high_grade = [e for e in evidence if e.source_tier in {"S", "A", "B"} and e.kind != "opinion"]
-    ratio = len(high_grade) / len(evidence) if evidence else 0.0
+    # 按证据类别而不是逐条记录计算来源质量；否则几十条巨潮公告会把比例虚高。
+    category_quality: Dict[str, bool] = {}
+    for e in evidence:
+        is_high = e.source_tier in {"S", "A", "B"} and e.kind != "opinion"
+        category_quality[e.category] = category_quality.get(e.category, False) or is_high
+    ratio = (
+        sum(1 for ok in category_quality.values() if ok) / len(category_quality)
+        if category_quality
+        else 0.0
+    )
 
     warnings: List[str] = []
     if coverage < 0.75:
         warnings.append("研究证据覆盖不足 75%，综合结论应降低置信度。")
-    if "governance" not in categories:
+    if "governance" not in categories and "primary" not in categories:
         warnings.append("缺少治理/再融资/处罚等客观记录，不宜评价管理层可信度。")
     if "valuation" not in categories or "market_context" not in categories:
         warnings.append("价格与估值位置证据不完整，不能只凭公司质量给出股票结论。")
