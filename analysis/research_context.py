@@ -47,8 +47,13 @@ class ResearchRequest(BaseModel):
                 raise ValueError("historical mode requires as_of")
             if self.as_of >= today:
                 raise ValueError("historical mode as_of must be before today")
-        elif self.as_of is None:
-            self.as_of = today
+        else:
+            if self.as_of is None:
+                self.as_of = today
+            elif self.as_of != today:
+                raise ValueError(
+                    "live mode always uses today's data; use historical mode for a past as_of"
+                )
         return self
 
 
