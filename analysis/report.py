@@ -163,7 +163,11 @@ async def generate_report(
         valuation_history,
         macro_rates,
     ) = await asyncio.gather(
-        load_knowledge_excerpts(),
+        load_knowledge_excerpts(
+            as_of=request.as_of
+            if request.mode == ResearchMode.HISTORICAL
+            else None
+        ),
         get_shareholder_count_trend(stock_code),
         get_dividend_history(stock_code),
         get_buyback_history(stock_code),
