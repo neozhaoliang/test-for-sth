@@ -37,7 +37,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from analysis.knowledge_base import ensure_loaded as ensure_knowledge_base_loaded
+from analysis.knowledge_base import (
+    ensure_loaded as ensure_knowledge_base_loaded,
+    invalidate_cache as invalidate_knowledge_base_cache,
+)
 from analysis.realtime_price import resolve_stock_code
 from analysis.report import generate_report
 from media_platform.xueqiu.help import normalize_user_id
@@ -168,11 +171,19 @@ async def _run_crawler_subprocess(task_id: str, cmd: list) -> None:
     returncode = await _run_cmd(cmd, log_lines)
     chain = _crawl_tasks[task_id].get("chain")
     if returncode == 0 and chain:
-        # 抓取成功后自动接续: 回测该用户发言并重建摘要 (LLM 分类每条帖子, 耗时较长)
-        log_lines.append("=" * 50)
-        log_lines.append("[web.app] 抓取完成, 自动开始回测与摘要重建")
-        log_lines.append("=" * 50)
-        returncode = await _run_cmd(chain, log_lines)
+        # 兼容旧的一条后续命令，也支持多条命令串行执行 (如 B站专栏 -> 视频字幕)。
+        commands = chain if chain and isinstance(chain[0], (list, tuple)) else [chain]
+        for idx, next_cmd in enumerate(commands, start=1):
+            log_lines.append("=" * 50)
+            log_lines.append(f"[web.app] 自动执行后续任务 {idx}/{len(commands)}")
+            log_lines.append("=" * 50)
+            returncode = await _run_cmd(list(next_cmd), log_lines)
+            if returncode != 0:
+                break
+    if returncode == 0:
+        # 原始知识语料可能变化；清掉进程内列表缓存。逐条蒸馏仍按内容哈希复用，
+        # 所以下次分析只会为新增/变化内容调用 LLM。
+        invalidate_knowledge_base_cache()
     _crawl_tasks[task_id]["status"] = "done" if returncode == 0 else "failed"
 
 
@@ -223,6 +234,36 @@ async def crawl_bili_opus(req: CrawlBiliOpusRequest) -> CrawlTaskResponse:
         "--creator_id", creator_id,
     ]
     task_id = await _start_crawl_task(cmd)
+    return CrawlTaskResponse(task_id=task_id)
+
+
+@app.post("/api/crawl/bili_knowledge", response_model=CrawlTaskResponse)
+async def crawl_bili_knowledge(req: CrawlBiliOpusRequest) -> CrawlTaskResponse:
+    """
+    一次更新 B站 KOL 的两类知识源：
+    1) opus 专栏/图文全文；
+    2) creator 视频元数据 + 可用的人工/AI字幕。
+    两步串行，复用浏览器持久登录态；任何一步失败都保留日志并将任务标记失败。
+    """
+    creator_id = req.creator_id.strip()
+    if not creator_id:
+        raise HTTPException(status_code=400, detail="creator_id 不能为空")
+
+    opus_cmd = [
+        sys.executable, "main.py",
+        "--platform", "bili",
+        "--lt", "qrcode",
+        "--type", "opus",
+        "--creator_id", creator_id,
+    ]
+    video_cmd = [
+        sys.executable, "main.py",
+        "--platform", "bili",
+        "--lt", "qrcode",
+        "--type", "creator",
+        "--creator_id", creator_id,
+    ]
+    task_id = await _start_crawl_task(opus_cmd, chain=[video_cmd])
     return CrawlTaskResponse(task_id=task_id)
 
 
@@ -417,10 +458,10 @@ _INDEX_HTML = """<!DOCTYPE html>
     </div>
   </details>
 
-  <p class="crawl-hint">抓取/更新 B 站专栏作者的全部图文 (需要登录，首次抓取请留意弹出的浏览器窗口扫码)</p>
+  <p class="crawl-hint">抓取/更新 B 站 KOL 知识：专栏全文 + 创作者视频字幕（人工字幕优先，AI字幕会标记；无字幕不会拿简介替代正文）。需要登录。</p>
   <div class="crawl-row">
     <input id="biliCreatorId" placeholder="B站 UID 或空间 URL" />
-    <button id="crawlBiliBtn">抓取/更新</button>
+    <button id="crawlBiliBtn">更新专栏+视频字幕</button>
   </div>
 
   <div class="crawl-status" id="crawlStatus"></div>
@@ -1376,7 +1417,7 @@ async function submitCrawl(platform) {
   } else {
     const creatorId = document.getElementById('biliCreatorId').value.trim();
     if (!creatorId) return;
-    url = '/api/crawl/bili_opus';
+    url = '/api/crawl/bili_knowledge';
     body = { creator_id: creatorId };
   }
 
