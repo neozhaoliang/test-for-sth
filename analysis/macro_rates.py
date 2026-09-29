@@ -16,8 +16,6 @@ from datetime import date, datetime
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-import akshare as ak
-import httpx
 
 from tools.utils import utils
 
@@ -62,6 +60,8 @@ def _freshness(as_of: Optional[date], max_days: int) -> Dict:
 
 
 async def _fetch_fred_series(series_id: str) -> List[Dict]:
+    import httpx
+
     url = _FRED_BASE.format(series_id=series_id)
     try:
         async with httpx.AsyncClient(
@@ -147,6 +147,8 @@ async def _fetch_us_rates() -> Optional[Dict]:
 
 
 async def _fetch_china_lpr() -> Optional[Dict]:
+    import akshare as ak
+
     try:
         df = await asyncio.wait_for(
             asyncio.to_thread(ak.macro_china_lpr),
