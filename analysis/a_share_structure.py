@@ -197,6 +197,145 @@ def _summarize_institutions(df) -> tuple[List[Dict], List[Dict], List[Dict]]:
     return rows, fund_details, etf_details
 
 
+def _compare_institution_summaries(
+    current: List[Dict],
+    previous: List[Dict],
+) -> List[Dict]:
+    """Compare two disclosed quarter snapshots by institution type."""
+    if not current or not previous:
+        return []
+    prev_map = {str(x.get("type") or ""): x for x in previous}
+    rows: List[Dict] = []
+    for cur in current:
+        inst_type = str(cur.get("type") or "")
+        prev = prev_map.get(inst_type)
+        if not inst_type or not prev:
+            continue
+
+        cur_ratio = _num(cur.get("latest_float_ratio_pct"))
+        prev_ratio = _num(prev.get("latest_float_ratio_pct"))
+        cur_shares = _num(cur.get("latest_shares"))
+        prev_shares = _num(prev.get("latest_shares"))
+        cur_n = _num(cur.get("institutions"))
+        prev_n = _num(prev.get("institutions"))
+
+        row = {"type": inst_type}
+        if cur_ratio is not None and prev_ratio is not None:
+            row["float_ratio_change_pp"] = round(cur_ratio - prev_ratio, 3)
+            row["current_float_ratio_pct"] = round(cur_ratio, 3)
+            row["previous_float_ratio_pct"] = round(prev_ratio, 3)
+        if cur_shares is not None and prev_shares is not None:
+            row["shares_change"] = round(cur_shares - prev_shares, 0)
+            row["current_shares"] = round(cur_shares, 0)
+            row["previous_shares"] = round(prev_shares, 0)
+            row["shares_change_pct"] = (
+                round((cur_shares - prev_shares) / prev_shares * 100, 2)
+                if prev_shares else None
+            )
+        if cur_n is not None and prev_n is not None:
+            row["institution_count_change"] = int(cur_n - prev_n)
+        rows.append(row)
+    return rows
+
+
+def _fund_key(item: Dict) -> str:
+    code = str(item.get("code") or "").strip()
+    if code and code.lower() != "nan":
+        return f"code:{code}"
+    return f"name:{str(item.get('name') or '').strip()}"
+
+
+def _compare_fund_details(
+    current: List[Dict],
+    previous: List[Dict],
+    *,
+    limit: int = 15,
+) -> Dict[str, List[Dict]]:
+    """Find the largest disclosed fund increases/decreases between two quarters."""
+    if not current or not previous:
+        return {"increased": [], "decreased": [], "newly_seen": [], "exited_top_list": []}
+
+    cur_map = {_fund_key(x): x for x in current if str(x.get("name") or "").strip()}
+    prev_map = {_fund_key(x): x for x in previous if str(x.get("name") or "").strip()}
+
+    changes: List[Dict] = []
+    newly_seen: List[Dict] = []
+    exited: List[Dict] = []
+
+    for key, cur in cur_map.items():
+        prev = prev_map.get(key)
+        if not prev:
+            newly_seen.append(cur)
+            continue
+        cur_ratio = _num(cur.get("latest_float_ratio_pct"))
+        prev_ratio = _num(prev.get("latest_float_ratio_pct"))
+        cur_shares = _num(cur.get("latest_shares"))
+        prev_shares = _num(prev.get("latest_shares"))
+        item = {
+            "name": cur.get("name"),
+            "code": cur.get("code"),
+            "current_float_ratio_pct": cur_ratio,
+            "previous_float_ratio_pct": prev_ratio,
+            "current_shares": cur_shares,
+            "previous_shares": prev_shares,
+        }
+        if cur_ratio is not None and prev_ratio is not None:
+            item["float_ratio_change_pp"] = round(cur_ratio - prev_ratio, 4)
+        if cur_shares is not None and prev_shares is not None:
+            item["shares_change"] = round(cur_shares - prev_shares, 0)
+            item["shares_change_pct"] = (
+                round((cur_shares - prev_shares) / prev_shares * 100, 2)
+                if prev_shares else None
+            )
+        if (
+            item.get("float_ratio_change_pp") not in (None, 0)
+            or item.get("shares_change") not in (None, 0)
+        ):
+            changes.append(item)
+
+    for key, prev in prev_map.items():
+        if key not in cur_map:
+            exited.append(prev)
+
+    def magnitude(x: Dict) -> float:
+        ratio = abs(_num(x.get("float_ratio_change_pp")) or 0.0)
+        shares = abs(_num(x.get("shares_change_pct")) or 0.0) / 100.0
+        return ratio + shares
+
+    increased = [
+        x for x in changes
+        if (_num(x.get("float_ratio_change_pp")) or 0) > 0
+        or (
+            x.get("float_ratio_change_pp") is None
+            and (_num(x.get("shares_change")) or 0) > 0
+        )
+    ]
+    decreased = [
+        x for x in changes
+        if (_num(x.get("float_ratio_change_pp")) or 0) < 0
+        or (
+            x.get("float_ratio_change_pp") is None
+            and (_num(x.get("shares_change")) or 0) < 0
+        )
+    ]
+    increased.sort(key=magnitude, reverse=True)
+    decreased.sort(key=magnitude, reverse=True)
+    newly_seen.sort(
+        key=lambda x: _num(x.get("latest_float_ratio_pct")) or 0.0,
+        reverse=True,
+    )
+    exited.sort(
+        key=lambda x: _num(x.get("latest_float_ratio_pct")) or 0.0,
+        reverse=True,
+    )
+    return {
+        "increased": increased[:limit],
+        "decreased": decreased[:limit],
+        "newly_seen": newly_seen[:limit],
+        "exited_top_list": exited[:limit],
+    }
+
+
 def _classify_holder(name: str) -> List[str]:
     return [
         category
@@ -287,32 +426,47 @@ async def get_a_share_structure(stock_code: str) -> Optional[Dict]:
         return None
 
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
-    selected: Optional[Tuple[str, str]] = None
-    institute_df = None
+    candidates = _quarter_candidates(today, limit=4)
+    if not candidates:
+        return None
 
-    # Direct institution-detail endpoint is stock-specific; try newest completed periods
-    # until one has disclosed data.
-    for quarter_code, report_date in _quarter_candidates(today, limit=3):
-        df = await _fetch_institute_detail(code6, quarter_code)
+    # Fetch a few completed quarters concurrently.  We keep the newest disclosed snapshot
+    # and the next disclosed snapshot for an explicit quarter-over-quarter comparison.
+    institution_frames = await asyncio.gather(
+        *(_fetch_institute_detail(code6, qcode) for qcode, _ in candidates)
+    )
+    disclosed: List[Tuple[str, str, object]] = []
+    for (qcode, report_date), df in zip(candidates, institution_frames):
         if df is not None and not df.empty:
-            selected = (quarter_code, report_date)
-            institute_df = df
-            break
+            disclosed.append((qcode, report_date, df))
 
-    if selected is None:
-        # We can still try top-10 holders for the latest completed quarter.
-        candidates = _quarter_candidates(today, limit=1)
-        if not candidates:
-            return None
-        selected = candidates[0]
-
-    quarter_code, report_date = selected
+    if disclosed:
+        quarter_code, report_date, institute_df = disclosed[0]
+        previous_quarter_code = disclosed[1][0] if len(disclosed) > 1 else None
+        previous_report_date = disclosed[1][1] if len(disclosed) > 1 else None
+        previous_institute_df = disclosed[1][2] if len(disclosed) > 1 else None
+    else:
+        # We can still use top-10 holders / unlock supply even when the institution-detail
+        # endpoint has no disclosed rows.
+        quarter_code, report_date = candidates[0]
+        institute_df = None
+        previous_quarter_code = None
+        previous_report_date = None
+        previous_institute_df = None
     top10_df, unlock_df = await asyncio.gather(
         _fetch_top10(code6, report_date),
         _fetch_unlock_queue(code6),
     )
 
     institution_summary, fund_details, etf_details = _summarize_institutions(institute_df)
+    previous_summary, previous_fund_details, previous_etf_details = _summarize_institutions(
+        previous_institute_df
+    )
+    institution_qoq = _compare_institution_summaries(
+        institution_summary, previous_summary
+    )
+    fund_qoq = _compare_fund_details(fund_details, previous_fund_details)
+    etf_qoq = _compare_fund_details(etf_details, previous_etf_details)
     top10, special = _summarize_top10(top10_df)
     unlocks = _summarize_unlocks(unlock_df, today)
 
@@ -326,6 +480,11 @@ async def get_a_share_structure(stock_code: str) -> Optional[Dict]:
         notes.append("前十大流通股东中未识别到汇金/证金/国新/诚通；这不等于其一定未持有，只表示本期前十大未见。")
     if special.get("foreign"):
         notes.append("前十大流通股东中存在香港中央结算/QFII等可识别境外资金。")
+    if previous_report_date and institution_qoq:
+        notes.append(
+            f"机构季度变化按两个已披露快照 {previous_report_date} → {report_date} 直接做差，"
+            "不是根据股价或成交量反推资金行为。"
+        )
     if unlocks.get("max_upcoming_float_ratio_pct") is not None:
         notes.append(
             f"未来12个月单批最大解禁约占解禁前流通市值 "
@@ -335,9 +494,15 @@ async def get_a_share_structure(stock_code: str) -> Optional[Dict]:
     return {
         "report_period": report_date,
         "quarter_code": quarter_code,
+        "previous_quarter_code": previous_quarter_code,
+        "previous_report_period": previous_report_date,
         "institution_summary": institution_summary,
-        "fund_details": fund_details,
-        "etf_details": etf_details,
+        "previous_institution_summary": previous_summary,
+        "institution_qoq": institution_qoq,
+        "fund_details": fund_details[:20],
+        "etf_details": etf_details[:20],
+        "fund_qoq": fund_qoq,
+        "etf_qoq": etf_qoq,
         "top10_free_holders": top10,
         "special_holders": special,
         "unlock_supply": unlocks,
