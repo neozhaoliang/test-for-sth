@@ -6,9 +6,9 @@ The core rule is simple:
     historical mode may only use sources that can prove their data was available
     on or before request.as_of.
 
-This module intentionally blocks historical reports until every required source path is
-declared and implemented as as-of safe.  It is better to reject a historical request than
-to silently mix 2026 knowledge into a 2024 backtest.
+Historical reports are allowed only when every *required* source path is point-in-time safe.
+Some live-only dimensions may be explicitly marked as safe omissions: historical mode must
+leave them missing rather than silently mix today's information into a past-date report.
 """
 
 from __future__ import annotations
