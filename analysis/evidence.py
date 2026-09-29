@@ -263,8 +263,12 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         out,
         category="fundamentals",
         label="结构性经营事实",
-        source="analysis.fundamentals",
-        tier="B",
+        source=(
+            "analysis.point_in_time_financials"
+            if fundamentals.get("point_in_time")
+            else "analysis.fundamentals"
+        ),
+        tier="S" if fundamentals.get("point_in_time") else "B",
         kind="fact",
         value=fundamentals,
         as_of=str(facts.get("finance_period") or facts.get("operate_period") or "") or None,
@@ -376,8 +380,12 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         out,
         category="profitability",
         label="盈利能力与杠杆趋势",
-        source="analysis.profitability",
-        tier="B",
+        source=(
+            "analysis.point_in_time_financials"
+            if (profitability or {}).get("point_in_time")
+            else "analysis.profitability"
+        ),
+        tier="S" if (profitability or {}).get("point_in_time") else "B",
         kind="derived",
         value=profitability,
         as_of=_latest_period_date((profitability or {}).get("periods") or []),
@@ -433,8 +441,12 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         out,
         category="shareholder_count",
         label="股东户数变化",
-        source="analysis.shareholder",
-        tier="B",
+        source=(
+            "analysis.point_in_time_shareholder"
+            if (shareholder_count or {}).get("point_in_time")
+            else "analysis.shareholder"
+        ),
+        tier="S" if (shareholder_count or {}).get("point_in_time") else "B",
         kind="fact",
         value=shareholder_count,
         as_of=str((shareholder_count or {}).get("as_of") or "") or None,
@@ -456,12 +468,21 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
             if isinstance(x, dict)
         ]
     )
+    shareholder_return_point_in_time = any(
+        bool(x.get("point_in_time"))
+        for x in shareholder_return["dividend_history"] + shareholder_return["buyback_history"]
+        if isinstance(x, dict)
+    )
     _add(
         out,
         category="shareholder_return",
         label="分红与回购记录",
-        source="analysis.shareholder",
-        tier="B",
+        source=(
+            "analysis.point_in_time_capital_returns"
+            if shareholder_return_point_in_time
+            else "analysis.shareholder"
+        ),
+        tier="S" if shareholder_return_point_in_time else "B",
         kind="fact",
         value=shareholder_return
         if shareholder_return["dividend_history"] or shareholder_return["buyback_history"]
