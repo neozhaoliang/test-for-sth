@@ -359,6 +359,15 @@ async def get_cninfo_primary_evidence(
                 dedup[key] = item
 
     records = list(dedup.values())
+    # Defense in depth: never trust only the remote date filter for historical requests.
+    # If CNINFO/AkShare returns a record beyond as_of, drop it locally.
+    if as_of is not None:
+        cutoff = as_of.isoformat()
+        records = [
+            x for x in records
+            if not x.get("published_at")
+            or str(x.get("published_at"))[:10] <= cutoff
+        ]
     records.sort(key=lambda x: x.get("published_at") or "", reverse=True)
     direct_n = sum(1 for x in records if x.get("acquisition") == "direct_cninfo")
     fallback_n = sum(1 for x in records if x.get("acquisition") == "akshare_fallback")
