@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from analysis.evidence import EvidenceItem, ResearchQuality
+from analysis.research_profile import ResearchProfile
 from analysis.reviewer import ResearchReview
 
 
@@ -114,6 +115,10 @@ class AnalysisReport(BaseModel):
     )
     management_capital: Optional[dict] = Field(
         default=None, description="管理层利益绑定、经营执行与5/10年资本分配长期账本"
+    )
+    research_profile: ResearchProfile = Field(
+        default_factory=ResearchProfile,
+        description="按行业/研发/资本回报确定的公司研究画像与重点证据准备度",
     )
     sentiment: Optional[dict] = Field(default=None, description="雪球讨论区情绪聚合 (看多/看空比例, 一致看多预警, 反向指标)")
     debate: Optional[dict] = Field(default=None, description="雪球多空辩论 (双方核心论点 + 历史验证统计 + 哪方更合理)")
