@@ -60,6 +60,7 @@ from analysis.snapshot_store import save_report_snapshot
 from analysis.report_blocks import _build_dividend_chart
 from analysis.report_synthesis import _generate_summary
 from analysis.report_social import (
+    collect_historical_candidate_context,
     collect_live_social_context,
     filter_relevant_knowledge,
     load_knowledge_excerpts,
@@ -285,9 +286,17 @@ async def generate_report(
         filing_calendar=filing_calendar,
     )
 
-    # Live social/KOL context is isolated from the public/company evidence path.
-    # Historical/as-of mode can replace or skip this branch without touching company data.
-    candidates = await collect_live_social_context(inputs, candidate_scores)
+    # Social context has a hard live/historical split. Historical mode never opens the
+    # current Xueqiu page or reads today's latest posts.
+    candidates = (
+        collect_historical_candidate_context(
+            inputs,
+            candidate_scores,
+            as_of=request.as_of,
+        )
+        if historical_mode
+        else await collect_live_social_context(inputs, candidate_scores)
+    )
 
     evidence = build_evidence_ledger(inputs, candidates)
     research_quality = evaluate_research_quality(evidence, today=request.as_of)
