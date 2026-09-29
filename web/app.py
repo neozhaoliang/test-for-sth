@@ -607,6 +607,20 @@ function renderFundamentalsBlock(f) {
     ['净利润', yi(x.net_profit) + (x.net_profit_basis ? ' (口径: ' + x.net_profit_basis + ')' : '')],
     ['经营活动现金流净额', yi(x.operating_cash_flow)],
     ['经营现金流/净利润', x.cash_to_profit_ratio === null || x.cash_to_profit_ratio === undefined ? '暂缺' : x.cash_to_profit_ratio],
+    ['应收账款',
+      yi(x.accounts_receivable_yuan) +
+      (x.accounts_receivable_yoy_pct === null || x.accounts_receivable_yoy_pct === undefined
+        ? '' : '，同比 ' + (x.accounts_receivable_yoy_pct >= 0 ? '+' : '') + x.accounts_receivable_yoy_pct + '%') +
+      (x.receivable_growth_minus_revenue_pp === null || x.receivable_growth_minus_revenue_pp === undefined
+        ? '' : '，较营收增速 ' + (x.receivable_growth_minus_revenue_pp >= 0 ? '+' : '') + x.receivable_growth_minus_revenue_pp + 'pct')
+    ],
+    ['存货',
+      yi(x.inventory_yuan) +
+      (x.inventory_yoy_pct === null || x.inventory_yoy_pct === undefined
+        ? '' : '，同比 ' + (x.inventory_yoy_pct >= 0 ? '+' : '') + x.inventory_yoy_pct + '%') +
+      (x.inventory_growth_minus_revenue_pp === null || x.inventory_growth_minus_revenue_pp === undefined
+        ? '' : '，较营收增速 ' + (x.inventory_growth_minus_revenue_pp >= 0 ? '+' : '') + x.inventory_growth_minus_revenue_pp + 'pct')
+    ],
     ['研发投入', yi(x.rd_investment_yuan) + '，研发强度 ' + pctStr(x.rd_intensity_pct)],
     ['前五大客户占营收', pctStr(x.top5_customer_pct)],
     ['前五大供应商占采购额', pctStr(x.top5_supplier_pct)],
