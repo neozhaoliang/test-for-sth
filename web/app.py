@@ -518,6 +518,12 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
+function safeExternalLink(url, label) {
+  if (!url || !/^https?:\/\//i.test(url)) return escapeHtml(label || '');
+  return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' +
+    escapeHtml(label || url) + '</a>';
+}
+
 function stanceLabel(stance) {
   if (stance === 'bullish') return '看多';
   if (stance === 'bearish') return '看空';
@@ -1052,6 +1058,32 @@ function renderResult(report) {
     html += '</div>';
   }
 
+  const review = report.review || {};
+  const dup = review.duplicate_factors || [];
+  const conflicts = review.possible_conflicts || [];
+  const weak = review.weak_links || [];
+  if (dup.length || conflicts.length || weak.length) {
+    html += '<details class="evidence-block"><summary style="cursor:pointer;"><b>研究审查</b>：' +
+      '重复因子 ' + dup.length + '，潜在冲突 ' + conflicts.length +
+      '，弱证据 ' + weak.length +
+      (review.confidence_penalty ? '，置信度扣减 ' + Math.round(review.confidence_penalty * 100) + ' 个百分点' : '') +
+      '</summary>';
+    const groups = [
+      ['重复计分提示', dup],
+      ['潜在冲突', conflicts],
+      ['弱证据链', weak],
+    ];
+    groups.forEach(([title, rows]) => {
+      if (!rows.length) return;
+      html += '<div style="margin-top:8px;"><b>' + title + '</b><ul>' +
+        rows.map(x => '<li>' + escapeHtml(x.message || '') +
+          (x.dimensions && x.dimensions.length ? ' <span class="credibility-note">[' +
+            x.dimensions.map(escapeHtml).join(' / ') + ']</span>' : '') +
+          '</li>').join('') + '</ul></div>';
+    });
+    html += '</details>';
+  }
+
   if (summary.thesis_summary) {
     html += '<div class="thesis-block"><b>关键论据:</b> ' + escapeHtml(summary.thesis_summary) + '</div>';
   }
@@ -1096,7 +1128,9 @@ function renderResult(report) {
     report.evidence.forEach(e => {
       html += '<tr><td>' + escapeHtml(e.label || e.category) + '</td><td style="text-align:center">' +
         escapeHtml(e.source_tier || '') + '</td><td style="text-align:center">' +
-        escapeHtml(e.kind || '') + '</td><td>' + escapeHtml(e.source || '') + '</td></tr>';
+        escapeHtml(e.kind || '') + '</td><td>' +
+        (e.url ? safeExternalLink(e.url, e.source || '来源') : escapeHtml(e.source || '')) +
+        '</td></tr>';
     });
     html += '</table></details>';
   }
