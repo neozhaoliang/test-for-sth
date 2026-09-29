@@ -66,6 +66,7 @@ analysis.research_context.SOURCE_TEMPORAL_CAPABILITIES
 | macro_rates | AS_OF_SAFE | Fed目标利率、美债10Y、LPR先截到 `as_of`，再相对该日判断新鲜度 |
 | margin | AS_OF_SAFE | 交易所融资明细从 `as_of` 向前回溯最近交易日 |
 | kol_knowledge | AS_OF_SAFE | 雪球/B站原始发布时间统一为 epoch 秒，历史模式排除未来和未知时间条目 |
+| candidate_credibility | AS_OF_SAFE | Wilson score 只使用 as-of 前发布且 as-of 前已经验证的预测 |
 
 当前仍阻断 historical：
 
@@ -78,7 +79,6 @@ analysis.research_context.SOURCE_TEMPORAL_CAPABILITIES
 | a_share_structure | 机构季度持仓必须按披露日而不是季度末判断 |
 | industry_cycle | 商品/运价/行业数据尚未统一接受 as_of |
 | xueqiu_live | 当前浏览器抓的是今天讨论区 |
-| candidate_credibility | 当前命中率可能包含 as_of 之后才验证出来的结果 |
 
 可通过 API 查看实时能力：
 
