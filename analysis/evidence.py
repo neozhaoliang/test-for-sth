@@ -434,6 +434,9 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         kind="fact",
         value=shareholder_count,
         as_of=str((shareholder_count or {}).get("as_of") or "") or None,
+        period=(shareholder_count or {}).get("period"),
+        published_at=(shareholder_count or {}).get("published_at"),
+        available_at=(shareholder_count or {}).get("available_at"),
         tags=("holders", "chip"),
         url=source_map.get("holder"),
     )
@@ -442,6 +445,13 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         "dividend_history": _get(inputs, "dividend_history") or [],
         "buyback_history": _get(inputs, "buyback_history") or [],
     }
+    shareholder_return_available_at = _latest_period_date(
+        [
+            x.get("available_at") or x.get("announce_date")
+            for x in shareholder_return["dividend_history"] + shareholder_return["buyback_history"]
+            if isinstance(x, dict)
+        ]
+    )
     _add(
         out,
         category="shareholder_return",
@@ -452,6 +462,9 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         value=shareholder_return
         if shareholder_return["dividend_history"] or shareholder_return["buyback_history"]
         else None,
+        as_of=shareholder_return_available_at,
+        published_at=shareholder_return_available_at,
+        available_at=shareholder_return_available_at,
         tags=("dividend", "buyback", "capital_allocation"),
     )
 
