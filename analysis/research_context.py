@@ -84,9 +84,9 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
     ),
     "fundamentals": TemporalCapability(
         source="fundamentals",
-        capability=SourceTemporalCapability.LIVE_ONLY,
-        reason="F10 parser currently returns the latest visible report and may include future publications",
-        implemented=False,
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="historical mode parses the exact CNINFO periodic-report PDF version published by as_of; live mode still uses F10",
+        implemented=True,
     ),
     "filing_calendar": TemporalCapability(
         source="filing_calendar",
@@ -95,9 +95,9 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
     ),
     "profitability": TemporalCapability(
         source="profitability",
-        capability=SourceTemporalCapability.LIVE_ONLY,
-        reason="current financial indicator path is not publication-date filtered",
-        implemented=False,
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="historical profitability is derived only from exact CNINFO filing versions published by as_of",
+        implemented=True,
     ),
     "shareholder_count": TemporalCapability(
         source="shareholder_count",
