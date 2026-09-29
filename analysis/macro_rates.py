@@ -55,10 +55,16 @@ def _num(value) -> Optional[float]:
         return None
 
 
-def _freshness(as_of: Optional[date], max_days: int) -> Dict:
-    if as_of is None:
+def _freshness(
+    observation_date: Optional[date],
+    max_days: int,
+    *,
+    reference_date: Optional[date] = None,
+) -> Dict:
+    if observation_date is None:
         return {"fresh": False, "age_days": None}
-    age = (_today() - as_of).days
+    reference_date = reference_date or _today()
+    age = (reference_date - observation_date).days
     return {"fresh": 0 <= age <= max_days, "age_days": age}
 
 
@@ -110,15 +116,20 @@ def _change_from_days(rows: List[Dict], days: int) -> Optional[float]:
     return round(latest["value"] - earlier["value"], 3)
 
 
-async def _fetch_us_rates() -> Optional[Dict]:
+async def _fetch_us_rates(as_of: Optional[date] = None) -> Optional[Dict]:
     lower_rows, upper_rows, ten_rows = await asyncio.gather(
         _fetch_fred_series("DFEDTARL"),
         _fetch_fred_series("DFEDTARU"),
         _fetch_fred_series("DGS10"),
     )
+    if as_of is not None:
+        lower_rows = [x for x in lower_rows if x["date"] <= as_of]
+        upper_rows = [x for x in upper_rows if x["date"] <= as_of]
+        ten_rows = [x for x in ten_rows if x["date"] <= as_of]
     if not (lower_rows or upper_rows or ten_rows):
         return None
 
+    reference_date = as_of or _today()
     out: Dict = {
         "source_name": "Federal Reserve via FRED",
         "source_tier": "S",
@@ -138,18 +149,22 @@ async def _fetch_us_rates() -> Optional[Dict]:
         out["fed_target_upper_pct"] = row["value"]
         out["fed_target_upper_as_of"] = row["date"].isoformat()
         out["fed_target_upper_change_180d_pp"] = _change_from_days(upper_rows, 180)
-        out["fed_target_freshness"] = _freshness(row["date"], _FRESH_DAYS["fed_target"])
+        out["fed_target_freshness"] = _freshness(
+            row["date"], _FRESH_DAYS["fed_target"], reference_date=reference_date
+        )
     if ten_rows:
         row = ten_rows[-1]
         out["us10y_yield_pct"] = row["value"]
         out["us10y_as_of"] = row["date"].isoformat()
         out["us10y_change_30d_pp"] = _change_from_days(ten_rows, 30)
         out["us10y_change_90d_pp"] = _change_from_days(ten_rows, 90)
-        out["us10y_freshness"] = _freshness(row["date"], _FRESH_DAYS["us10y"])
+        out["us10y_freshness"] = _freshness(
+            row["date"], _FRESH_DAYS["us10y"], reference_date=reference_date
+        )
     return out
 
 
-async def _fetch_china_lpr() -> Optional[Dict]:
+async def _fetch_china_lpr(as_of: Optional[date] = None) -> Optional[Dict]:
     import akshare as ak
 
     try:
@@ -165,12 +180,17 @@ async def _fetch_china_lpr() -> Optional[Dict]:
 
     if df is None or df.empty or "TRADE_DATE" not in df.columns:
         return None
-    df = df.dropna(subset=["TRADE_DATE"]).sort_values("TRADE_DATE")
+    df = df.dropna(subset=["TRADE_DATE"]).copy()
+    df["_date"] = df["TRADE_DATE"].map(_parse_date)
+    df = df.dropna(subset=["_date"]).sort_values("_date")
+    if as_of is not None:
+        df = df[df["_date"] <= as_of]
     if df.empty:
         return None
 
     row = df.iloc[-1]
-    as_of = _parse_date(row.get("TRADE_DATE"))
+    observation_date = row.get("_date") or _parse_date(row.get("TRADE_DATE"))
+    reference_date = as_of or _today()
     one_y = _num(row.get("LPR1Y"))
     five_y = _num(row.get("LPR5Y"))
 
@@ -187,18 +207,28 @@ async def _fetch_china_lpr() -> Optional[Dict]:
         "source_name": "AkShare / Eastmoney LPR",
         "source_tier": "B",
         "source_url": "https://data.eastmoney.com/cjsj/globalRateLPR.html",
-        "as_of": as_of.isoformat() if as_of else "",
+        "as_of": observation_date.isoformat() if observation_date else "",
         "lpr_1y_pct": one_y,
         "lpr_5y_pct": five_y,
         "lpr_1y_change_6obs_pp": previous_value("LPR1Y"),
         "lpr_5y_change_6obs_pp": previous_value("LPR5Y"),
-        "freshness": _freshness(as_of, _FRESH_DAYS["china_lpr"]),
+        "freshness": _freshness(
+            observation_date,
+            _FRESH_DAYS["china_lpr"],
+            reference_date=reference_date,
+        ),
         "note": "LPR是贷款市场报价利率，不等同于央行政策利率。",
     }
 
 
-async def get_macro_rate_context() -> Optional[Dict]:
-    us, china = await asyncio.gather(_fetch_us_rates(), _fetch_china_lpr())
+async def get_macro_rate_context(
+    *,
+    as_of: Optional[date] = None,
+) -> Optional[Dict]:
+    us, china = await asyncio.gather(
+        _fetch_us_rates(as_of=as_of),
+        _fetch_china_lpr(as_of=as_of),
+    )
     if not us and not china:
         return None
 
@@ -214,7 +244,7 @@ async def get_macro_rate_context() -> Optional[Dict]:
         warnings.append("LPR数据已过新鲜度阈值，不能当作当前贷款报价利率使用。")
 
     return {
-        "as_of": _today().isoformat(),
+        "as_of": (as_of or _today()).isoformat(),
         "us": us,
         "china": china,
         "warnings": warnings,
