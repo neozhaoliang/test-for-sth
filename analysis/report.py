@@ -48,6 +48,7 @@ from analysis.debate import derive_sentiment, get_debate
 from analysis.evidence import ResearchQuality, build_evidence_ledger, evaluate_research_quality
 from analysis.research_profile import ResearchProfile, classify_research_profile
 from analysis.report_contract import _PROMPT_VERSION
+from analysis.report_validation import validate_report
 
 from analysis.report_blocks import _build_dividend_chart
 from analysis.report_synthesis import _generate_summary
@@ -445,7 +446,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
             3,
         )
 
-    return AnalysisReport(
+    report = AnalysisReport(
         stock_code=stock_code,
         stock_name=stock_name,
         realtime_quote=quote,
@@ -483,3 +484,16 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         prompt_version=_PROMPT_VERSION,
         generated_at=int(time.time()),
     )
+
+    validation = validate_report(report)
+    report.validation = validation.model_dump()
+    if not validation.ok:
+        messages = "；".join(x.message for x in validation.errors)
+        raise RuntimeError(f"报告合同校验失败: {messages}")
+    if validation.warnings:
+        utils.logger.warning(
+            "[analysis.report] %s 报告合同告警: %s",
+            stock_code,
+            "；".join(x.message for x in validation.warnings),
+        )
+    return report
