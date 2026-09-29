@@ -79,9 +79,8 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
     ),
     "realtime_quote": TemporalCapability(
         source="realtime_quote",
-        capability=SourceTemporalCapability.LIVE_ONLY,
-        reason="current quote adapter has no historical point-in-time contract yet",
-        implemented=False,
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="historical daily-close quote is capped at as_of and uses the previous trading day for change",
     ),
     "fundamentals": TemporalCapability(
         source="fundamentals",
@@ -115,9 +114,8 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
     ),
     "market_context": TemporalCapability(
         source="market_context",
-        capability=SourceTemporalCapability.LIVE_ONLY,
-        reason="current helper anchors calculations on today",
-        implemented=False,
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="stock and index series are truncated to as_of before YTD/52-week/history calculations",
     ),
     "margin": TemporalCapability(
         source="margin",
