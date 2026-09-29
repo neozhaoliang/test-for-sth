@@ -12,13 +12,16 @@ Returned records are metadata cards (title/date/category/link), not interpreted 
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 
-from tools.utils import utils
+
+
+logger = logging.getLogger("MediaCrawler")
 
 
 _PRIMARY_CATEGORIES = (
@@ -132,7 +135,7 @@ async def _get_org_id(client, code6: str) -> Optional[str]:
         resp.raise_for_status()
         rows = (resp.json() or {}).get("stockList") or []
     except Exception as e:
-        utils.logger.warning(
+        logger.warning(
             f"[primary_sources] CNINFO stock map failed: {type(e).__name__}: {str(e)[:140]}"
         )
         return None
@@ -186,7 +189,7 @@ async def _fetch_category_direct(
             data = resp.json() or {}
             announcements = data.get("announcements") or []
         except Exception as e:
-            utils.logger.warning(
+            logger.warning(
                 f"[primary_sources] direct CNINFO {code6} {category} failed: "
                 f"{type(e).__name__}: {str(e)[:160]}"
             )
@@ -239,7 +242,7 @@ async def _fetch_category_fallback(
                 timeout=_FALLBACK_TIMEOUT_S,
             )
         except Exception as e:
-            utils.logger.warning(
+            logger.warning(
                 f"[primary_sources] AkShare fallback {code6} {category} failed: "
                 f"{type(e).__name__}: {str(e)[:160]}"
             )
@@ -356,7 +359,7 @@ async def get_cninfo_primary_evidence(
     records.sort(key=lambda x: x.get("published_at") or "", reverse=True)
     direct_n = sum(1 for x in records if x.get("acquisition") == "direct_cninfo")
     fallback_n = sum(1 for x in records if x.get("acquisition") == "akshare_fallback")
-    utils.logger.info(
+    logger.info(
         f"[primary_sources] {stock_code} CNINFO evidence: {len(records)} "
         f"(direct={direct_n}, fallback={fallback_n})"
     )
