@@ -98,6 +98,9 @@ class AnalysisReport(BaseModel):
     profitability_trend: Optional[dict] = Field(default=None, description="近几个报告期毛利率/净利率/ROE/资产负债率趋势 (盈利能力与成本弹性)")
     fundamentals: Optional[dict] = Field(default=None, description="同花顺 F10 结构性事实 (集中度/海外占比/现金流质量/研发强度/股东人数/公司自述风险)")
     valuation: Optional[dict] = Field(default=None, description="估值快照 (PE/PB/每股指标/股权质押)")
+    valuation_history: Optional[dict] = Field(
+        default=None, description="历史PE/PB分位与月度估值序列"
+    )
     xueqiu_stock: Optional[dict] = Field(default=None, description="雪球个股维度 (机构持仓/讨论热度，仅聚合数字)")
     a_share_structure: Optional[dict] = Field(
         default=None, description="A股公开机构持股、前十大流通股东与特殊资金类型"
