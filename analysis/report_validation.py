@@ -16,6 +16,7 @@ The validator is safe for CI because it performs no network or LLM calls.
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Dict, List, Optional, Set
 
 from pydantic import BaseModel, Field
@@ -76,6 +77,57 @@ def _issue(code: str, severity: str, message: str) -> ValidationIssue:
     return ValidationIssue(code=code, severity=severity, message=message)
 
 
+def _parse_date(value) -> Optional[date]:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()[:10]
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _validate_historical_cutoff(report: AnalysisReport) -> List[ValidationIssue]:
+    if str(report.research_mode or "") != "historical":
+        return []
+
+    cutoff = _parse_date(report.as_of)
+    if cutoff is None:
+        return [
+            _issue(
+                "invalid_historical_as_of",
+                "error",
+                f"historical report 的 as_of={report.as_of!r} 不是有效 YYYY-MM-DD。",
+            )
+        ]
+
+    issues: List[ValidationIssue] = []
+    for item in report.evidence:
+        for field_name in ("available_at", "published_at"):
+            value = getattr(item, field_name, None)
+            dt = _parse_date(value)
+            if dt is not None and dt > cutoff:
+                issues.append(
+                    _issue(
+                        "future_evidence",
+                        "error",
+                        f"{item.label} 的 {field_name}={dt.isoformat()} 晚于历史截止日 "
+                        f"{cutoff.isoformat()}。",
+                    )
+                )
+        period = _parse_date(getattr(item, "period", None))
+        if period is not None and period > cutoff:
+            issues.append(
+                _issue(
+                    "future_period",
+                    "error",
+                    f"{item.label} 的 period={period.isoformat()} 晚于历史截止日 "
+                    f"{cutoff.isoformat()}。",
+                )
+            )
+    return issues
+
+
 def _dimension_score_keys(scores: Optional[List[dict]]) -> Set[str]:
     out: Set[str] = set()
     for row in scores or []:
@@ -96,6 +148,8 @@ def validate_report(report: AnalysisReport) -> ReportValidation:
     summary = report.summary
     quality = report.research_quality
     review = report.review
+
+    errors.extend(_validate_historical_cutoff(report))
 
     for field_name in ("stance", "company_quality_stance", "current_odds_stance"):
         value = str(getattr(summary, field_name, "") or "")
