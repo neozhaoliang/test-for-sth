@@ -49,6 +49,7 @@ jobs:
             analysis/shareholder.py \
             backtest/score.py \
             analysis/report_contract.py \
+            analysis/report_inputs.py \
             analysis/report_validation.py \
             analysis/research_context.py \
             analysis/snapshot_store.py \
