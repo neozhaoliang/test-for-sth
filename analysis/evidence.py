@@ -577,6 +577,8 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         kind="derived",
         value=a_share_structure,
         as_of=str((a_share_structure or {}).get("report_period") or "") or None,
+        period=str((a_share_structure or {}).get("report_period") or "") or None,
+        available_at=str((a_share_structure or {}).get("available_at") or "") or None,
         tags=("institution", "fund", "social_security", "insurance", "qfii", "national_team"),
     )
 
