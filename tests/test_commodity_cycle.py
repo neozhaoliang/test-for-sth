@@ -32,6 +32,6 @@ def test_series_stats_calculates_direction_and_one_year_position():
     stats = _series_stats(dates, closes)
 
     assert stats["latest"] == 199.0
-    assert stats["change_20d_pct"] == round((199.0 - 178.0) / 178.0 * 100, 2)
-    assert stats["change_60d_pct"] == round((199.0 - 138.0) / 138.0 * 100, 2)
+    assert stats["change_20d_pct"] == round((199.0 - 179.0) / 179.0 * 100, 2)
+    assert stats["change_60d_pct"] == round((199.0 - 139.0) / 139.0 * 100, 2)
     assert stats["position_1y_pct"] == 100.0
