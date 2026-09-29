@@ -37,6 +37,7 @@ from analysis.industry import get_industry_comparison
 from analysis.knowledge_base import ensure_loaded as ensure_knowledge_base_loaded
 from analysis.margin import get_margin_signal
 from analysis.management_capital import build_management_capital_record
+from analysis.macro_rates import get_macro_rate_context
 from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.primary_sources import get_cninfo_primary_evidence
@@ -75,7 +76,7 @@ _PROMPT_TEMPLATE = """你是一名证券研究助手。你的任务不是预测�
 
 **硬性要求 (违反任何一条都视为不合格输出):**
 - 引用任何维度的证据时，必须带出该数据块里的具体数字/期间。数据块标注"暂缺"的维度，只能写"该维度数据暂缺"，**禁止编造，也禁止在该维度上做任何方向的断言——包括反向断言** (数据缺失时不能说"客户集中度低""没有地缘风险")。
-- 引用"加息/降息/宏观流动性"类论据时，必须点名央行/经济体、当前政策利率水平或近期变动幅度、预期持续时间窗口。不确定精确数字时，要说明这是基于知识的粗略估计，但仍要给出具体数量级和主体，不能只写"加息预期"四个字。
+- 引用"加息/降息/宏观流动性"类论据时，只能引用"中美利率环境"块中带日期且 freshness=true 的具体数字；该块缺失或过期时，不得凭记忆补政策利率或写"加息预期/降息预期"。
 - **你的判断只能建立在下述数据块给出的数字上。** 数据块里没有的维度一律写"该维度数据暂缺"，禁止凭记忆、市场印象或"这类公司通常……"来补全。读起来通顺但对不上数据块的结论，比写"暂缺"更糟糕。
 - **重大事项必须正面处理**: 近期重大事项块若包含定增/注资/再融资/股东会等事件，必须点名事件与日期，并评估其对每股净资产、每股收益、ROE 的摊薄或增厚影响及当前进度；认购方是财政部/国资等政策性主体时必须点明其含义。该块标注暂缺时写明"重大事项数据暂缺"，不得凭记忆补全。
 - **输出中禁止出现"六查""第N步""检查项"等内部流程用语**——结论直接陈述事实与判断，不得提及分析流程本身。
@@ -109,6 +110,9 @@ _PROMPT_TEMPLATE = """你是一名证券研究助手。你的任务不是预测�
 
 汇率敞口 (判断汇率变动对收入的影响方向):
 {fx_block}
+
+中美利率环境 (只允许使用 freshness=true 的当前数据；LPR不等同于央行政策利率):
+{macro_rates_block}
 
 {xueqiu_block}
 
@@ -194,6 +198,7 @@ class AnalysisInputs:
     profitability_trend: Optional[Dict] = None
     commodity_signal: Optional[Dict] = None
     rmb_signal: Optional[Dict] = None
+    macro_rates: Optional[Dict] = None
     fundamentals: Optional[Dict] = None
     valuation: Optional[Dict] = None
     valuation_history: Optional[Dict] = None
@@ -817,6 +822,59 @@ def _build_commodity_block(commodity_signal: Optional[Dict]) -> str:
     )
 
 
+def _build_macro_rates_block(data: Optional[Dict]) -> str:
+    if not data:
+        return "暂缺 (本次未取得中美利率数据，不得讨论加息/降息影响)"
+
+    lines: List[str] = []
+    us = data.get("us") or {}
+    if us:
+        ff_fresh = (us.get("fed_target_freshness") or {}).get("fresh", False)
+        lo = us.get("fed_target_lower_pct")
+        hi = us.get("fed_target_upper_pct")
+        if ff_fresh and lo is not None and hi is not None:
+            lines.append(
+                f"美联储联邦基金目标区间 {lo}%~{hi}% "
+                f"(截至 {us.get('fed_target_upper_as_of')}; "
+                f"上限较约180日前变化 {us.get('fed_target_upper_change_180d_pp')}pct)"
+            )
+        else:
+            lines.append("美联储目标利率: 数据缺失或过期，不得作为当前利率引用")
+
+        u10_fresh = (us.get("us10y_freshness") or {}).get("fresh", False)
+        if u10_fresh and us.get("us10y_yield_pct") is not None:
+            lines.append(
+                f"美国10年期国债收益率 {us.get('us10y_yield_pct')}% "
+                f"(截至 {us.get('us10y_as_of')}; 30日变化 "
+                f"{us.get('us10y_change_30d_pp')}pct，90日变化 "
+                f"{us.get('us10y_change_90d_pp')}pct)"
+            )
+        else:
+            lines.append("美国10年期国债收益率: 数据缺失或过期")
+    else:
+        lines.append("美国利率数据: 暂缺")
+
+    china = data.get("china") or {}
+    if china:
+        fresh = (china.get("freshness") or {}).get("fresh", False)
+        if fresh:
+            lines.append(
+                f"中国LPR: 1年期 {china.get('lpr_1y_pct')}%，5年期 {china.get('lpr_5y_pct')}% "
+                f"(截至 {china.get('as_of')}; 近6个观测值变化分别 "
+                f"{china.get('lpr_1y_change_6obs_pp')}pct / "
+                f"{china.get('lpr_5y_change_6obs_pp')}pct)"
+            )
+            lines.append(f"注: {china.get('note')}")
+        else:
+            lines.append("中国LPR: 数据缺失或过期，不得作为当前利率引用")
+    else:
+        lines.append("中国LPR: 暂缺")
+
+    for warning in data.get("warnings") or []:
+        lines.append(f"警告: {warning}")
+    return "\n".join(lines)
+
+
 def _build_fx_block(rmb_signal: Optional[Dict], facts: Optional[Dict]) -> str:
     """
     汇率敞口 = 汇率方向 × 海外收入占比。两者缺一都无法判断顺风逆风：
@@ -1204,6 +1262,7 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
             inputs.refinancing_history, inputs.executive_profile, inputs.governance_alerts
         ),
         fx_block=_build_fx_block(inputs.rmb_signal, (inputs.fundamentals or {}).get("facts")),
+        macro_rates_block=_build_macro_rates_block(inputs.macro_rates),
         xueqiu_block=_build_xueqiu_block(inputs.xueqiu_stock),
         debate_block=_build_debate_block(inputs.debate),
         sentiment_block=_build_sentiment_block(inputs.sentiment),
@@ -1298,7 +1357,7 @@ _ANALYSIS_TOOLS = [
     ),
     _analysis_tool(
         "analyze_policy_geopolitics",
-        "国家政策与国际形势 (战争/加息等): 引用'近期重大事项'与'汇率敞口'块, 并查知识库中军师祭咖啡/老木匠等对政策偏好的记录 (A股政策取向、资金面政策意图); 只写与本标的有直接传导路径的变量并点名具体政策/数字, 无关的央行动作一律不写。",
+        "国家政策与国际形势 (战争/利率等): 利率论据必须优先引用'中美利率环境'中 freshness=true 的Fed目标区间、美债10Y或LPR，并结合'汇率敞口'、'近期重大事项'和知识库政策记录。LPR只是贷款报价利率，不得写成央行政策利率。宏观数据缺失/过期时不允许凭记忆补数字；地缘事件只有本报告有具体事件与传导路径时才讨论。",
     ),
     _analysis_tool(
         "analyze_price_position",
@@ -1624,6 +1683,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         primary_evidence,
         a_share_structure,
         valuation_history,
+        macro_rates,
     ) = await asyncio.gather(
         _load_knowledge_excerpts(),
         get_shareholder_count_trend(stock_code),
@@ -1636,6 +1696,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         get_cninfo_primary_evidence(stock_code),
         get_a_share_structure(stock_code),
         get_valuation_history(stock_code),
+        get_macro_rate_context(),
     )
 
     rd_team: Optional[Dict] = None
@@ -1706,6 +1767,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         profitability_trend=profitability_trend,
         commodity_signal=commodity_signal,
         rmb_signal=rmb_signal,
+        macro_rates=macro_rates,
         fundamentals=fundamentals,
         valuation=valuation,
         valuation_history=valuation_history,
@@ -1784,6 +1846,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         profitability_trend=profitability_trend,
         commodity_signal=commodity_signal,
         rmb_signal=rmb_signal,
+        macro_rates=macro_rates,
         fundamentals=inputs.fundamentals,
         valuation=inputs.valuation,
         valuation_history=valuation_history,
