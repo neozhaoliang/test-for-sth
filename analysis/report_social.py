@@ -41,21 +41,29 @@ def credibility_note(hit_rate: float, correct: int, incorrect: int) -> str:
     return f"基于 {total} 条历史预测验证，命中 {correct} 次，命中率 {hit_rate:.0%}"
 
 
-def historical_thesis(user_id: str, stock_code: str) -> List[str]:
-    from backtest import digest
+def historical_thesis(
+    user_id: str,
+    stock_code: str,
+    *,
+    as_of: Optional[date] = None,
+) -> List[str]:
+    # Digest files are current aggregate artifacts and may contain posts/outcomes that did
+    # not exist at a historical cutoff. Historical mode therefore bypasses digest entirely.
+    if as_of is None:
+        from backtest import digest
 
-    views = digest.views_for_user_stock(user_id, stock_code)
-    if views:
-        out: List[str] = []
-        for v in views:
-            text = v.get("summary") or "；".join(
-                t.get("thesis", "") for t in v.get("theses", [])[:3]
-            )
-            if text:
-                out.append(text)
-        return out[-_MAX_HISTORICAL_THESIS:]
+        views = digest.views_for_user_stock(user_id, stock_code)
+        if views:
+            out: List[str] = []
+            for v in views:
+                text = v.get("summary") or "；".join(
+                    t.get("thesis", "") for t in v.get("theses", [])[:3]
+                )
+                if text:
+                    out.append(text)
+            return out[-_MAX_HISTORICAL_THESIS:]
 
-    records = load_records(user_id)
+    records = load_records(user_id, as_of=as_of)
     thesis = [
         r.get("thesis", "")
         for r in records
@@ -228,4 +236,53 @@ async def collect_live_social_context(
         if started:
             await session.close()
 
+    return candidates
+
+
+
+def collect_historical_candidate_context(
+    inputs,
+    candidate_scores,
+    *,
+    as_of: date,
+) -> List[CandidateOpinion]:
+    """
+    Build historical candidate context without any live browser/network social access.
+
+    - no current Xueqiu stock page;
+    - no current debate/sentiment stream;
+    - no latest-post fetch;
+    - credibility comes from candidate_scores already filtered by as_of;
+    - thesis text comes only from backtest records available by as_of.
+    """
+    inputs.xueqiu_stock = None
+    inputs.debate = None
+    inputs.sentiment = None
+
+    candidates: List[CandidateOpinion] = []
+    for user in candidate_scores:
+        stock_score = next(
+            s for s in user.by_stock if s.stock_code == inputs.stock_code
+        )
+        candidates.append(
+            CandidateOpinion(
+                user_id=user.user_id,
+                user_nickname=user.user_nickname,
+                wilson_score=stock_score.wilson_score,
+                hit_rate=stock_score.hit_rate,
+                correct=stock_score.correct,
+                incorrect=stock_score.incorrect,
+                credibility_note=credibility_note(
+                    stock_score.hit_rate,
+                    stock_score.correct,
+                    stock_score.incorrect,
+                ),
+                historical_thesis=historical_thesis(
+                    user.user_id,
+                    inputs.stock_code,
+                    as_of=as_of,
+                ),
+                latest_posts=[],
+            )
+        )
     return candidates
