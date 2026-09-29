@@ -47,6 +47,8 @@ from analysis.evidence import ResearchQuality, build_evidence_ledger, evaluate_r
 from analysis.research_profile import ResearchProfile, classify_research_profile
 from analysis.report_contract import _PROMPT_VERSION
 from analysis.report_validation import validate_report
+from analysis.research_context import ResearchRequest, assert_request_supported
+from analysis.snapshot_store import save_report_snapshot
 
 from analysis.report_blocks import _build_dividend_chart
 from analysis.report_synthesis import _generate_summary
@@ -125,7 +127,17 @@ def _should_fetch_rd_team(fundamentals: Optional[Dict]) -> bool:
     )
 
 
-async def generate_report(stock_code: str) -> AnalysisReport:
+async def generate_report(
+    stock_code: str,
+    request: Optional[ResearchRequest] = None,
+) -> AnalysisReport:
+    request = request or ResearchRequest(stock_code=stock_code)
+    if request.stock_code != stock_code:
+        raise ValueError(
+            f"request.stock_code={request.stock_code} does not match stock_code={stock_code}"
+        )
+    assert_request_supported(request)
+
     candidate_scores = find_candidates(stock_code)
 
     stock_name = _resolve_stock_name(stock_code, candidate_scores)
@@ -155,9 +167,9 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         get_ths_fundamentals(stock_code),
         get_market_context(stock_code),
         get_margin_signal(stock_code),
-        get_cninfo_primary_evidence(stock_code),
+        get_cninfo_primary_evidence(stock_code, as_of=request.as_of),
         get_a_share_structure(stock_code),
-        get_valuation_history(stock_code),
+        get_valuation_history(stock_code, as_of=request.as_of),
         get_macro_rate_context(),
     )
 
@@ -296,6 +308,8 @@ async def generate_report(stock_code: str) -> AnalysisReport:
     report = AnalysisReport(
         stock_code=stock_code,
         stock_name=stock_name,
+        research_mode=request.mode.value,
+        as_of=str(request.as_of or ""),
         realtime_quote=quote,
         candidates=candidates,
         knowledge_excerpts=knowledge_excerpts,
@@ -342,5 +356,13 @@ async def generate_report(stock_code: str) -> AnalysisReport:
             "[analysis.report] %s 报告合同告警: %s",
             stock_code,
             "；".join(x.message for x in validation.warnings),
+        )
+
+    if request.save_snapshot:
+        snapshot_path = save_report_snapshot(report, request)
+        utils.logger.info(
+            "[analysis.report] %s snapshot saved: %s",
+            stock_code,
+            snapshot_path,
         )
     return report
