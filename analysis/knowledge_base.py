@@ -207,6 +207,17 @@ def _cache_key(source_name: str, entry_id: str) -> str:
     return f"{source_name}:{entry_id}"
 
 
+def _normalize_epoch_seconds(value) -> int:
+    try:
+        ts = int(float(value or 0))
+    except (TypeError, ValueError):
+        return 0
+    # milliseconds / microseconds -> seconds
+    while ts > 10_000_000_000:
+        ts //= 1000
+    return max(0, ts)
+
+
 def _normalize_source_url(url: str) -> str:
     url = (url or "").strip()
     if url.startswith("//"):
@@ -250,7 +261,9 @@ def _load_raw_entries(source: KnowledgeSource) -> List[Dict]:
                             # 雪球发帖无标题, 用正文前 80 字当标题 (提炼输出才是实际内容)
                             "title": str(rec.get(source.title_field, ""))[:80],
                             "content": content,
-                            "timestamp": int(rec.get(source.time_field) or 0),
+                            "timestamp": _normalize_epoch_seconds(
+                                rec.get(source.time_field)
+                            ),
                             "source_url": source_url,
                         }
                     )
