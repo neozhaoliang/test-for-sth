@@ -100,6 +100,10 @@ class AnalysisReport(BaseModel):
     macro_rates: Optional[dict] = Field(
         default=None, description="中美利率环境：Fed目标区间/美债10Y/中国LPR及新鲜度"
     )
+    policy_events: Optional[dict] = Field(
+        default=None,
+        description="按公司暴露路径筛选的近期政策/地缘财经媒体事件线索；不是一手事实",
+    )
     profitability_trend: Optional[dict] = Field(default=None, description="近几个报告期毛利率/净利率/ROE/资产负债率趋势 (盈利能力与成本弹性)")
     fundamentals: Optional[dict] = Field(default=None, description="同花顺 F10 结构性事实 (集中度/海外占比/现金流质量/研发强度/股东人数/公司自述风险)")
     valuation: Optional[dict] = Field(default=None, description="估值快照 (PE/PB/每股指标/股权质押)")
