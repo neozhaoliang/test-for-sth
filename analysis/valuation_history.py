@@ -9,6 +9,7 @@ inside the prompt.
 
 from __future__ import annotations
 
+import logging
 import asyncio
 import re
 from datetime import date, datetime
@@ -16,8 +17,9 @@ from typing import Dict, List, Optional
 
 import akshare as ak
 
-from tools.utils import utils
 
+
+logger = logging.getLogger("MediaCrawler")
 
 _TIMEOUT_S = 30
 _WINDOWS = (3, 5, 10)
@@ -119,7 +121,7 @@ async def get_valuation_history(
             timeout=_TIMEOUT_S,
         )
     except Exception as e:
-        utils.logger.warning(
+        logger.warning(
             f"[valuation_history] stock_value_em({code6}) failed: "
             f"{type(e).__name__}: {str(e)[:160]}"
         )
