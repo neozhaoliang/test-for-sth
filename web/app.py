@@ -1022,6 +1022,14 @@ function renderResult(report) {
   const stanceClass = 'stance-' + (summary.stance || 'neutral');
   html += '<h3>综合分析</h3>';
   html += '<p><span class="stance-badge ' + stanceClass + '">' + stanceLabel(summary.stance) + '</span>';
+  if (summary.company_quality_stance || summary.current_odds_stance) {
+    html += '<span style="margin-left:12px;">企业长期质量: <b>' +
+      stanceLabel(summary.company_quality_stance) + '</b> ｜ 当前股票赔率: <b>' +
+      stanceLabel(summary.current_odds_stance) + '</b></span>';
+  }
+  if (summary.confidence !== undefined && summary.confidence !== null) {
+    html += '<span style="margin-left:12px;">置信度 ' + Math.round(summary.confidence * 100) + '%</span>';
+  }
   if (summary.lynch_category && lynchCategoryLabel(summary.lynch_category)) {
     html += '<span class="lynch-category">' + escapeHtml(lynchCategoryLabel(summary.lynch_category)) + '</span>';
   }
@@ -1029,6 +1037,21 @@ function renderResult(report) {
     html += ' <span class="prompt-version">(prompt ' + escapeHtml(report.prompt_version) + ')</span>';
   }
   html += '</p>';
+  const rq = report.research_quality || {};
+  if (rq.total_dimensions) {
+    html += '<div class="evidence-block"><b>证据质量:</b> 覆盖 ' +
+      Math.round((rq.coverage || 0) * 100) + '% (' +
+      (rq.covered_dimensions || 0) + '/' + rq.total_dimensions + ' 个研究方向)，' +
+      '非社交事实/推导来源占比 ' + Math.round((rq.high_grade_ratio || 0) * 100) + '%';
+    if (rq.missing_dimensions && rq.missing_dimensions.length) {
+      html += '<br><b>尚缺:</b> ' + rq.missing_dimensions.map(escapeHtml).join('、');
+    }
+    if (rq.warnings && rq.warnings.length) {
+      html += '<br><b>质量提示:</b><br>' + rq.warnings.map(x => '· ' + escapeHtml(x)).join('<br>');
+    }
+    html += '</div>';
+  }
+
   if (summary.thesis_summary) {
     html += '<div class="thesis-block"><b>关键论据:</b> ' + escapeHtml(summary.thesis_summary) + '</div>';
   }
@@ -1048,8 +1071,9 @@ function renderResult(report) {
       management: '管理层', fundamentals: '基本面', rd: '研发能力', chip_flow: '筹码',
       price_position: '股价位置', cycle_position: '周期', policy_geopolitics: '政策形势',
       retail_sentiment: '散户情绪', shareholder_returns: '股东回报', growth_elasticity: '成长弹性',
+      a_share_structure: 'A股资金结构', risk_quality: '财务质量与尾部风险',
     };
-    html += '<details class="evidence-block"><summary style="cursor:pointer;">九维度详细分析 (展开)</summary>';
+    html += '<details class="evidence-block"><summary style="cursor:pointer;">十二维度详细分析 (展开)</summary>';
     Object.keys(summary.dimension_analyses).forEach(k => {
       html += '<div style="margin:8px 0;white-space:pre-wrap;"><b>' +
         escapeHtml(dimLabels[k] || k) + ':</b> ' +
@@ -1059,11 +1083,23 @@ function renderResult(report) {
   }
 
   if (summary.dimension_scores && summary.dimension_scores.length >= 6) {
-    html += '<div class="evidence-block"><b>九维度评分 (-10 利空 ~ +10 利多, 悬停顶点看理由):</b><br>' +
+    html += '<div class="evidence-block"><b>十二维度评分 (-10 利空 ~ +10 利多, 悬停顶点看理由):</b><br>' +
       renderDimensionRadar(summary.dimension_scores) + '</div>';
   }
 
   html += renderEvidenceSection(report);
+
+  if (report.evidence && report.evidence.length) {
+    html += '<details class="evidence-block"><summary style="cursor:pointer;">证据账本 (' +
+      report.evidence.length + ' 条，展开)</summary><table style="width:100%;margin-top:8px;border-collapse:collapse;">' +
+      '<tr><th style="text-align:left">证据</th><th>等级</th><th>类型</th><th style="text-align:left">来源</th></tr>';
+    report.evidence.forEach(e => {
+      html += '<tr><td>' + escapeHtml(e.label || e.category) + '</td><td style="text-align:center">' +
+        escapeHtml(e.source_tier || '') + '</td><td style="text-align:center">' +
+        escapeHtml(e.kind || '') + '</td><td>' + escapeHtml(e.source || '') + '</td></tr>';
+    });
+    html += '</table></details>';
+  }
 
   html += '<h3>候选用户 (' + report.candidates.length + ')</h3>';
   for (const c of report.candidates) {
