@@ -181,7 +181,11 @@ def validate_report(report: AnalysisReport) -> ReportValidation:
     # Final confidence is capped by coverage and then reduced by deterministic review penalty.
     max_confidence = max(
         0.0,
-        min(1.0, float(quality.coverage or 0.0))
+        min(
+            1.0,
+            float(quality.coverage or 0.0),
+            float(report.research_profile.readiness or 0.0),
+        )
         - float(review.confidence_penalty or 0.0),
     )
     if float(summary.confidence or 0.0) > max_confidence + 1e-6:
