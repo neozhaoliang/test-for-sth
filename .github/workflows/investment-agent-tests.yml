@@ -1,0 +1,31 @@
+name: Investment Agent core tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - feature/investment-agent-evidence-v2
+
+jobs:
+  core-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install lightweight test dependencies
+        run: python -m pip install --upgrade pip pytest "pydantic>=2,<3"
+
+      - name: Compile investment analysis modules
+        run: |
+          python -m compileall -q             analysis/evidence.py             analysis/reviewer.py             analysis/primary_sources.py             analysis/report.py             analysis/knowledge_base.py             analysis/fundamentals.py             model/m_analysis.py
+
+      - name: Run investment core unit tests
+        run: |
+          pytest -q             tests/test_analysis_evidence.py             tests/test_analysis_reviewer.py
