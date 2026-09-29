@@ -102,6 +102,9 @@ class AnalysisReport(BaseModel):
     valuation_history: Optional[dict] = Field(
         default=None, description="历史PE/PB分位与月度估值序列"
     )
+    rd_team: Optional[dict] = Field(
+        default=None, description="巨潮最新年报中的研发人员数量、占比与学历/年龄结构"
+    )
     xueqiu_stock: Optional[dict] = Field(default=None, description="雪球个股维度 (机构持仓/讨论热度，仅聚合数字)")
     a_share_structure: Optional[dict] = Field(
         default=None, description="A股公开机构持股、前十大流通股东与特殊资金类型"
