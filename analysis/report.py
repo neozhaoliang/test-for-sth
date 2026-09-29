@@ -1245,15 +1245,65 @@ def _build_a_share_structure_block(data: Optional[Dict]) -> str:
         lines.append("机构持股汇总:")
         for row in institutions:
             ratio = row.get("latest_float_ratio_pct")
-            change = row.get("float_ratio_change_pct")
+            provider_change = row.get("float_ratio_change_pct")
             seg = f"  · {row.get('type')}: {row.get('institutions')} 家"
             if ratio is not None:
                 seg += f"，合计占流通股 {ratio}%"
-            if change is not None:
-                seg += f"，较前期变化 {change:+}%"
+            if provider_change is not None:
+                seg += f"，数据源报告增幅合计 {provider_change:+}%"
             lines.append(seg)
     else:
         lines.append("机构持股汇总: 暂缺")
+
+    qoq = data.get("institution_qoq") or []
+    if qoq:
+        prev = data.get("previous_report_period") or "前一披露期"
+        lines.append(f"机构季度快照变化 ({prev} → {data.get('report_period') or '本期'}):")
+        for row in qoq:
+            seg = f"  · {row.get('type')}: "
+            parts = []
+            if row.get("float_ratio_change_pp") is not None:
+                parts.append(f"占流通股变化 {row.get('float_ratio_change_pp'):+}%")
+            if row.get("shares_change_pct") is not None:
+                parts.append(f"持股数变化 {row.get('shares_change_pct'):+}%")
+            if row.get("institution_count_change") is not None:
+                parts.append(f"机构数变化 {row.get('institution_count_change'):+d}")
+            lines.append(seg + ("，".join(parts) if parts else "可比数据不足"))
+
+    fund_qoq = data.get("fund_qoq") or {}
+    if fund_qoq:
+        inc = fund_qoq.get("increased") or []
+        dec = fund_qoq.get("decreased") or []
+        new = fund_qoq.get("newly_seen") or []
+        exited = fund_qoq.get("exited_top_list") or []
+        if inc:
+            lines.append(
+                "公募增持较多: " + "；".join(
+                    f"{x.get('name')} "
+                    + (
+                        f"{x.get('float_ratio_change_pp'):+}%流通股"
+                        if x.get("float_ratio_change_pp") is not None
+                        else f"持股数变化 {x.get('shares_change_pct'):+}%"
+                    )
+                    for x in inc[:5]
+                )
+            )
+        if dec:
+            lines.append(
+                "公募减持较多: " + "；".join(
+                    f"{x.get('name')} "
+                    + (
+                        f"{x.get('float_ratio_change_pp'):+}%流通股"
+                        if x.get("float_ratio_change_pp") is not None
+                        else f"持股数变化 {x.get('shares_change_pct'):+}%"
+                    )
+                    for x in dec[:5]
+                )
+            )
+        if new:
+            lines.append("本期新见公募: " + "；".join(str(x.get("name")) for x in new[:5]))
+        if exited:
+            lines.append("本期明细未再见公募: " + "；".join(str(x.get("name")) for x in exited[:5]))
 
     special = data.get("special_holders") or {}
     labels = {
