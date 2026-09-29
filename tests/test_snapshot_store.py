@@ -5,7 +5,13 @@ from analysis.evidence import EvidenceItem, ResearchQuality
 from analysis.research_context import ResearchRequest
 from analysis.research_profile import ResearchProfile
 from analysis.reviewer import ResearchReview
-from analysis.snapshot_store import load_snapshot_manifest, save_report_snapshot
+from analysis.snapshot_store import (
+    load_snapshot_manifest,
+    load_snapshot_report,
+    load_snapshot_research_inputs,
+    save_report_snapshot,
+    verify_snapshot_integrity,
+)
 from model.m_analysis import AnalysisReport, StructuredSummary
 
 
@@ -82,6 +88,8 @@ def test_snapshot_writes_manifest_hashes_and_source_vintages(tmp_path):
     assert (path / "report.json").exists()
     assert (path / "evidence.json").exists()
     assert (path / "manifest.json").exists()
+    assert (path / "request.json").exists()
+    assert (path / "research_inputs.json").exists()
     assert len(manifest.report_sha256) == 64
     assert len(manifest.evidence_sha256) == 64
     assert manifest.prompt_version == "test-prompt"
@@ -91,3 +99,49 @@ def test_snapshot_writes_manifest_hashes_and_source_vintages(tmp_path):
     second = save_report_snapshot(report, request)
     assert second == path
     assert load_snapshot_manifest(second).report_sha256 == manifest.report_sha256
+
+
+
+def test_snapshot_research_inputs_exclude_old_conclusion(tmp_path):
+    request = ResearchRequest(
+        stock_code="600000",
+        save_snapshot=True,
+        snapshot_root=str(tmp_path),
+    )
+    report = _report()
+    report.as_of = str(request.as_of)
+
+    path = save_report_snapshot(report, request)
+    inputs = load_snapshot_research_inputs(path)
+
+    assert "summary" not in inputs
+    assert "review" not in inputs
+    assert "validation" not in inputs
+    assert inputs["stock_code"] == "600000"
+    assert inputs["evidence"][0]["category"] == "valuation_history"
+
+    loaded = load_snapshot_report(path)
+    assert loaded.stock_code == report.stock_code
+    assert loaded.summary.stance == report.summary.stance
+
+
+def test_snapshot_integrity_detects_tampering(tmp_path):
+    request = ResearchRequest(
+        stock_code="600000",
+        save_snapshot=True,
+        snapshot_root=str(tmp_path),
+    )
+    report = _report()
+    report.as_of = str(request.as_of)
+    path = save_report_snapshot(report, request)
+
+    before = verify_snapshot_integrity(path)
+    assert before["ok"] is True
+
+    report_path = path / "report.json"
+    payload = report_path.read_text(encoding="utf-8")
+    report_path.write_text(payload.replace("测试股份", "被篡改股份"), encoding="utf-8")
+
+    after = verify_snapshot_integrity(path)
+    assert after["ok"] is False
+    assert any("report" in x for x in after["errors"])
