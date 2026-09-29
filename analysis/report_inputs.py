@@ -20,6 +20,8 @@ from model.m_analysis import KnowledgeExcerpt
 class AnalysisInputs:
     stock_code: str
     stock_name: str = ""
+    research_mode: str = "live"
+    as_of: str = ""
     quote: Dict = field(default_factory=dict)
     knowledge_excerpts: List[KnowledgeExcerpt] = field(default_factory=list)
     industry_comparison: Optional[Dict] = None
