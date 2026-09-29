@@ -13,6 +13,7 @@ That separation is important for:
 from __future__ import annotations
 
 from datetime import date, datetime
+import logging
 from typing import Any, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -22,8 +23,9 @@ from analysis.knowledge_base import (
 )
 from backtest.score import load_records
 from model.m_analysis import CandidateOpinion, KnowledgeExcerpt
-from tools.utils import utils
 
+
+logger = logging.getLogger("MediaCrawler")
 
 _MAX_LATEST_POSTS = 5
 _MAX_HISTORICAL_THESIS = 5
@@ -159,7 +161,7 @@ async def filter_relevant_knowledge(
         repair_requirements="必须是 JSON 数组，元素为条目编号 (非负整数)",
     )
     if not isinstance(parsed, list):
-        utils.logger.warning(
+        logger.warning(
             f"[analysis.report_social] 知识库相关性筛选失败，回退为全量 ({stock_code})"
         )
         return knowledge_excerpts
@@ -169,7 +171,7 @@ async def filter_relevant_knowledge(
         if isinstance(i, int) and 0 <= i < len(knowledge_excerpts)
     }
     if not kept:
-        utils.logger.warning(
+        logger.warning(
             f"[analysis.report_social] 知识库相关性筛选返回空结果，回退为全量 ({stock_code})"
         )
         return knowledge_excerpts
@@ -196,7 +198,7 @@ async def collect_live_social_context(
     session = AnalysisBrowserSession()
     started = await session.start()
     if not started:
-        utils.logger.warning(
+        logger.warning(
             f"[analysis.report_social] 浏览器会话启动失败，跳过雪球维度与最新发言 "
             f"(stock_code={inputs.stock_code})"
         )
