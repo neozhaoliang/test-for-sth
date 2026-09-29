@@ -132,6 +132,10 @@ class KnowledgeSource(NamedTuple):
     title_field: str
     content_field: str
     time_field: str  # 用于排序的数值型时间字段 (如 last_modify_ts)；无则传空字符串
+    filter_field: str = ""  # 可选: 只接纳指定作者/UID，防止同目录其他来源污染
+    filter_value: str = ""
+    url_field: str = ""
+    url_template: str = ""  # 支持 {id}
 
 
 _SOURCES: List[KnowledgeSource] = [
@@ -142,6 +146,20 @@ _SOURCES: List[KnowledgeSource] = [
         title_field="title",
         content_field="content",
         time_field="last_modify_ts",
+        filter_field="author",
+        filter_value="买股票的老木匠",
+        url_field="jump_url",
+    ),
+    KnowledgeSource(
+        name="bili_laomujiang_transcript",
+        glob_pattern=os.path.join("bili", "jsonl", "creator_transcripts_*.jsonl"),
+        id_field="transcript_id",
+        title_field="title",
+        content_field="transcript",
+        time_field="pub_ts",
+        filter_field="author",
+        filter_value="买股票的老木匠",
+        url_field="video_url",
     ),
 ]
 
@@ -162,6 +180,7 @@ def _build_sources() -> List[KnowledgeSource]:
                 title_field="description",
                 content_field="description",
                 time_field="created_at",
+                url_template=f"https://xueqiu.com/{uid}/{{id}}",
             )
         )
     return sources
@@ -174,6 +193,7 @@ class KnowledgeEntry(NamedTuple):
     raw_content: str
     distilled: str  # 提炼后的投资观点摘要，未提炼成功时为空字符串
     timestamp: int
+    source_url: str = ""
 
 
 _cache: Optional[List[KnowledgeEntry]] = None
@@ -187,6 +207,15 @@ def _cache_key(source_name: str, entry_id: str) -> str:
     return f"{source_name}:{entry_id}"
 
 
+def _normalize_source_url(url: str) -> str:
+    url = (url or "").strip()
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("/"):
+        return "https://www.bilibili.com" + url
+    return url
+
+
 def _load_raw_entries(source: KnowledgeSource) -> List[Dict]:
     raws: List[Dict] = []
     pattern = os.path.join(_ROOT_DATA_DIR, source.glob_pattern)
@@ -198,14 +227,29 @@ def _load_raw_entries(source: KnowledgeSource) -> List[Dict]:
                     if not line:
                         continue
                     rec = json.loads(line)
+                    if source.filter_field:
+                        actual = str(rec.get(source.filter_field, "") or "").strip()
+                        if actual != source.filter_value:
+                            continue
+                    entry_id = str(rec.get(source.id_field, ""))
+                    source_url = ""
+                    if source.url_field:
+                        source_url = _normalize_source_url(str(rec.get(source.url_field, "") or ""))
+                    if not source_url and source.url_template and entry_id:
+                        source_url = source.url_template.format(id=entry_id)
+                    content = str(rec.get(source.content_field, "") or "").strip()
+                    # 字幕抓取会显式记录无字幕；这种记录用于可观测性，但不能进入知识蒸馏。
+                    if not content:
+                        continue
                     raws.append(
                         {
                             "source": source.name,
-                            "entry_id": str(rec.get(source.id_field, "")),
+                            "entry_id": entry_id,
                             # 雪球发帖无标题, 用正文前 80 字当标题 (提炼输出才是实际内容)
                             "title": str(rec.get(source.title_field, ""))[:80],
-                            "content": str(rec.get(source.content_field, "")),
+                            "content": content,
                             "timestamp": int(rec.get(source.time_field) or 0),
+                            "source_url": source_url,
                         }
                     )
         except (OSError, json.JSONDecodeError) as e:
@@ -335,6 +379,7 @@ async def ensure_loaded() -> List[KnowledgeEntry]:
                 raw_content=raw["content"],
                 distilled=distilled,
                 timestamp=raw["timestamp"],
+                source_url=raw.get("source_url", ""),
             )
         )
     entries.sort(key=lambda e: e.timestamp, reverse=True)
