@@ -262,6 +262,7 @@ async def crawl_bili_knowledge(req: CrawlBiliOpusRequest) -> CrawlTaskResponse:
         "--lt", "qrcode",
         "--type", "creator",
         "--creator_id", creator_id,
+        "--get_comment", "false",
     ]
     task_id = await _start_crawl_task(opus_cmd, chain=[video_cmd])
     return CrawlTaskResponse(task_id=task_id)
