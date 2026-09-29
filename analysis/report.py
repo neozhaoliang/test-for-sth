@@ -32,6 +32,7 @@ from analysis.candidates import find_candidates
 from analysis.commodity import get_cycle_commodity_signal, get_rmb_trend_signal
 from analysis.freight import get_container_freight_signal
 from analysis.fundamentals import get_ths_fundamentals
+from analysis.filing_calendar import get_financial_filing_calendar
 from analysis.industry import get_industry_comparison
 from analysis.margin import get_margin_signal
 from analysis.management_capital import build_management_capital_record
@@ -95,6 +96,7 @@ class AnalysisInputs:
     primary_evidence: List[Dict] = field(default_factory=list)
     a_share_structure: Optional[Dict] = None
     management_capital: Optional[Dict] = None
+    filing_calendar: List[Dict] = field(default_factory=list)
     research_profile: Optional[ResearchProfile] = None
     research_quality: Optional[ResearchQuality] = None
 
@@ -162,6 +164,7 @@ async def generate_report(
         a_share_structure,
         valuation_history,
         macro_rates,
+        filing_calendar,
     ) = await asyncio.gather(
         load_knowledge_excerpts(
             as_of=request.as_of
@@ -179,6 +182,7 @@ async def generate_report(
         get_a_share_structure(stock_code),
         get_valuation_history(stock_code, as_of=request.as_of),
         get_macro_rate_context(as_of=request.as_of),
+        get_financial_filing_calendar(stock_code, as_of=request.as_of),
     )
 
     rd_team: Optional[Dict] = None
@@ -281,6 +285,7 @@ async def generate_report(
         primary_evidence=primary_evidence,
         a_share_structure=a_share_structure,
         management_capital=management_capital,
+        filing_calendar=filing_calendar,
     )
 
     # Live social/KOL context is isolated from the public/company evidence path.
@@ -337,6 +342,7 @@ async def generate_report(
         xueqiu_stock=inputs.xueqiu_stock,
         a_share_structure=a_share_structure,
         management_capital=management_capital,
+        filing_calendar=filing_calendar,
         debate=inputs.debate,
         sentiment=inputs.sentiment,
         primary_evidence=primary_evidence,
