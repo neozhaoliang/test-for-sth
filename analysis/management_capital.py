@@ -250,7 +250,7 @@ def build_management_capital_record(
         "recent_governance_negative_events": primary_governance_negatives[:8],
         "recent_primary_refinancing_events": primary_refinancing[:8],
         "notes": notes,
-        "source_tier": "S/B mixed",
+        "source_tier": "A" if primary_evidence else "B",
         "method": (
             "巨潮一手公告优先；分红/回购历史与F10再融资用于长期资本分配统计。"
             "同一事件在管理层与股东回报分析中共享，不作为两份独立证据重复计分。"
