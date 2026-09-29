@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -276,7 +276,7 @@ async def get_cninfo_primary_evidence(
     stock_code: str,
     *,
     lookback_years: int = _LOOKBACK_YEARS,
-    as_of: Optional[datetime.date] = None,
+    as_of: Optional[date] = None,
 ) -> List[Dict]:
     """
     Fetch recent official disclosure metadata from CNINFO for governance/capital-allocation
