@@ -62,6 +62,7 @@ class TemporalCapability(BaseModel):
     capability: SourceTemporalCapability
     reason: str
     implemented: bool = True
+    required_for_historical: bool = True
 
 
 # This registry is deliberately conservative.  A source only becomes AS_OF_SAFE after its
@@ -141,8 +142,9 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
     "xueqiu_live": TemporalCapability(
         source="xueqiu_live",
         capability=SourceTemporalCapability.LIVE_ONLY,
-        reason="current browser path reads today's stock page and discussion stream",
+        reason="historical mode deliberately omits today's stock page/discussion stream; absence lowers evidence coverage but does not permit a live fallback",
         implemented=False,
+        required_for_historical=False,
     ),
     "kol_knowledge": TemporalCapability(
         source="kol_knowledge",
@@ -175,9 +177,14 @@ def historical_readiness() -> HistoricalReadiness:
         item = SOURCE_TEMPORAL_CAPABILITIES[name]
         if item.capability == SourceTemporalCapability.AS_OF_SAFE and item.implemented:
             safe.append(name)
-        else:
-            blocking.append(name)
+            continue
+        if not item.required_for_historical:
+            # Explicit safe omission: historical orchestration must not fall back to live
+            # data, but the missing optional source does not block the whole report.
             reasons[name] = item.reason
+            continue
+        blocking.append(name)
+        reasons[name] = item.reason
     return HistoricalReadiness(
         ready=not blocking,
         safe_sources=safe,
