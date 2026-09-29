@@ -16,13 +16,13 @@ def test_change_from_days_uses_observation_at_or_before_cutoff():
 
 @pytest.mark.asyncio
 async def test_macro_context_warns_when_upstream_marks_series_stale(monkeypatch):
-    async def fake_us():
+    async def fake_us(as_of=None):
         return {
             "fed_target_freshness": {"fresh": False, "age_days": 20},
             "us10y_freshness": {"fresh": True, "age_days": 2},
         }
 
-    async def fake_china():
+    async def fake_china(as_of=None):
         return {
             "freshness": {"fresh": False, "age_days": 60},
         }
@@ -36,3 +36,36 @@ async def test_macro_context_warns_when_upstream_marks_series_stale(monkeypatch)
     assert len(result["warnings"]) == 2
     assert any("联邦基金" in x for x in result["warnings"])
     assert any("LPR" in x for x in result["warnings"])
+
+
+def test_freshness_is_relative_to_historical_reference_date():
+    out = macro_rates._freshness(
+        date(2024, 6, 20),
+        15,
+        reference_date=date(2024, 6, 30),
+    )
+    assert out == {"fresh": True, "age_days": 10}
+
+
+@pytest.mark.asyncio
+async def test_macro_context_forwards_as_of_to_both_sources(monkeypatch):
+    seen = []
+
+    async def fake_us(as_of=None):
+        seen.append(("us", as_of))
+        return None
+
+    async def fake_china(as_of=None):
+        seen.append(("china", as_of))
+        return None
+
+    monkeypatch.setattr(macro_rates, "_fetch_us_rates", fake_us)
+    monkeypatch.setattr(macro_rates, "_fetch_china_lpr", fake_china)
+
+    result = await macro_rates.get_macro_rate_context(as_of=date(2024, 6, 30))
+
+    assert result is None
+    assert seen == [
+        ("us", date(2024, 6, 30)),
+        ("china", date(2024, 6, 30)),
+    ]
