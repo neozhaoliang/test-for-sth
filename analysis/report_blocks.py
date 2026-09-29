@@ -534,6 +534,35 @@ def _build_commodity_block(commodity_signal: Optional[Dict]) -> str:
     return "\n".join(lines)
 
 
+def _build_policy_events_block(data: Optional[Dict]) -> str:
+    if not data:
+        return (
+            "暂缺 (近期财经媒体事件线索没有匹配到公司暴露路径；"
+            "不得据此反向断言“没有政策/地缘风险”)"
+        )
+    lines = [
+        "以下仅为近期财经媒体/快讯事件线索，不是一手事实；"
+        "只能用于提出需要核对的传导路径，不能单独成为看多/看空证据。"
+    ]
+    for item in (data.get("events") or [])[:14]:
+        date_text = str(item.get("published_at") or "日期未知")
+        media = str(item.get("media") or "媒体来源未知")
+        title = str(item.get("title") or "").strip()
+        topics = "、".join(item.get("matched_topics") or [])
+        terms = "、".join(item.get("matched_terms") or [])
+        line = f"  · {date_text} [{media}] {title}"
+        if topics:
+            line += f" | 匹配主题: {topics}"
+        if terms:
+            line += f" | 关键词: {terms}"
+        if item.get("url"):
+            line += f" | {item.get('url')}"
+        lines.append(line)
+    if data.get("note"):
+        lines.append(f"注: {data.get('note')}")
+    return "\n".join(lines)
+
+
 def _build_macro_rates_block(data: Optional[Dict]) -> str:
     if not data:
         return "暂缺 (本次未取得中美利率数据，不得讨论加息/降息影响)"
@@ -1126,6 +1155,7 @@ def _build_prompt(inputs: Any, candidates: List[CandidateOpinion]) -> str:
         ),
         fx_block=_build_fx_block(inputs.rmb_signal, (inputs.fundamentals or {}).get("facts")),
         macro_rates_block=_build_macro_rates_block(inputs.macro_rates),
+        policy_events_block=_build_policy_events_block(inputs.policy_events),
         xueqiu_block=_build_xueqiu_block(inputs.xueqiu_stock),
         debate_block=_build_debate_block(inputs.debate),
         sentiment_block=_build_sentiment_block(inputs.sentiment),
