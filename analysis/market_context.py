@@ -134,15 +134,23 @@ async def get_market_context(
         s = stock_df.copy()
         s["date"] = pd.to_datetime(s["date"])
         s = s.set_index("date")["close"].astype(float)
-        stock = _summary(s)
+        if cutoff is not None:
+            s = s[s.index <= cutoff]
+        if s.empty:
+            s = pd.Series(dtype=float)
+        else:
+            stock = _summary(s)
 
-        week52 = s[s.index >= (s.index[-1] - pd.Timedelta(days=365))]
-        if not week52.empty:
+        week52 = (
+            s[s.index >= (s.index[-1] - pd.Timedelta(days=365))]
+            if not s.empty else s
+        )
+        if stock is not None and not week52.empty:
             stock["w52_high"] = round(float(week52.max()), 2)
             stock["w52_high_date"] = str(week52.idxmax().date())
             stock["w52_low"] = round(float(week52.min()), 2)
             stock["w52_low_date"] = str(week52.idxmin().date())
-        if not s.empty:
+        if stock is not None and not s.empty:
             stock["hist_high"] = round(float(s.max()), 2)
             stock["hist_high_date"] = str(s.idxmax().date())
             stock["hist_low"] = round(float(s.min()), 2)
