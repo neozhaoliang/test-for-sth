@@ -268,6 +268,8 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         kind="fact",
         value=fundamentals,
         as_of=str(facts.get("finance_period") or facts.get("operate_period") or "") or None,
+        period=str(facts.get("finance_period") or facts.get("operate_period") or "") or None,
+        available_at=str(fundamentals.get("available_at") or "") or None,
         tags=("financials", "customers", "suppliers", "cashflow", "working_capital", "receivables", "inventory"),
         url=source_map.get("finance") or source_map.get("operate"),
     )
@@ -379,6 +381,8 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         kind="derived",
         value=profitability,
         as_of=_latest_period_date((profitability or {}).get("periods") or []),
+        period=_latest_period_date((profitability or {}).get("periods") or []),
+        available_at=str((profitability or {}).get("available_at") or "") or None,
         tags=("margin", "roe", "debt"),
     )
 
