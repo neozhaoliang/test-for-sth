@@ -33,8 +33,8 @@ def test_historical_request_requires_past_as_of_and_is_currently_blocked():
     assert not readiness.ready
     assert "valuation_history" in readiness.safe_sources
     assert "primary_evidence" in readiness.safe_sources
-    assert "shareholder_count" in readiness.safe_sources
-    assert "dividend_buyback" in readiness.safe_sources
+    assert "shareholder_count" in readiness.blocking_sources
+    assert "dividend_buyback" in readiness.blocking_sources
     assert "fundamentals" in readiness.blocking_sources
     assert "xueqiu_live" in readiness.blocking_sources
 
