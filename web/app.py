@@ -1509,6 +1509,15 @@ function renderResult(report) {
     if (rq.missing_dimensions && rq.missing_dimensions.length) {
       html += '<br><b>尚缺:</b> ' + rq.missing_dimensions.map(escapeHtml).join('、');
     }
+    if (rq.stale_evidence && rq.stale_evidence.length) {
+      html += '<br><b>已过新鲜度阈值:</b><ul>' +
+        rq.stale_evidence.map(x =>
+          '<li>' + escapeHtml(x.label || x.category || '') +
+          '：截止 ' + escapeHtml(x.as_of || '') +
+          '，距今 ' + escapeHtml(String(x.age_days)) +
+          ' 天（阈值 ' + escapeHtml(String(x.max_age_days)) + ' 天）</li>'
+        ).join('') + '</ul>';
+    }
     if (rq.warnings && rq.warnings.length) {
       html += '<br><b>质量提示:</b><br>' + rq.warnings.map(x => '· ' + escapeHtml(x)).join('<br>');
     }
@@ -1583,11 +1592,12 @@ function renderResult(report) {
   if (report.evidence && report.evidence.length) {
     html += '<details class="evidence-block"><summary style="cursor:pointer;">证据账本 (' +
       report.evidence.length + ' 条，展开)</summary><table style="width:100%;margin-top:8px;border-collapse:collapse;">' +
-      '<tr><th style="text-align:left">证据</th><th>等级</th><th>类型</th><th style="text-align:left">来源</th></tr>';
+      '<tr><th style="text-align:left">证据</th><th>等级</th><th>类型</th><th>数据时点</th><th style="text-align:left">来源</th></tr>';
     report.evidence.forEach(e => {
       html += '<tr><td>' + escapeHtml(e.label || e.category) + '</td><td style="text-align:center">' +
         escapeHtml(e.source_tier || '') + '</td><td style="text-align:center">' +
-        escapeHtml(e.kind || '') + '</td><td>' +
+        escapeHtml(e.kind || '') + '</td><td style="text-align:center">' +
+        escapeHtml(e.as_of || '未标注') + '</td><td>' +
         (e.url ? safeExternalLink(e.url, e.source || '来源') : escapeHtml(e.source || '')) +
         '</td></tr>';
     });
