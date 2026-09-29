@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple
 
 from analysis.report import generate_report
 from analysis.report_validation import validate_report
+from analysis.research_context import ResearchRequest
 
 
 DEFAULT_CASES: List[Tuple[str, str, str]] = [
@@ -54,12 +55,18 @@ async def _run_case(
     expected_archetype: Optional[str],
     label: str,
     output_dir: Optional[Path],
+    snapshot_root: Optional[Path],
     min_coverage: float,
 ) -> Dict:
     failures: List[str] = []
     warnings: List[str] = []
     try:
-        report = await generate_report(code)
+        request = ResearchRequest(
+            stock_code=code,
+            save_snapshot=bool(snapshot_root),
+            snapshot_root=str(snapshot_root) if snapshot_root else "data/investment_snapshots",
+        )
+        report = await generate_report(code, request=request)
     except Exception as e:
         return {
             "stock_code": code,
@@ -135,6 +142,7 @@ async def _run_case(
 async def main_async(
     cases: List[Tuple[str, Optional[str], str]],
     output_dir: Optional[Path],
+    snapshot_root: Optional[Path],
     min_coverage: float,
 ) -> int:
     results = []
@@ -146,6 +154,7 @@ async def main_async(
             expected,
             label,
             output_dir,
+            snapshot_root,
             min_coverage,
         )
         results.append(result)
@@ -156,6 +165,7 @@ async def main_async(
         "passed": sum(1 for x in results if x["ok"]),
         "failed": sum(1 for x in results if not x["ok"]),
         "failed_codes": [x["stock_code"] for x in results if not x["ok"]],
+        "snapshot_root": str(snapshot_root) if snapshot_root else "",
         "average_coverage": round(
             sum(float(x.get("evidence_coverage") or 0) for x in results)
             / len(results),
@@ -188,6 +198,11 @@ def main() -> None:
         help="optional directory for full report JSON files",
     )
     parser.add_argument(
+        "--snapshot-root",
+        default="",
+        help="optional standard snapshot root; when set, each passing report is also frozen as a hashed snapshot",
+    )
+    parser.add_argument(
         "--min-coverage",
         type=float,
         default=0.60,
@@ -196,8 +211,16 @@ def main() -> None:
     args = parser.parse_args()
     cases = [_parse_case(x) for x in args.cases] if args.cases else DEFAULT_CASES
     output_dir = Path(args.out) if args.out else None
+    snapshot_root = Path(args.snapshot_root) if args.snapshot_root else None
     raise SystemExit(
-        asyncio.run(main_async(cases, output_dir, max(0.0, min(1.0, args.min_coverage))))
+        asyncio.run(
+            main_async(
+                cases,
+                output_dir,
+                snapshot_root,
+                max(0.0, min(1.0, args.min_coverage)),
+            )
+        )
     )
 
 
