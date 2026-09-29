@@ -57,7 +57,7 @@ _DIMENSION_REQUIREMENTS: Dict[str, tuple[str, ...]] = {
     "chip_flow": ("shareholder_count", "margin"),
     "price_position": ("valuation_history", "valuation", "market_context"),
     "cycle_position": ("industry", "cycle_signal"),
-    "policy_geopolitics": ("macro_rates", "fx", "major_events", "knowledge"),
+    "policy_geopolitics": ("macro_rates", "fx", "major_events", "policy_events", "knowledge"),
     "retail_sentiment": ("sentiment", "debate"),
     "shareholder_returns": ("management_capital", "shareholder_return", "governance"),
     "growth_elasticity": ("profitability", "valuation_history", "valuation"),
@@ -76,6 +76,7 @@ _FRESHNESS_DAYS: Dict[str, int] = {
     "shareholder_count": 190,
     "a_share_structure": 190,
     "cycle_signal": 10,
+    "policy_events": 7,
     "profitability": 220,
     "fundamentals": 220,
     "rd_team": 550,
@@ -488,6 +489,19 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         tags=("rates", "fed", "treasury", "lpr", "macro"),
     )
 
+    policy_events = _get(inputs, "policy_events")
+    _add(
+        out,
+        category="policy_events",
+        label="近期政策/地缘事件线索",
+        source="analysis.policy_context",
+        tier=(policy_events or {}).get("source_tier") or "B",
+        kind=(policy_events or {}).get("kind") or "reported_event",
+        value=policy_events,
+        as_of=str((policy_events or {}).get("as_of") or "") or None,
+        tags=("policy", "geopolitics", "news_clue", "trade", "rates"),
+    )
+
     rmb = _get(inputs, "rmb_signal")
     _add(
         out,
@@ -626,7 +640,10 @@ def evaluate_research_quality(
     # 按证据类别而不是逐条记录计算来源质量；否则几十条巨潮公告会把比例虚高。
     category_quality: Dict[str, bool] = {}
     for e in evidence:
-        is_high = e.source_tier in {"S", "A", "B"} and e.kind != "opinion"
+        is_high = (
+            e.source_tier in {"S", "A", "B"}
+            and e.kind in {"fact", "derived"}
+        )
         category_quality[e.category] = category_quality.get(e.category, False) or is_high
     ratio = (
         sum(1 for ok in category_quality.values() if ok) / len(category_quality)
