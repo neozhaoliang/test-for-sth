@@ -134,6 +134,9 @@ class AnalysisReport(BaseModel):
     review: ResearchReview = Field(
         default_factory=ResearchReview, description="跨维度重复计分、潜在冲突与弱证据审查"
     )
+    validation: Optional[dict] = Field(
+        default=None, description="最终报告合同校验结果；结构错误会在返回前阻断"
+    )
     summary: StructuredSummary = Field(default_factory=StructuredSummary, description="LLM 生成的结构化分析摘要")
     prompt_version: str = Field(default="", description="生成本报告所用的 prompt 版本号")
     generated_at: int = Field(default=0, description="报告生成时间 (Unix 秒)")
