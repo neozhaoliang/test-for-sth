@@ -99,7 +99,7 @@ _FACTOR_RULES = {
 }
 
 _REQUIRED_CATEGORIES = {
-    "analyze_management": {"governance", "shareholder_return", "primary"},
+    "analyze_management": {"management_capital", "governance", "shareholder_return", "primary"},
     "analyze_business_fundamentals": {"fundamentals", "profitability"},
     "analyze_rd_capability": {"rd_team", "rd"},
     "analyze_chip_flow": {"shareholder_count", "margin"},
@@ -107,7 +107,7 @@ _REQUIRED_CATEGORIES = {
     "analyze_cycle_position": {"cycle_signal", "industry"},
     "analyze_policy_geopolitics": {"fx", "major_events", "primary", "knowledge"},
     "analyze_retail_sentiment": {"sentiment", "debate"},
-    "analyze_shareholder_returns": {"shareholder_return", "governance", "primary"},
+    "analyze_shareholder_returns": {"management_capital", "shareholder_return", "governance", "primary"},
     "analyze_growth_elasticity": {"profitability", "valuation_history", "valuation"},
     "analyze_a_share_structure": {"a_share_structure", "market_context", "margin", "institutional", "knowledge"},
     "analyze_risk_quality": {"fundamentals", "profitability", "governance", "primary"},
