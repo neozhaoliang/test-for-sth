@@ -44,6 +44,7 @@ class KnowledgeExcerpt(BaseModel):
     title: str = Field(default="", description="资料标题")
     distilled: str = Field(default="", description="LLM 提炼后的投资观点摘要 (已去除闲聊)")
     source_url: str = Field(default="", description="原帖/专栏/视频来源链接")
+    published_at: str = Field(default="", description="原始内容发布时间，历史模式用于防未来泄漏")
 
 
 class StructuredSummary(BaseModel):
