@@ -44,6 +44,7 @@ jobs:
             analysis/valuation_history.py \
             analysis/rd_team.py \
             analysis/primary_sources.py \
+            analysis/policy_context.py \
             analysis/report_contract.py \
             analysis/report_blocks.py \
             analysis/report_synthesis.py \
@@ -94,4 +95,5 @@ jobs:
             tests/test_commodity_cycle.py \
             tests/test_a_share_structure.py \
             tests/test_primary_sources.py \
+            tests/test_policy_context.py \
             tests/test_rd_team.py
