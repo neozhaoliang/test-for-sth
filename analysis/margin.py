@@ -23,13 +23,15 @@
 融资余额快速上升 + 股价高位 = 杠杆资金拥挤风险; 持续回落 = 去杠杆。
 """
 
+import logging
 import asyncio
 import datetime
 from typing import Dict, List, Optional
 
 import akshare as ak
 
-from tools.utils import utils
+
+logger = logging.getLogger("MediaCrawler")
 
 _MAX_TRADING_DAYS = 6  # 收集的交易日数
 _MAX_CALENDAR_BACK = 14  # 最多回溯的自然日 (跨周末/长假)
@@ -90,10 +92,10 @@ async def get_margin_signal(
             asyncio.to_thread(_fetch_series, exchange, symbol, as_of), timeout=_FETCH_BUDGET_S
         )
     except asyncio.TimeoutError:
-        utils.logger.warning(f"[margin] {stock_code} 融资融券数据获取超时, 跳过该维度")
+        logger.warning(f"[margin] {stock_code} 融资融券数据获取超时, 跳过该维度")
         return None
     if len(series) < 3:
-        utils.logger.warning(f"[margin] {stock_code} 融资融券数据不足 ({len(series)} 天), 跳过该维度")
+        logger.warning(f"[margin] {stock_code} 融资融券数据不足 ({len(series)} 天), 跳过该维度")
         return None
     series.sort(key=lambda s: s["date"])
     first = series[0]["balance_yuan"]
