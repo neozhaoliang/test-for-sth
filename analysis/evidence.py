@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
@@ -43,6 +46,7 @@ class ResearchQuality(BaseModel):
     total_dimensions: int = 12
     high_grade_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
     missing_dimensions: List[str] = Field(default_factory=list)
+    stale_evidence: List[Dict[str, Any]] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
 
 
@@ -61,6 +65,22 @@ _DIMENSION_REQUIREMENTS: Dict[str, tuple[str, ...]] = {
     "risk_quality": ("fundamentals", "profitability", "governance"),
 }
 
+# Maximum acceptable age for evidence whose usefulness is strongly time-sensitive.
+# Categories absent from this map are either historical by nature (e.g. announcements,
+# dividends) or already carry their own freshness logic.
+_FRESHNESS_DAYS: Dict[str, int] = {
+    "quote": 3,
+    "valuation_history": 10,
+    "market_context": 10,
+    "margin": 14,
+    "shareholder_count": 190,
+    "a_share_structure": 190,
+    "profitability": 220,
+    "fundamentals": 220,
+    "rd_team": 550,
+}
+
+
 _DIMENSION_LABELS = {
     "management": "管理层与治理",
     "fundamentals": "经营基本面与护城河",
@@ -75,6 +95,70 @@ _DIMENSION_LABELS = {
     "a_share_structure": "A股资金结构与市场风格",
     "risk_quality": "财务质量与尾部风险",
 }
+
+
+def _parse_as_of_date(value: Optional[str]) -> Optional[date]:
+    if not value:
+        return None
+    text = str(value).strip()
+    m = re.search(r"(20\d{2}|19\d{2})[-/]?(\d{2})[-/]?(\d{2})", text)
+    if not m:
+        return None
+    try:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+
+
+def _latest_period_date(value: Any) -> Optional[str]:
+    """Extract the latest YYYY-MM-DD-like date from nested evidence payloads."""
+    candidates: List[date] = []
+
+    def walk(obj: Any) -> None:
+        if isinstance(obj, dict):
+            for v in obj.values():
+                walk(v)
+        elif isinstance(obj, (list, tuple)):
+            for v in obj:
+                walk(v)
+        elif isinstance(obj, (str, date, datetime)):
+            d = _parse_as_of_date(str(obj))
+            if d:
+                candidates.append(d)
+
+    walk(value)
+    return max(candidates).isoformat() if candidates else None
+
+
+def _stale_evidence(
+    evidence: List[EvidenceItem],
+    *,
+    today: Optional[date] = None,
+) -> List[Dict[str, Any]]:
+    today = today or datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    rows: List[Dict[str, Any]] = []
+    seen_categories = set()
+    for item in evidence:
+        max_age = _FRESHNESS_DAYS.get(item.category)
+        if max_age is None or item.category in seen_categories:
+            continue
+        as_of = _parse_as_of_date(item.as_of)
+        if as_of is None:
+            continue
+        age = (today - as_of).days
+        if age > max_age:
+            seen_categories.add(item.category)
+            rows.append(
+                {
+                    "category": item.category,
+                    "label": item.label,
+                    "as_of": as_of.isoformat(),
+                    "age_days": age,
+                    "max_age_days": max_age,
+                }
+            )
+    rows.sort(key=lambda x: x["age_days"], reverse=True)
+    return rows
 
 
 def _safe_json(value: Any) -> str:
@@ -164,6 +248,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         tier="B",
         kind="fact",
         value=fundamentals,
+        as_of=str(facts.get("finance_period") or facts.get("operate_period") or "") or None,
         tags=("financials", "customers", "suppliers", "cashflow", "working_capital", "receivables", "inventory"),
         url=source_map.get("finance") or source_map.get("operate"),
     )
@@ -187,6 +272,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         tier="B",
         kind="fact",
         value=rd_payload,
+        as_of=str(facts.get("operate_period") or facts.get("finance_period") or "") or None,
         tags=("rd", "patent", "technology"),
         url=source_map.get("operate"),
     )
@@ -249,6 +335,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         tier="B",
         kind="derived",
         value=profitability,
+        as_of=_latest_period_date((profitability or {}).get("periods") or []),
         tags=("margin", "roe", "debt"),
     )
 
@@ -261,6 +348,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         tier="B",
         kind="derived",
         value=market,
+        as_of=_latest_period_date(market),
         tags=("style", "position", "index"),
     )
 
@@ -376,6 +464,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         tier="B",
         kind="derived",
         value=margin,
+        as_of=str((margin or {}).get("latest_date") or "") or None,
         tags=("margin_financing", "leverage", "chip"),
     )
 
@@ -508,7 +597,11 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
     return out
 
 
-def evaluate_research_quality(evidence: List[EvidenceItem]) -> ResearchQuality:
+def evaluate_research_quality(
+    evidence: List[EvidenceItem],
+    *,
+    today: Optional[date] = None,
+) -> ResearchQuality:
     categories = {e.category for e in evidence}
     covered: List[str] = []
     missing: List[str] = []
@@ -532,6 +625,16 @@ def evaluate_research_quality(evidence: List[EvidenceItem]) -> ResearchQuality:
     )
 
     warnings: List[str] = []
+    stale = _stale_evidence(evidence, today=today)
+    if stale:
+        detail = "；".join(
+            f"{x['label']}截止{x['as_of']}（{x['age_days']}天前）"
+            for x in stale[:4]
+        )
+        warnings.append(
+            "存在已过新鲜度阈值的时点型证据：" + detail
+            + "。这些数据只能作历史背景，不能直接代表当前状态。"
+        )
     if coverage < 0.75:
         warnings.append("研究证据覆盖不足 75%，综合结论应降低置信度。")
     if "governance" not in categories and "primary" not in categories:
@@ -549,5 +652,6 @@ def evaluate_research_quality(evidence: List[EvidenceItem]) -> ResearchQuality:
         total_dimensions=len(_DIMENSION_REQUIREMENTS),
         high_grade_ratio=round(ratio, 3),
         missing_dimensions=[_DIMENSION_LABELS[d] for d in missing],
+        stale_evidence=stale,
         warnings=warnings,
     )
