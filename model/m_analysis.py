@@ -109,6 +109,9 @@ class AnalysisReport(BaseModel):
     a_share_structure: Optional[dict] = Field(
         default=None, description="A股公开机构持股、前十大流通股东与特殊资金类型"
     )
+    management_capital: Optional[dict] = Field(
+        default=None, description="管理层利益绑定、经营执行与5/10年资本分配长期账本"
+    )
     sentiment: Optional[dict] = Field(default=None, description="雪球讨论区情绪聚合 (看多/看空比例, 一致看多预警, 反向指标)")
     debate: Optional[dict] = Field(default=None, description="雪球多空辩论 (双方核心论点 + 历史验证统计 + 哪方更合理)")
     primary_evidence: List[dict] = Field(default_factory=list, description="巨潮等一手公告元数据")
