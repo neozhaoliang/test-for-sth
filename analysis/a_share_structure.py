@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -37,6 +37,7 @@ _SPECIAL_HOLDER_PATTERNS = {
 }
 
 _INSTITUTION_TYPES = ("基金", "全国社保", "QFII", "保险")
+_ETF_RE = re.compile(r"ETF|交易型开放式指数", re.I)
 
 
 def _bare_code(stock_code: str) -> str:
@@ -94,6 +95,23 @@ async def _fetch_institute_detail(code6: str, quarter_code: str):
         return None
 
 
+async def _fetch_unlock_queue(code6: str):
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                ak.stock_restricted_release_queue_em,
+                symbol=code6,
+            ),
+            timeout=_FETCH_TIMEOUT_S,
+        )
+    except Exception as e:
+        utils.logger.warning(
+            f"[a_share_structure] unlock queue {code6} failed: "
+            f"{type(e).__name__}: {str(e)[:140]}"
+        )
+        return None
+
+
 async def _fetch_top10(code6: str, report_date: str):
     try:
         return await asyncio.wait_for(
@@ -112,10 +130,13 @@ async def _fetch_top10(code6: str, report_date: str):
         return None
 
 
-def _summarize_institutions(df) -> List[Dict]:
+def _summarize_institutions(df) -> tuple[List[Dict], List[Dict], List[Dict]]:
     if df is None or df.empty:
-        return []
+        return [], [], []
     rows: List[Dict] = []
+    fund_details: List[Dict] = []
+    etf_details: List[Dict] = []
+
     for inst_type in _INSTITUTION_TYPES:
         sub = df[df["持股机构类型"] == inst_type] if "持股机构类型" in df.columns else None
         if sub is None or sub.empty:
@@ -139,7 +160,36 @@ def _summarize_institutions(df) -> List[Dict]:
                 "latest_shares": round(sum(latest_shares), 0) if latest_shares else None,
             }
         )
-    return rows
+
+        if inst_type == "基金":
+            details: List[Dict] = []
+            for _, r in sub.iterrows():
+                name = str(
+                    r.get("持股机构全称")
+                    or r.get("持股机构简称")
+                    or ""
+                ).strip()
+                if not name:
+                    continue
+                item = {
+                    "name": name,
+                    "code": str(r.get("持股机构代码") or ""),
+                    "latest_shares": _num(r.get("最新持股数")),
+                    "latest_float_ratio_pct": _num(r.get("最新占流通股比例")),
+                    "float_ratio_change_pct": _num(r.get("占流通股比例增幅")),
+                }
+                details.append(item)
+            details.sort(
+                key=lambda x: (
+                    x.get("latest_float_ratio_pct") is not None,
+                    x.get("latest_float_ratio_pct") or 0,
+                ),
+                reverse=True,
+            )
+            fund_details = details[:20]
+            etf_details = [x for x in details if _ETF_RE.search(x.get("name") or "")][:20]
+
+    return rows, fund_details, etf_details
 
 
 def _classify_holder(name: str) -> List[str]:
@@ -174,6 +224,58 @@ def _summarize_top10(df) -> tuple[List[Dict], Dict[str, List[Dict]]]:
     return rows, special
 
 
+def _summarize_unlocks(df, today: date) -> Dict:
+    if df is None or df.empty or "解禁时间" not in df.columns:
+        return {"upcoming_12m": [], "recent_6m": [], "max_upcoming_float_ratio_pct": None}
+
+    upcoming: List[Dict] = []
+    recent: List[Dict] = []
+    end = today + timedelta(days=365)
+    recent_start = today - timedelta(days=183)
+
+    for _, row in df.iterrows():
+        raw_date = row.get("解禁时间")
+        if raw_date is None:
+            continue
+        if isinstance(raw_date, datetime):
+            dt = raw_date.date()
+        elif isinstance(raw_date, date):
+            dt = raw_date
+        else:
+            try:
+                dt = datetime.strptime(str(raw_date)[:10], "%Y-%m-%d").date()
+            except ValueError:
+                continue
+        item = {
+            "date": dt.isoformat(),
+            "shareholders": int(_num(row.get("解禁股东数")) or 0) or None,
+            "unlock_shares": _num(row.get("解禁数量")),
+            "actual_unlock_shares": _num(row.get("实际解禁数量")),
+            "remaining_locked_shares": _num(row.get("未解禁数量")),
+            "actual_market_value_yuan": _num(row.get("实际解禁数量市值")),
+            "total_market_ratio_pct": _num(row.get("占总市值比例")),
+            "float_market_ratio_pct": _num(row.get("占流通市值比例")),
+            "type": str(row.get("限售股类型") or ""),
+        }
+        if today <= dt <= end:
+            upcoming.append(item)
+        elif recent_start <= dt < today:
+            recent.append(item)
+
+    upcoming.sort(key=lambda x: x["date"])
+    recent.sort(key=lambda x: x["date"], reverse=True)
+    ratios = [
+        x["float_market_ratio_pct"]
+        for x in upcoming
+        if x.get("float_market_ratio_pct") is not None
+    ]
+    return {
+        "upcoming_12m": upcoming[:10],
+        "recent_6m": recent[:10],
+        "max_upcoming_float_ratio_pct": round(max(ratios), 3) if ratios else None,
+    }
+
+
 async def get_a_share_structure(stock_code: str) -> Optional[Dict]:
     code6 = _bare_code(stock_code)
     if len(code6) != 6:
@@ -200,12 +302,16 @@ async def get_a_share_structure(stock_code: str) -> Optional[Dict]:
         selected = candidates[0]
 
     quarter_code, report_date = selected
-    top10_df = await _fetch_top10(code6, report_date)
+    top10_df, unlock_df = await asyncio.gather(
+        _fetch_top10(code6, report_date),
+        _fetch_unlock_queue(code6),
+    )
 
-    institution_summary = _summarize_institutions(institute_df)
+    institution_summary, fund_details, etf_details = _summarize_institutions(institute_df)
     top10, special = _summarize_top10(top10_df)
+    unlocks = _summarize_unlocks(unlock_df, today)
 
-    if not institution_summary and not top10:
+    if not institution_summary and not top10 and not unlocks.get("upcoming_12m") and not unlocks.get("recent_6m"):
         return None
 
     notes: List[str] = []
@@ -215,17 +321,26 @@ async def get_a_share_structure(stock_code: str) -> Optional[Dict]:
         notes.append("前十大流通股东中未识别到汇金/证金/国新/诚通；这不等于其一定未持有，只表示本期前十大未见。")
     if special.get("foreign"):
         notes.append("前十大流通股东中存在香港中央结算/QFII等可识别境外资金。")
+    if unlocks.get("max_upcoming_float_ratio_pct") is not None:
+        notes.append(
+            f"未来12个月单批最大解禁约占解禁前流通市值 "
+            f"{unlocks['max_upcoming_float_ratio_pct']}%；解禁是潜在供给，不等于股东一定卖出。"
+        )
 
     return {
         "report_period": report_date,
         "quarter_code": quarter_code,
         "institution_summary": institution_summary,
+        "fund_details": fund_details,
+        "etf_details": etf_details,
         "top10_free_holders": top10,
         "special_holders": special,
+        "unlock_supply": unlocks,
         "notes": notes,
         "source_tier": "B",
         "sources": [
             "AkShare stock_institute_hold_detail (Sina institutional holdings)",
             "AkShare stock_gdfx_free_top_10_em (Eastmoney top-10 free-float holders)",
+            "AkShare stock_restricted_release_queue_em (Eastmoney restricted-share unlocks)",
         ],
     }
