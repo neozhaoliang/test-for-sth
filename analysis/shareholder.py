@@ -21,13 +21,15 @@
 akshare 接口均以不带市场前缀的 6 位数字代码为入参。
 """
 
+import logging
 import time
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 
 import akshare as ak
 
-from tools.utils import utils
+
+logger = logging.getLogger("MediaCrawler")
 
 _BUYBACK_CACHE_TTL_SECONDS = 3600
 _buyback_cache: Optional[Tuple[float, "object"]] = None
@@ -78,7 +80,7 @@ async def get_shareholder_count_trend(
         detail = await asyncio.to_thread(ak.stock_zh_a_gdhs_detail_em, symbol=code6)
     except Exception as e:
         detail = None
-        utils.logger.warning(
+        logger.warning(
             f"[shareholder] stock_zh_a_gdhs_detail_em({stock_code}) failed: {e}"
         )
 
@@ -119,7 +121,7 @@ async def get_shareholder_count_trend(
     try:
         df = await asyncio.to_thread(ak.stock_zh_a_gdhs, symbol="最新")
     except Exception as e:
-        utils.logger.error(f"[shareholder] stock_zh_a_gdhs(最新) failed: {e}")
+        logger.error(f"[shareholder] stock_zh_a_gdhs(最新) failed: {e}")
         return None
 
     if df is None or df.empty:
@@ -161,7 +163,7 @@ async def get_dividend_history(
             ak.stock_history_dividend_detail, symbol=_bare_code(stock_code), indicator="分红"
         )
     except Exception as e:
-        utils.logger.error(f"[shareholder] stock_history_dividend_detail({stock_code}) failed: {e}")
+        logger.error(f"[shareholder] stock_history_dividend_detail({stock_code}) failed: {e}")
         return []
 
     if df is None or df.empty:
@@ -195,7 +197,7 @@ async def _get_buyback_df():
     try:
         df = await asyncio.to_thread(ak.stock_repurchase_em)
     except Exception as e:
-        utils.logger.error(f"[shareholder] stock_repurchase_em failed: {e}")
+        logger.error(f"[shareholder] stock_repurchase_em failed: {e}")
         return None
 
     _buyback_cache = (time.time(), df)
