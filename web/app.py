@@ -906,7 +906,9 @@ function renderEvidenceSection(report) {
             parts.push('机构数 ' + (x.institution_count_change >= 0 ? '+' : '') + x.institution_count_change);
           }
           return '<li>' + escapeHtml(x.type || '') + ': ' + escapeHtml(parts.join('，') || '可比数据不足') + '</li>';
-        }).join('') + '</ul></details>';
+        }).join('') + '</ul>' +
+        renderInstitutionChangeChart(qoq) +
+        '</details>';
     }
 
     const fundQoq = ash.fund_qoq || {};
@@ -1383,6 +1385,56 @@ function renderDimensionRadar(scores) {
     grid + axes +
     '<polygon points="' + poly + '" fill="#1a73e8" fill-opacity="0.20" stroke="#1a73e8" stroke-width="2"/>' +
     dots + labels + '</svg>';
+}
+
+function renderInstitutionChangeChart(rows) {
+  const data = (rows || []).filter(x =>
+    x.float_ratio_change_pp !== null && x.float_ratio_change_pp !== undefined
+  );
+  const fallback = !data.length
+    ? (rows || []).filter(x => x.shares_change_pct !== null && x.shares_change_pct !== undefined)
+    : [];
+  const source = data.length ? data : fallback;
+  if (!source.length) return '';
+
+  const useRatio = data.length > 0;
+  const values = source.map(x => Number(
+    useRatio ? x.float_ratio_change_pp : x.shares_change_pct
+  )).filter(Number.isFinite);
+  if (!values.length) return '';
+
+  const maxAbs = Math.max(0.1, ...values.map(Math.abs));
+  const W = 680, rowH = 34, top = 28, bottom = 24;
+  const H = top + bottom + source.length * rowH;
+  const labelW = 130, axisX = 390, halfW = 230;
+
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H +
+    '" width="100%" role="img" aria-label="机构季度持仓变化">';
+  svg += '<text x="' + axisX + '" y="14" text-anchor="middle" font-size="11" fill="#666">' +
+    (useRatio ? '占流通股比例变化（百分点）' : '持股数变化（%）') + '</text>';
+  svg += '<line x1="' + axisX + '" y1="' + (top - 6) + '" x2="' + axisX +
+    '" y2="' + (H - bottom + 2) + '" stroke="#aaa" stroke-width="1"/>';
+
+  source.forEach((x, i) => {
+    const value = Number(useRatio ? x.float_ratio_change_pp : x.shares_change_pct);
+    if (!Number.isFinite(value)) return;
+    const y = top + i * rowH + 7;
+    const width = Math.abs(value) / maxAbs * halfW;
+    const left = value >= 0 ? axisX : axisX - width;
+    svg += '<text x="' + (labelW - 8) + '" y="' + (y + 12) +
+      '" text-anchor="end" font-size="12" fill="#333">' +
+      escapeHtml(x.type || '') + '</text>';
+    svg += '<rect class="holder-mark" x="' + left.toFixed(1) + '" y="' + y +
+      '" width="' + Math.max(1, width).toFixed(1) + '" height="16" rx="2" ' +
+      'fill="currentColor" fill-opacity="0.55" data-tip="' +
+      escapeHtml((x.type || '') + ' ' + (value >= 0 ? '+' : '') + value +
+        (useRatio ? ' pct' : '%')) + '"/>';
+    svg += '<text x="' + (value >= 0 ? axisX + width + 6 : axisX - width - 6).toFixed(1) +
+      '" y="' + (y + 12) + '" text-anchor="' + (value >= 0 ? 'start' : 'end') +
+      '" font-size="11" fill="#444">' + (value >= 0 ? '+' : '') + value + '</text>';
+  });
+  svg += '</svg>';
+  return '<div style="margin-top:8px;">' + svg + '</div>';
 }
 
 function renderDimensionBars(scores) {
