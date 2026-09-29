@@ -1206,49 +1206,6 @@ def _build_valuation_history_block(data: Optional[Dict]) -> str:
         )
     else:
         lines.append("PB 分位: 暂缺")
-    funds = data.get("fund_details") or []
-    if funds:
-        lines.append("主要公募基金持仓 (按最新占流通股比例排序):")
-        for f in funds[:8]:
-            change = f.get("float_ratio_change_pct")
-            seg = f"  · {f.get('name')}: 占流通股 {f.get('latest_float_ratio_pct')}%"
-            if change is not None:
-                seg += f"，较前期 {change:+}%"
-            lines.append(seg)
-
-    etfs = data.get("etf_details") or []
-    if etfs:
-        lines.append("可识别ETF持仓:")
-        for f in etfs[:8]:
-            change = f.get("float_ratio_change_pct")
-            seg = f"  · {f.get('name')}: 占流通股 {f.get('latest_float_ratio_pct')}%"
-            if change is not None:
-                seg += f"，较前期 {change:+}%"
-            lines.append(seg)
-    else:
-        lines.append("可识别ETF持仓: 本期机构明细中未识别到ETF名称")
-
-    unlocks = data.get("unlock_supply") or {}
-    upcoming = unlocks.get("upcoming_12m") or []
-    if upcoming:
-        lines.append("未来12个月限售解禁供给:")
-        for x in upcoming[:8]:
-            lines.append(
-                f"  · {x.get('date')}: 解禁数量 {x.get('unlock_shares')} 股，"
-                f"占流通市值比例 {x.get('float_market_ratio_pct')}%，"
-                f"类型 {x.get('type') or '未知'}"
-            )
-    else:
-        lines.append("未来12个月限售解禁: 未见记录或数据暂缺")
-    recent_unlock = unlocks.get("recent_6m") or []
-    if recent_unlock:
-        lines.append("近6个月已发生解禁:")
-        for x in recent_unlock[:5]:
-            lines.append(
-                f"  · {x.get('date')}: 实际解禁 {x.get('actual_unlock_shares')} 股，"
-                f"占流通市值比例 {x.get('float_market_ratio_pct')}%"
-            )
-
     for note in data.get("notes") or []:
         lines.append(f"注: {note}")
     return "\n".join(lines)
@@ -1335,6 +1292,49 @@ def _build_a_share_structure_block(data: Optional[Dict]) -> str:
             lines.append("本期新见公募: " + "；".join(str(x.get("name")) for x in new[:5]))
         if exited:
             lines.append("本期明细未再见公募: " + "；".join(str(x.get("name")) for x in exited[:5]))
+
+    funds = data.get("fund_details") or []
+    if funds:
+        lines.append("主要公募基金持仓 (按最新占流通股比例排序):")
+        for f in funds[:8]:
+            change = f.get("float_ratio_change_pct")
+            seg = f"  · {f.get('name')}: 占流通股 {f.get('latest_float_ratio_pct')}%"
+            if change is not None:
+                seg += f"，数据源报告增幅 {change:+}%"
+            lines.append(seg)
+
+    etfs = data.get("etf_details") or []
+    if etfs:
+        lines.append("可识别ETF持仓:")
+        for f in etfs[:8]:
+            change = f.get("float_ratio_change_pct")
+            seg = f"  · {f.get('name')}: 占流通股 {f.get('latest_float_ratio_pct')}%"
+            if change is not None:
+                seg += f"，数据源报告增幅 {change:+}%"
+            lines.append(seg)
+    else:
+        lines.append("可识别ETF持仓: 本期机构明细中未识别到ETF名称")
+
+    unlocks = data.get("unlock_supply") or {}
+    upcoming = unlocks.get("upcoming_12m") or []
+    if upcoming:
+        lines.append("未来12个月限售解禁供给:")
+        for x in upcoming[:8]:
+            lines.append(
+                f"  · {x.get('date')}: 解禁数量 {x.get('unlock_shares')} 股，"
+                f"占流通市值比例 {x.get('float_market_ratio_pct')}%，"
+                f"类型 {x.get('type') or '未知'}"
+            )
+    else:
+        lines.append("未来12个月限售解禁: 未见记录或数据暂缺")
+    recent_unlock = unlocks.get("recent_6m") or []
+    if recent_unlock:
+        lines.append("近6个月已发生解禁:")
+        for x in recent_unlock[:5]:
+            lines.append(
+                f"  · {x.get('date')}: 实际解禁 {x.get('actual_unlock_shares')} 股，"
+                f"占流通市值比例 {x.get('float_market_ratio_pct')}%"
+            )
 
     special = data.get("special_holders") or {}
     labels = {
