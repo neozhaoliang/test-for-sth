@@ -36,6 +36,7 @@ from analysis.fundamentals import get_ths_fundamentals
 from analysis.industry import get_industry_comparison
 from analysis.knowledge_base import ensure_loaded as ensure_knowledge_base_loaded
 from analysis.margin import get_margin_signal
+from analysis.management_capital import build_management_capital_record
 from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.primary_sources import get_cninfo_primary_evidence
@@ -141,7 +142,10 @@ A股公开资金结构 (基金/社保/QFII/保险 + 前十大流通股东中特�
 知识库中该时期的资金与风格真实记录 (老木匠、军师祭咖啡等的专栏与发帖摘要中关于筹码/资金面/风格切换/政策偏好的记录):
 {kb_fund_flow_block}
 
-治理与股东回报记录 (管理层人品/美誉度只能基于这里的客观事实推断: 任职年限、薪酬与持股、分红回购、再融资记录、减持/处罚/问询记录):
+管理层与长期资本分配账本 (同一底层事件在管理层与股东回报分析中共享，只计一次影响):
+{management_capital_block}
+
+治理原始记录 (高管画像/再融资/减持/处罚/问询等，用于交叉核对，不得凭此直接贴“人品”标签):
 {governance_block}
 
 盈利能力与成本弹性 (近几个报告期毛利率/主营业务利润率、净利率、ROE、资产负债率的具体走势):
@@ -206,6 +210,7 @@ class AnalysisInputs:
     freight_signal: Optional[Dict] = None
     primary_evidence: List[Dict] = field(default_factory=list)
     a_share_structure: Optional[Dict] = None
+    management_capital: Optional[Dict] = None
 
 
 def _credibility_note(hit_rate: float, correct: int, incorrect: int) -> str:
@@ -465,6 +470,90 @@ def _build_rd_block(
             f"  董事长学历 {executive_profile.get('chairman_education')}"
             if executive_profile.get("chairman_education") else "  董事长学历 暂缺"
         )
+    return "\n".join(lines)
+
+
+def _build_management_capital_block(data: Optional[Dict]) -> str:
+    if not data:
+        return "暂缺 (本次未能构建长期资本分配账本)"
+    lines: List[str] = []
+    alignment = data.get("alignment") or {}
+    parts = []
+    if alignment.get("chairman"):
+        parts.append(f"董事长 {alignment['chairman']}")
+    if alignment.get("joined_year"):
+        tenure = alignment.get("tenure_years")
+        parts.append(
+            f"{alignment['joined_year']}年加入公司"
+            + (f"，至今约 {tenure} 年" if tenure is not None else "")
+        )
+    if alignment.get("chairman_salary_wan") is not None:
+        parts.append(f"年薪 {alignment['chairman_salary_wan']} 万元")
+    if alignment.get("chairman_shares"):
+        parts.append(f"持股 {alignment['chairman_shares']}")
+    lines.append("管理层利益绑定: " + ("；".join(parts) if parts else "暂缺"))
+
+    execution = data.get("execution") or {}
+    if execution:
+        seg = [
+            f"观察期 {execution.get('period_start')}~{execution.get('period_end')}",
+        ]
+        if execution.get("roe_avg_pct") is not None:
+            seg.append(
+                f"ROE均值 {execution.get('roe_avg_pct')}%，最低 {execution.get('roe_min_pct')}%，"
+                f"最新 {execution.get('roe_latest_pct')}%"
+            )
+        if execution.get("net_profit_growth_observations"):
+            seg.append(
+                f"净利润增速为正 {execution.get('net_profit_growth_positive_periods')}/"
+                f"{execution.get('net_profit_growth_observations')} 个观察期"
+            )
+        if execution.get("net_margin_change_pp") is not None:
+            seg.append(
+                f"净利率较观察期起点变化 {execution.get('net_margin_change_pp'):+} 个百分点"
+            )
+        lines.append("经营执行记录: " + "；".join(seg))
+    else:
+        lines.append("经营执行记录: 暂缺")
+
+    for key, label in (("five_year", "近5年"), ("ten_year", "近10年")):
+        row = data.get(key) or {}
+        if not row:
+            continue
+        lines.append(
+            f"{label}资本分配: 分红覆盖 {row.get('dividend_years_count')}/{row.get('window_years')} 个日历年，"
+            f"累计每10股现金分红 {row.get('cash_dividend_per_10_total')} 元；"
+            f"回购记录 {row.get('buyback_records')} 次，已回购金额合计 "
+            f"{_yi(row.get('buyback_actual_amount_yuan'))}；"
+            f"再融资记录 {row.get('refinancing_records')} 次；"
+            f"巨潮减持公告 {row.get('insider_reduction_announcements')} 条；"
+            f"处罚/警示/问询等治理负面公告 {row.get('governance_negative_announcements')} 条"
+        )
+
+    reductions = data.get("recent_insider_reduction_events") or []
+    if reductions:
+        lines.append("近期减持公告:")
+        for item in reductions[:5]:
+            lines.append(
+                f"  · {item.get('published_at') or ''} {item.get('title') or ''}"
+                + (f" | {item.get('url')}" if item.get("url") else "")
+            )
+
+    negatives = data.get("recent_governance_negative_events") or []
+    if negatives:
+        lines.append("近期治理负面公告:")
+        for item in negatives[:5]:
+            lines.append(
+                f"  · {item.get('published_at') or ''} {item.get('title') or ''}"
+                + (f" | {item.get('url')}" if item.get("url") else "")
+            )
+
+    for note in data.get("notes") or []:
+        lines.append(f"注: {note}")
+    lines.append(
+        "口径说明: 这是一份事实账本，不等同于对个人品德的判断；"
+        "管理层可信度只能从长期行为记录、利益绑定和经营兑现中谨慎推断。"
+    )
     return "\n".join(lines)
 
 
@@ -1107,6 +1196,7 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         rd_block=_build_rd_block(inputs.fundamentals, inputs.executive_profile, inputs.rd_team),
         primary_evidence_block=_build_primary_evidence_block(inputs.primary_evidence),
         major_events_block=_build_major_events_block(inputs.major_events),
+        management_capital_block=_build_management_capital_block(inputs.management_capital),
         governance_block=_build_governance_block(
             inputs.refinancing_history, inputs.executive_profile, inputs.governance_alerts
         ),
@@ -1189,7 +1279,7 @@ _ANALYSIS_TOOL_NAMES = [
 _ANALYSIS_TOOLS = [
     _analysis_tool(
         "analyze_management",
-        "管理层人品与能力: 优先引用'一手公告证据'，并用'治理与股东回报记录'块的客观事实交叉核对 (高管画像/任职年限/薪酬持股/减持处罚/再融资/分红回购记录) 评价管理层是否值得信任; 该块没有的记录写'该维度数据暂缺', 禁止凭印象评价人品。",
+        "管理层治理可信度与执行能力: 优先引用'管理层与长期资本分配账本'，再用'一手公告证据'和'治理原始记录'交叉核对。分开看利益绑定(任期/持股)、经营执行(ROE/利润增速/净利率)、资本分配(5/10年分红回购再融资)与治理负面记录(减持/处罚/问询)。不得凭名声、人设或学历直接评价人品；事实不足就写暂缺。",
     ),
     _analysis_tool(
         "analyze_business_fundamentals",
@@ -1221,7 +1311,7 @@ _ANALYSIS_TOOLS = [
     ),
     _analysis_tool(
         "analyze_shareholder_returns",
-        "股东回报历史: 优先核对'一手公告证据'中的权益分派/股权变动/再融资，再结合第三方历史数据。正面=持续分红+真实回购 (引用分红/回购历史块的具体数字); 负面=定增/配股、大股东减持、无分红、低息借款给大股东等 (引用'治理与股东回报记录'块的再融资与警示事件); 该块没有的记录写暂缺。",
+        "股东回报历史: 以'管理层与长期资本分配账本'的5年/10年统计为主，并用一手公告核对。必须同时看分红覆盖年数与累计金额、真实回购、再融资次数、大股东/董监高减持和治理负面记录；不能因为某一年高分红就概括为长期股东友好。同一事件若已用于管理层分析，最终综合时只计一次。",
     ),
     _analysis_tool(
         "analyze_growth_elasticity",
@@ -1592,6 +1682,15 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         executive_profile = fundamentals.pop("executive_profile", None)
         governance_alerts = fundamentals.pop("governance_alerts", None) or []
 
+    management_capital = build_management_capital_record(
+        dividend_history=dividend_history,
+        buyback_history=buyback_history,
+        refinancing_history=refinancing_history,
+        primary_evidence=primary_evidence,
+        executive_profile=executive_profile,
+        profitability_trend=profitability_trend,
+    )
+
     inputs = AnalysisInputs(
         stock_code=stock_code,
         stock_name=stock_name,
@@ -1617,6 +1716,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         margin_signal=margin_signal,
         primary_evidence=primary_evidence,
         a_share_structure=a_share_structure,
+        management_capital=management_capital,
     )
 
     # 雪球个股数据必须借道已登录的浏览器会话，且只在会话存活期内可用；
@@ -1687,6 +1787,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         rd_team=rd_team,
         xueqiu_stock=inputs.xueqiu_stock,
         a_share_structure=a_share_structure,
+        management_capital=management_capital,
         debate=inputs.debate,
         sentiment=inputs.sentiment,
         primary_evidence=primary_evidence,
