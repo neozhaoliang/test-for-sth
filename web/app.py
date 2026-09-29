@@ -595,6 +595,50 @@ function pctStr(v) {
   return (v === null || v === undefined) ? '暂缺' : v + '%';
 }
 
+function renderWorkingCapitalGrowthChart(facts) {
+  const candidates = [
+    ['营收', facts.revenue_yoy_pct],
+    ['应收', facts.accounts_receivable_yoy_pct],
+    ['存货', facts.inventory_yoy_pct],
+  ].filter(([, v]) => v !== null && v !== undefined && Number.isFinite(Number(v)));
+  if (candidates.length < 2) return '';
+
+  const values = candidates.map(([, v]) => Number(v));
+  const maxAbs = Math.max(5, ...values.map(Math.abs));
+  const W = 620, H = 205, padL = 48, padR = 20, padT = 24, padB = 42;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const zeroY = padT + plotH / 2;
+  const scale = (plotH / 2 - 10) / maxAbs;
+  const barW = Math.min(90, plotW / (candidates.length * 1.8));
+  const gap = plotW / candidates.length;
+
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H +
+    '" width="100%" role="img" aria-label="营收应收存货同比增速对比">';
+  svg += '<line x1="' + padL + '" y1="' + zeroY + '" x2="' + (W - padR) +
+    '" y2="' + zeroY + '" stroke="#aaa" stroke-width="1"/>';
+  svg += '<text x="' + (padL - 6) + '" y="' + (zeroY + 4) +
+    '" text-anchor="end" font-size="10" fill="#666">0%</text>';
+
+  candidates.forEach(([name, raw], i) => {
+    const value = Number(raw);
+    const h = Math.abs(value) * scale;
+    const x = padL + gap * (i + 0.5) - barW / 2;
+    const y = value >= 0 ? zeroY - h : zeroY;
+    svg += '<rect class="holder-mark" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) +
+      '" width="' + barW.toFixed(1) + '" height="' + Math.max(1, h).toFixed(1) +
+      '" rx="3" fill="currentColor" fill-opacity="0.55" data-tip="' +
+      escapeHtml(name + '同比 ' + (value >= 0 ? '+' : '') + value + '%') + '"/>';
+    svg += '<text x="' + (x + barW / 2).toFixed(1) + '" y="' +
+      (value >= 0 ? y - 5 : y + h + 13).toFixed(1) +
+      '" text-anchor="middle" font-size="11" fill="#444">' +
+      (value >= 0 ? '+' : '') + value + '%</text>';
+    svg += '<text x="' + (x + barW / 2).toFixed(1) + '" y="' + (H - 14) +
+      '" text-anchor="middle" font-size="12" fill="#333">' + escapeHtml(name) + '</text>';
+  });
+  svg += '</svg>';
+  return svg;
+}
+
 function renderFundamentalsBlock(f) {
   if (!f || !f.facts) {
     return '<div class="evidence-block missing"><b>结构性事实:</b> 暂缺 (本次未能取到同花顺 F10 数据)</div>';
@@ -633,6 +677,13 @@ function renderFundamentalsBlock(f) {
 
   let html = '<div class="evidence-block"><b>结构性事实 (同花顺 F10，公司定期报告原文):</b><ul>' +
     rows.map(([k, v]) => '<li>' + k + ': ' + escapeHtml(String(v)) + '</li>').join('') + '</ul>';
+
+  const wcChart = renderWorkingCapitalGrowthChart(x);
+  if (wcChart) {
+    html += '<div style="margin-top:8px"><b>营运资金压力：营收 vs 应收/存货同比增速</b><br>' +
+      wcChart +
+      '<div class="credibility-note">应收或存货增速长期显著高于营收时，需要进一步解释回款质量、渠道压货或库存积压；单一期不能独立定性。</div></div>';
+  }
 
   const series = x.holder_count_series || [];
   if (series.length >= 2) {
