@@ -802,6 +802,28 @@ function renderEvidenceSection(report) {
     html += '<div class="evidence-block missing"><b>估值:</b> 暂缺 (本次未能取到估值数据)</div>';
   }
 
+  const vh = report.valuation_history;
+  if (vh) {
+    const peText = (vh.pe_percentiles || []).map(x =>
+      x.years + '年 ' + x.percentile + '%分位').join('，');
+    const pbText = (vh.pb_percentiles || []).map(x =>
+      x.years + '年 ' + x.percentile + '%分位').join('，');
+    html += '<div class="evidence-block"><b>历史估值位置:</b> 当前 PE(TTM) ' +
+      (vh.current_pe_ttm === null || vh.current_pe_ttm === undefined ? '暂缺' : vh.current_pe_ttm) +
+      '，PB ' + (vh.current_pb === null || vh.current_pb === undefined ? '暂缺' : vh.current_pb) +
+      (peText ? '<br>PE: ' + escapeHtml(peText) : '') +
+      (pbText ? '<br>PB: ' + escapeHtml(pbText) : '');
+    if (vh.history_monthly && vh.history_monthly.length >= 6) {
+      html += '<br>' + renderValuationHistoryChart(vh.history_monthly);
+    }
+    (vh.notes || []).forEach(n => {
+      html += '<div class="credibility-note">· ' + escapeHtml(n) + '</div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div class="evidence-block missing"><b>历史估值位置:</b> 暂缺</div>';
+  }
+
   html += renderFundamentalsBlock(report.fundamentals);
   html += renderXueqiuBlock(report.xueqiu_stock);
 
@@ -1045,6 +1067,77 @@ function renderDimensionRadar(scores) {
     dots + labels + '</svg>';
 }
 
+function renderDimensionBars(scores) {
+  const rows = scores || [];
+  const W = 720, rowH = 34, top = 22, bottom = 24;
+  const H = top + bottom + rows.length * rowH;
+  const labelW = 150, axisX = 430, halfW = 245;
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="十二维度倾向条形图">';
+  svg += '<line x1="' + axisX + '" y1="' + (top - 8) + '" x2="' + axisX + '" y2="' + (H - bottom + 2) +
+    '" stroke="#aaa" stroke-width="1"/>';
+  svg += '<text x="' + (axisX - halfW) + '" y="13" font-size="11" fill="#666">-10 利空</text>' +
+    '<text x="' + (axisX + halfW - 36) + '" y="13" font-size="11" fill="#666">+10 利多</text>';
+  rows.forEach((s, i) => {
+    const y = top + i * rowH + 8;
+    const score = Math.max(-10, Math.min(10, Number(s.score) || 0));
+    const width = Math.abs(score) / 10 * halfW;
+    const x = score >= 0 ? axisX : axisX - width;
+    const fill = score >= 0 ? '#d93025' : '#188038';
+    svg += '<text x="' + (labelW - 8) + '" y="' + (y + 12) + '" text-anchor="end" font-size="12" fill="#333">' +
+      escapeHtml(s.dimension || '') + '</text>';
+    svg += '<rect class="holder-mark" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) +
+      '" width="' + Math.max(1, width).toFixed(1) + '" height="16" rx="2" fill="' + fill +
+      '" fill-opacity="0.78" data-tip="' + escapeHtml(s.note || '') + '"/>';
+    svg += '<text x="' + (score >= 0 ? axisX + width + 6 : axisX - width - 6).toFixed(1) +
+      '" y="' + (y + 12) + '" text-anchor="' + (score >= 0 ? 'start' : 'end') +
+      '" font-size="11" font-weight="bold" fill="' + fill + '">' +
+      (score > 0 ? '+' : '') + score + '</text>';
+  });
+  svg += '</svg>';
+  return svg;
+}
+
+function renderValuationHistoryChart(data) {
+  const rows = (data || []).filter(x => x.pe_ttm !== null && x.pe_ttm !== undefined && x.pe_ttm > 0);
+  if (rows.length < 3) return '';
+  const vals = rows.map(x => Number(x.pe_ttm)).filter(Number.isFinite).sort((a, b) => a - b);
+  if (vals.length < 3) return '';
+  const q = p => vals[Math.min(vals.length - 1, Math.max(0, Math.floor((vals.length - 1) * p)))];
+  let lo = q(0.05), hi = q(0.95);
+  if (!(hi > lo)) { lo = vals[0]; hi = vals[vals.length - 1] || lo + 1; }
+  if (!(hi > lo)) hi = lo + 1;
+  const W = 680, H = 220, padL = 52, padR = 18, padT = 18, padB = 34;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const xOf = i => padL + (rows.length === 1 ? 0 : i / (rows.length - 1)) * plotW;
+  const yOf = v => {
+    const clipped = Math.max(lo, Math.min(hi, v));
+    return padT + plotH - (clipped - lo) / (hi - lo) * plotH;
+  };
+  const points = rows.map((r, i) => xOf(i).toFixed(1) + ',' + yOf(Number(r.pe_ttm)).toFixed(1)).join(' ');
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="PE历史走势">';
+  for (let i = 0; i <= 4; i++) {
+    const v = lo + (hi - lo) * i / 4;
+    const y = yOf(v);
+    svg += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) +
+      '" y2="' + y.toFixed(1) + '" stroke="#eee"/>' +
+      '<text x="' + (padL - 6) + '" y="' + (y + 4).toFixed(1) +
+      '" text-anchor="end" font-size="10" fill="#666">' + v.toFixed(1) + '</text>';
+  }
+  svg += '<polyline points="' + points + '" fill="none" stroke="#1a73e8" stroke-width="2"/>';
+  const last = rows[rows.length - 1];
+  svg += '<circle class="holder-mark" cx="' + xOf(rows.length - 1).toFixed(1) +
+    '" cy="' + yOf(Number(last.pe_ttm)).toFixed(1) + '" r="4" fill="#1a73e8" data-tip="' +
+    escapeHtml(last.date + ' PE(TTM) ' + last.pe_ttm) + '"/>';
+  svg += '<text x="' + padL + '" y="' + (H - 10) + '" font-size="10" fill="#666">' +
+    escapeHtml(rows[0].date) + '</text>' +
+    '<text x="' + (W - padR) + '" y="' + (H - 10) + '" text-anchor="end" font-size="10" fill="#666">' +
+    escapeHtml(last.date) + '</text>' +
+    '<text x="' + (W / 2) + '" y="12" text-anchor="middle" font-size="11" fill="#666">' +
+    'PE(TTM) 月度历史（纵轴按5%~95%分位裁剪显示）</text>';
+  svg += '</svg>';
+  return svg;
+}
+
 function attachRadarTooltips() {
   const tip = document.getElementById('radarTip');
   if (!tip) return;
@@ -1161,8 +1254,10 @@ function renderResult(report) {
   }
 
   if (summary.dimension_scores && summary.dimension_scores.length >= 6) {
-    html += '<div class="evidence-block"><b>十二维度评分 (-10 利空 ~ +10 利多, 悬停顶点看理由):</b><br>' +
-      renderDimensionRadar(summary.dimension_scores) + '</div>';
+    html += '<div class="evidence-block"><b>十二维度倾向 (-10 利空 ~ +10 利多):</b><br>' +
+      renderDimensionBars(summary.dimension_scores) +
+      '<details style="margin-top:8px;"><summary style="cursor:pointer;">查看雷达图</summary>' +
+      renderDimensionRadar(summary.dimension_scores) + '</details></div>';
   }
 
   html += renderEvidenceSection(report);
