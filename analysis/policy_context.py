@@ -137,9 +137,11 @@ def build_policy_topics(
 ) -> Dict[str, Tuple[str, ...]]:
     topics: Dict[str, Tuple[str, ...]] = {}
 
-    # Rates are broadly relevant, but trade/FX/war topics are included only when there is a
-    # plausible exposure path (overseas business, commodity cycle, technology supply chain).
-    topics["rates_liquidity"] = _COMMON_TOPICS["rates_liquidity"]
+    # Current rate levels are already supplied by macro_rates.  News about rate/liquidity
+    # changes is kept here only for businesses whose economics are especially rate-sensitive,
+    # avoiding generic macro headlines flooding every company's policy block.
+    if archetype in {"financial", "stable_yield"}:
+        topics["rates_liquidity"] = _COMMON_TOPICS["rates_liquidity"]
     topics.update(_ARCHETYPE_TOPICS.get(archetype, {}))
 
     overseas = False
@@ -244,11 +246,12 @@ def filter_policy_event_clues(
         text = f"{row.get('title') or ''} {row.get('summary') or ''}"
         matched_topics, matched_terms = _match_topics(text, topics)
         company_hits = [term for term in company_terms if term in text]
-        if not matched_topics and not company_hits:
+        # This module is specifically policy/geopolitical context.  Merely naming the company
+        # is not enough; ordinary earnings/product news belongs elsewhere.
+        if not matched_topics:
             continue
 
         score = len(matched_topics) * 2 + len(matched_terms) * 0.25 + len(company_hits) * 3
-        # Company-specific news needs either a policy/geopolitical topic or direct company hit.
         item = dict(row)
         item["matched_topics"] = matched_topics
         item["matched_terms"] = list(dict.fromkeys(matched_terms + company_hits))
