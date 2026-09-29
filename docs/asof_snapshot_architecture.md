@@ -63,6 +63,8 @@ analysis.research_context.SOURCE_TEMPORAL_CAPABILITIES
 | market_context | AS_OF_SAFE | 个股和主要指数都先截断到 `as_of`，再计算 YTD/半年/52周/历史区间 |
 | valuation_history | AS_OF_SAFE | PE/PB 历史序列在本地按 `date <= as_of` 截断 |
 | primary_evidence | AS_OF_SAFE | 巨潮公告查询以 `as_of` 为截止日期，并再次本地过滤发布日期 |
+| macro_rates | AS_OF_SAFE | Fed目标利率、美债10Y、LPR先截到 `as_of`，再相对该日判断新鲜度 |
+| margin | AS_OF_SAFE | 交易所融资明细从 `as_of` 向前回溯最近交易日 |
 
 当前仍阻断 historical：
 
@@ -73,8 +75,6 @@ analysis.research_context.SOURCE_TEMPORAL_CAPABILITIES
 | shareholder_count | 有历史记录，但尚未严格处理披露可用日期 |
 | dividend_buyback | 事件尚未统一按公告可用日过滤 |
 | a_share_structure | 机构季度持仓必须按披露日而不是季度末判断 |
-| margin | 当前默认取最新融资盘 |
-| macro_rates | 最新公布值尚未做 vintage/release-date 历史化 |
 | industry_cycle | 商品/运价/行业数据尚未统一接受 as_of |
 | xueqiu_live | 当前浏览器抓的是今天讨论区 |
 | kol_knowledge | 知识卡尚未统一过滤原始发布日期 <= as_of |
