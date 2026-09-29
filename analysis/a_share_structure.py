@@ -22,7 +22,7 @@ import akshare as ak
 from tools.utils import utils
 
 
-_FETCH_TIMEOUT_S = 30
+_FETCH_TIMEOUT_S = 15
 
 _SPECIAL_HOLDER_PATTERNS = {
     "national_team": re.compile(
@@ -185,7 +185,7 @@ async def get_a_share_structure(stock_code: str) -> Optional[Dict]:
 
     # Direct institution-detail endpoint is stock-specific; try newest completed periods
     # until one has disclosed data.
-    for quarter_code, report_date in _quarter_candidates(today):
+    for quarter_code, report_date in _quarter_candidates(today, limit=3):
         df = await _fetch_institute_detail(code6, quarter_code)
         if df is not None and not df.empty:
             selected = (quarter_code, report_date)
