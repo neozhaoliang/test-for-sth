@@ -101,7 +101,7 @@ _FACTOR_RULES = {
 _REQUIRED_CATEGORIES = {
     "analyze_management": {"governance", "shareholder_return", "primary"},
     "analyze_business_fundamentals": {"fundamentals", "profitability"},
-    "analyze_rd_capability": {"rd"},
+    "analyze_rd_capability": {"rd_team", "rd"},
     "analyze_chip_flow": {"shareholder_count", "margin"},
     "analyze_price_position": {"valuation_history", "valuation", "market_context"},
     "analyze_cycle_position": {"cycle_signal", "industry"},
