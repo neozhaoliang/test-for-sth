@@ -1103,12 +1103,36 @@ function renderEvidenceSection(report) {
 
   const cs = report.commodity_signal;
   if (cs) {
-    html += '<div class="evidence-block"><b>大宗商品价差/汇率 (周期性矿业股):</b> 沪铜 ' + cs.sh_copper_price + ' ' + escapeHtml(cs.sh_copper_unit) +
-      '，COMEX铜 ' + cs.comex_copper_price + ' ' + escapeHtml(cs.comex_copper_unit) +
-      '，人民币汇率趋势: ' + escapeHtml(cs.rmb_trend || '暂缺') +
-      (cs.note ? '<br>' + escapeHtml(cs.note) : '') + '</div>';
+    html += '<div class="evidence-block"><b>周期商品锚 (' + escapeHtml(cs.route || '未分类') +
+      (cs.as_of ? '，截至 ' + escapeHtml(cs.as_of) : '') + '):</b><ul>';
+    (cs.anchors || []).forEach(a => {
+      let s = escapeHtml(a.name || a.symbol || '') + ': ' +
+        (a.latest === null || a.latest === undefined ? '暂缺' : a.latest + ' ' + escapeHtml(a.unit || ''));
+      if (a.change_20d_pct !== null && a.change_20d_pct !== undefined) {
+        s += '，20日 ' + (a.change_20d_pct >= 0 ? '+' : '') + a.change_20d_pct + '%';
+      }
+      if (a.change_60d_pct !== null && a.change_60d_pct !== undefined) {
+        s += '，60日 ' + (a.change_60d_pct >= 0 ? '+' : '') + a.change_60d_pct + '%';
+      }
+      if (a.position_1y_pct !== null && a.position_1y_pct !== undefined) {
+        s += '，1年位置 ' + a.position_1y_pct + '%';
+      }
+      html += '<li>' + s + '</li>';
+    });
+    const copper = cs.copper_cross_market || {};
+    if (Object.keys(copper).length) {
+      html += '<li>铜产业内外盘背景：沪铜 ' +
+        (copper.sh_copper_price === null || copper.sh_copper_price === undefined ? '暂缺' : copper.sh_copper_price + ' ' + escapeHtml(copper.sh_copper_unit || '')) +
+        '；COMEX铜 ' +
+        (copper.comex_copper_price === null || copper.comex_copper_price === undefined ? '暂缺' : copper.comex_copper_price + ' ' + escapeHtml(copper.comex_copper_unit || '')) +
+        '</li>';
+    }
+    html += '</ul>' +
+      '<div class="credibility-note">' +
+      escapeHtml(cs.note || '期货连续合约仅作周期方向代理，不等同公司实际结算价。') +
+      '</div></div>';
   } else {
-    html += '<div class="evidence-block missing"><b>大宗商品价差/汇率:</b> 暂缺 (非周期性矿业股，或行业归属数据未能取到)</div>';
+    html += '<div class="evidence-block missing"><b>周期商品锚:</b> 暂缺；未匹配到可靠产品代理时不拿其他商品价格替代</div>';
   }
 
   const mc = report.market_context;
