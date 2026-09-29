@@ -73,6 +73,7 @@ jobs:
             store/bilibili/__init__.py \
             tools/live_public_acceptance.py \
             tools/live_report_acceptance.py \
+            tools/live_historical_acceptance.py \
             tools/snapshot_cli.py \
             web/app.py
 
