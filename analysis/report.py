@@ -45,6 +45,8 @@ from analysis.point_in_time_financials import (
     to_historical_profitability,
 )
 from analysis.point_in_time_ownership import get_point_in_time_ownership
+from analysis.point_in_time_shareholder import get_point_in_time_shareholder_trend
+from analysis.point_in_time_capital_returns import build_point_in_time_capital_returns
 from analysis.policy_context import get_policy_event_context
 from analysis.realtime_price import get_historical_quote, get_realtime_quote, get_stock_name
 from analysis.rd_team import get_rd_team_composition
@@ -128,12 +130,18 @@ async def generate_report(
     if historical_mode:
         pit_financials_task = get_point_in_time_financials(stock_code, request.as_of)
         ownership_task = get_point_in_time_ownership(stock_code, request.as_of)
+        shareholder_task = get_point_in_time_shareholder_trend(stock_code, request.as_of)
+        dividend_task = asyncio.sleep(0, result=[])
+        buyback_task = asyncio.sleep(0, result=[])
         fundamentals_task = asyncio.sleep(0, result=None)
         profitability_task = asyncio.sleep(0, result=None)
         live_a_share_structure_task = asyncio.sleep(0, result=None)
     else:
         pit_financials_task = asyncio.sleep(0, result=None)
         ownership_task = asyncio.sleep(0, result=None)
+        shareholder_task = get_shareholder_count_trend(stock_code)
+        dividend_task = get_dividend_history(stock_code)
+        buyback_task = get_buyback_history(stock_code)
         fundamentals_task = get_ths_fundamentals(stock_code)
         profitability_task = get_profitability_trend(stock_code)
         live_a_share_structure_task = get_a_share_structure(stock_code)
@@ -160,9 +168,9 @@ async def generate_report(
             if request.mode == ResearchMode.HISTORICAL
             else None
         ),
-        get_shareholder_count_trend(stock_code, as_of=request.as_of),
-        get_dividend_history(stock_code, as_of=request.as_of),
-        get_buyback_history(stock_code, as_of=request.as_of),
+        shareholder_task,
+        dividend_task,
+        buyback_task,
         profitability_task,
         fundamentals_task,
         get_market_context(stock_code, as_of=request.as_of),
@@ -180,6 +188,9 @@ async def generate_report(
         fundamentals = to_historical_fundamentals(point_in_time_financials)
         profitability_trend = to_historical_profitability(point_in_time_financials)
         a_share_structure = point_in_time_ownership
+        dividend_history, buyback_history = build_point_in_time_capital_returns(
+            primary_evidence
+        )
 
     rd_team: Optional[Dict] = None
     if historical_mode:
