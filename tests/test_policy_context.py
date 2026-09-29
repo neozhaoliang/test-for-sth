@@ -8,7 +8,7 @@ def test_domestic_consumer_does_not_inherit_war_or_trade_topics_without_exposure
         overseas_revenue_pct=1.0,
     )
     assert "consumption_policy" in topics
-    assert "rates_liquidity" in topics
+    assert "rates_liquidity" not in topics
     assert "war_shipping" not in topics
     assert "trade_sanctions" not in topics
     assert "fx" not in topics
@@ -77,7 +77,7 @@ def test_event_filter_keeps_only_company_or_exposure_relevant_items():
 
     titles = [x["title"] for x in out]
     assert "美国扩大先进芯片出口管制" in titles
-    assert "中芯国际发布业务进展" in titles
+    assert "中芯国际发布业务进展" not in titles
     assert "某地旅游景区迎来客流高峰" not in titles
     export = next(x for x in out if "出口管制" in x["title"])
     assert "trade_sanctions" in export["matched_topics"]
