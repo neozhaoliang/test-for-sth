@@ -633,6 +633,56 @@ function renderFundamentalsBlock(f) {
   return html;
 }
 
+function renderRdTeamBlock(rd) {
+  if (!rd) {
+    return '<div class="evidence-block missing"><b>研发团队组成:</b> 暂缺 (本次未取得巨潮最新年报研发人员表)</div>';
+  }
+  if (rd.parse_status !== 'ok') {
+    return '<div class="evidence-block missing"><b>研发团队组成:</b> 已定位 ' +
+      escapeHtml(rd.title || '最新年报') + '，但解析状态为 ' +
+      escapeHtml(rd.parse_status || 'unknown') + '；不据此猜测人才结构</div>';
+  }
+
+  let html = '<div class="evidence-block"><b>研发团队组成（巨潮最新年报）:</b><ul>';
+  if (rd.rd_headcount !== null && rd.rd_headcount !== undefined) {
+    html += '<li>研发人员: ' + rd.rd_headcount + ' 人' +
+      (rd.rd_staff_ratio_pct !== null && rd.rd_staff_ratio_pct !== undefined
+        ? '，占员工总数 ' + rd.rd_staff_ratio_pct + '%' : '') + '</li>';
+  }
+  const edu = rd.education || {};
+  const eduLabels = {
+    doctor: '博士', master: '硕士', bachelor: '本科',
+    college: '专科', high_school_or_below: '高中及以下',
+  };
+  const eduParts = Object.keys(eduLabels)
+    .filter(k => edu[k] !== null && edu[k] !== undefined)
+    .map(k => eduLabels[k] + ' ' + edu[k] + ' 人');
+  if (eduParts.length) {
+    html += '<li>学历结构: ' + eduParts.join('，') + '</li>';
+  }
+  const age = rd.age || {};
+  const ageLabels = {
+    under_30: '30岁以下', '30_to_40': '30-40岁', '40_to_50': '40-50岁',
+    '50_to_60': '50-60岁', '60_or_above': '60岁及以上',
+  };
+  const ageParts = Object.keys(ageLabels)
+    .filter(k => age[k] !== null && age[k] !== undefined)
+    .map(k => ageLabels[k] + ' ' + age[k] + ' 人');
+  if (ageParts.length) {
+    html += '<li>年龄结构: ' + ageParts.join('，') + '</li>';
+  }
+  if (rd.hit_pages && rd.hit_pages.length) {
+    html += '<li>年报命中页: ' + rd.hit_pages.join('、') + '</li>';
+  }
+  html += '</ul>';
+  if (rd.pdf_url) {
+    html += '<div>' + safeExternalLink(rd.pdf_url, rd.title || '打开巨潮年报原文') + '</div>';
+  }
+  html += '<div class="credibility-note">学历/年龄结构只描述研发队伍构成，不能单独推出技术实力；需与研发强度、专利和产品兑现结合。</div>';
+  html += '</div>';
+  return html;
+}
+
 function renderXueqiuBlock(x) {
   if (!x) {
     return '<div class="evidence-block missing"><b>雪球个股维度:</b> 暂缺 (本次未能取到机构持仓/讨论热度)</div>';
@@ -867,6 +917,7 @@ function renderEvidenceSection(report) {
   }
 
   html += renderFundamentalsBlock(report.fundamentals);
+  html += renderRdTeamBlock(report.rd_team);
   html += renderXueqiuBlock(report.xueqiu_stock);
 
   const db = report.debate;
