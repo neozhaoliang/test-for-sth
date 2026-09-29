@@ -862,6 +862,28 @@ function renderMacroRatesBlock(m) {
   return html;
 }
 
+function renderPolicyEventsBlock(p) {
+  if (!p || !(p.events || []).length) {
+    return '<div class="evidence-block missing"><b>近期政策/地缘事件线索:</b> 暂缺；不能反向推断没有相关风险</div>';
+  }
+  let html = '<div class="evidence-block"><b>近期政策/地缘事件线索:</b>' +
+    '<div class="credibility-note">以下来自财经媒体/快讯，只是待核对的事件线索；必须结合公司实际暴露与一手/市场数据，不能把标题直接当成利好或利空。</div>' +
+    '<ul>';
+  (p.events || []).slice(0, 12).forEach(x => {
+    const label = (x.published_at || '日期未知') + ' [' + (x.media || '媒体来源未知') + '] ' +
+      (x.title || '');
+    html += '<li>' +
+      (x.url ? safeExternalLink(x.url, label) : escapeHtml(label));
+    if (x.matched_terms && x.matched_terms.length) {
+      html += '<br><span class="credibility-note">匹配暴露/主题: ' +
+        x.matched_terms.map(escapeHtml).join('、') + '</span>';
+    }
+    html += '</li>';
+  });
+  html += '</ul></div>';
+  return html;
+}
+
 function renderXueqiuBlock(x) {
   if (!x) {
     return '<div class="evidence-block missing"><b>雪球个股维度:</b> 暂缺 (本次未能取到机构持仓/讨论热度)</div>';
@@ -1220,6 +1242,7 @@ function renderEvidenceSection(report) {
   html += renderRdTeamBlock(report.rd_team);
   html += renderManagementCapitalBlock(report.management_capital);
   html += renderMacroRatesBlock(report.macro_rates);
+  html += renderPolicyEventsBlock(report.policy_events);
   html += renderXueqiuBlock(report.xueqiu_stock);
 
   const db = report.debate;
