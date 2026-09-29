@@ -40,14 +40,14 @@ from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.primary_sources import get_cninfo_primary_evidence
 from analysis.policy_context import get_policy_event_context
-from analysis.realtime_price import get_realtime_quote, get_stock_name
+from analysis.realtime_price import get_historical_quote, get_realtime_quote, get_stock_name
 from analysis.rd_team import get_rd_team_composition
 from analysis.valuation_history import get_valuation_history
 from analysis.evidence import ResearchQuality, build_evidence_ledger, evaluate_research_quality
 from analysis.research_profile import ResearchProfile, classify_research_profile
 from analysis.report_contract import _PROMPT_VERSION
 from analysis.report_validation import validate_report
-from analysis.research_context import ResearchRequest, assert_request_supported
+from analysis.research_context import ResearchMode, ResearchRequest, assert_request_supported
 from analysis.snapshot_store import save_report_snapshot
 
 from analysis.report_blocks import _build_dividend_chart
@@ -141,7 +141,11 @@ async def generate_report(
     candidate_scores = find_candidates(stock_code)
 
     stock_name = _resolve_stock_name(stock_code, candidate_scores)
-    quote = await get_realtime_quote(stock_code)
+    quote = (
+        await get_historical_quote(stock_code, request.as_of)
+        if request.mode == ResearchMode.HISTORICAL
+        else await get_realtime_quote(stock_code)
+    )
     if not stock_name:
         stock_name = await get_stock_name(stock_code) or ""
 
@@ -165,7 +169,7 @@ async def generate_report(
         get_buyback_history(stock_code),
         get_profitability_trend(stock_code),
         get_ths_fundamentals(stock_code),
-        get_market_context(stock_code),
+        get_market_context(stock_code, as_of=request.as_of),
         get_margin_signal(stock_code),
         get_cninfo_primary_evidence(stock_code, as_of=request.as_of),
         get_a_share_structure(stock_code),
