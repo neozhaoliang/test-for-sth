@@ -1491,6 +1491,26 @@ def _resolve_stock_name(stock_code: str, candidate_scores) -> str:
     return ""
 
 
+_RD_TEAM_INDUSTRY_RE = re.compile(
+    r"半导体|电子|通信|计算机|软件|互联网|光学|光电子|电池|光伏|风电|"
+    r"电网设备|自动化|机器人|机械设备|通用设备|专用设备|汽车零部件|"
+    r"国防军工|航空|航天|医疗器械|生物制品|化学制药|医疗服务"
+)
+
+
+def _should_fetch_rd_team(fundamentals: Optional[Dict]) -> bool:
+    facts = (fundamentals or {}).get("facts") or {}
+    industry = str(facts.get("sw_industry") or "")
+    rd_intensity = facts.get("rd_intensity_pct")
+    try:
+        rd_intensity = float(rd_intensity) if rd_intensity is not None else None
+    except (TypeError, ValueError):
+        rd_intensity = None
+    return bool(_RD_TEAM_INDUSTRY_RE.search(industry)) or (
+        rd_intensity is not None and rd_intensity >= 2.0
+    )
+
+
 async def generate_report(stock_code: str) -> AnalysisReport:
     candidate_scores = find_candidates(stock_code)
 
@@ -1511,7 +1531,6 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         primary_evidence,
         a_share_structure,
         valuation_history,
-        rd_team,
     ) = await asyncio.gather(
         _load_knowledge_excerpts(),
         get_shareholder_count_trend(stock_code),
@@ -1524,8 +1543,16 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         get_cninfo_primary_evidence(stock_code),
         get_a_share_structure(stock_code),
         get_valuation_history(stock_code),
-        get_rd_team_composition(stock_code),
     )
+
+    rd_team: Optional[Dict] = None
+    if _should_fetch_rd_team(fundamentals):
+        rd_team = await get_rd_team_composition(stock_code)
+    else:
+        utils.logger.info(
+            f"[analysis.report] {stock_code} 非高研发/科技先进制造画像，"
+            "跳过年报PDF研发人员表抓取"
+        )
 
     # 行业反查的起点是 F10 公司概要页里的申万行业名，所以必须等 fundamentals 回来。
     # 这一步不再有按行业板块的逐次网络请求，只是本地匹配，放在 gather 之后不拖慢。
