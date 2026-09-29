@@ -5,8 +5,8 @@ from analysis.evidence import EvidenceItem, ResearchQuality
 from analysis.research_context import ResearchRequest
 from analysis.research_profile import ResearchProfile
 from analysis.reviewer import ResearchReview
-from analysis.snapshot_replay import _inputs_from_frozen
 from analysis.snapshot_store import (
+    frozen_research_inputs_to_analysis_inputs,
     load_snapshot_manifest,
     load_snapshot_report,
     load_snapshot_research_inputs,
@@ -162,7 +162,7 @@ def test_frozen_research_inputs_rebuild_analysis_inputs(tmp_path):
 
     path = save_report_snapshot(report, request)
     frozen = load_snapshot_research_inputs(path)
-    inputs, candidates, evidence = _inputs_from_frozen(frozen)
+    inputs, candidates, evidence = frozen_research_inputs_to_analysis_inputs(frozen)
 
     assert inputs.stock_code == "600000"
     assert inputs.stock_name == "测试股份"
