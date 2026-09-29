@@ -164,7 +164,13 @@ async def get_historical_quote(
     if df is None or df.empty:
         return None
 
-    rows = df.sort_values("date").reset_index(drop=True)
+    rows = df.copy()
+    rows["_date"] = pd.to_datetime(rows["date"], errors="coerce")
+    rows = rows.dropna(subset=["_date"])
+    rows = rows[rows["_date"].dt.date <= as_of]
+    rows = rows.sort_values("_date").reset_index(drop=True)
+    if rows.empty:
+        return None
     last = rows.iloc[-1]
     latest = float(last["close"])
     change_pct = None
