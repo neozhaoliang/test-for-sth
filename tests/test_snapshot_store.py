@@ -5,6 +5,7 @@ from analysis.evidence import EvidenceItem, ResearchQuality
 from analysis.research_context import ResearchRequest
 from analysis.research_profile import ResearchProfile
 from analysis.reviewer import ResearchReview
+from analysis.snapshot_replay import _inputs_from_frozen
 from analysis.snapshot_store import (
     load_snapshot_manifest,
     load_snapshot_report,
@@ -145,3 +146,26 @@ def test_snapshot_integrity_detects_tampering(tmp_path):
     after = verify_snapshot_integrity(path)
     assert after["ok"] is False
     assert any("report" in x for x in after["errors"])
+
+
+
+def test_frozen_research_inputs_rebuild_analysis_inputs(tmp_path):
+    request = ResearchRequest(
+        stock_code="600000",
+        save_snapshot=True,
+        snapshot_root=str(tmp_path),
+    )
+    report = _report()
+    report.as_of = str(request.as_of)
+    report.candidates = []
+    report.knowledge_excerpts = []
+
+    path = save_report_snapshot(report, request)
+    frozen = load_snapshot_research_inputs(path)
+    inputs, candidates, evidence = _inputs_from_frozen(frozen)
+
+    assert inputs.stock_code == "600000"
+    assert inputs.stock_name == "测试股份"
+    assert candidates == []
+    assert len(evidence) == 2
+    assert evidence[0].category == "valuation_history"
