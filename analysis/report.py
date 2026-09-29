@@ -46,6 +46,11 @@ from analysis.rd_team import get_rd_team_composition
 from analysis.valuation_history import get_valuation_history
 from analysis.debate import derive_sentiment, get_debate
 from analysis.evidence import EvidenceItem, build_evidence_ledger, evaluate_research_quality
+from analysis.research_profile import (
+    ResearchProfile,
+    classify_research_profile,
+    profile_prompt_block,
+)
 from analysis.reviewer import ResearchReview, review_dimension_analyses
 from analysis.session import AnalysisBrowserSession
 from analysis.shareholder import get_buyback_history, get_dividend_history, get_shareholder_count_trend
@@ -91,6 +96,8 @@ _PROMPT_TEMPLATE = """你是一名证券研究助手。你的任务不是预测�
 
 股票: {stock_code} ({stock_name})
 当前行情: {quote_line}
+
+{research_profile_block}
 
 {valuation_block}
 
@@ -216,6 +223,7 @@ class AnalysisInputs:
     primary_evidence: List[Dict] = field(default_factory=list)
     a_share_structure: Optional[Dict] = None
     management_capital: Optional[Dict] = None
+    research_profile: Optional[ResearchProfile] = None
 
 
 def _credibility_note(hit_rate: float, correct: int, incorrect: int) -> str:
@@ -1375,6 +1383,9 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         stock_code=inputs.stock_code,
         stock_name=inputs.stock_name or inputs.stock_code,
         quote_line=quote_line,
+        research_profile_block=profile_prompt_block(
+            inputs.research_profile or ResearchProfile()
+        ),
         valuation_block=_build_valuation_block(inputs.valuation, quote),
         valuation_history_block=_build_valuation_history_block(inputs.valuation_history),
         fundamentals_block=_build_fundamentals_block(inputs.fundamentals),
@@ -1945,13 +1956,24 @@ async def generate_report(stock_code: str) -> AnalysisReport:
 
     evidence = build_evidence_ledger(inputs, candidates)
     research_quality = evaluate_research_quality(evidence)
+    research_profile = classify_research_profile(
+        fundamentals=inputs.fundamentals,
+        management_capital=inputs.management_capital,
+        evidence=evidence,
+    )
+    inputs.research_profile = research_profile
     summary, review = await _generate_summary(inputs, candidates, evidence)
-    # 置信度先受证据覆盖率上限约束，再扣除跨维度冲突/弱证据惩罚。
+    # 置信度同时受全局证据覆盖率、公司画像重点证据准备度限制，
+    # 再扣除跨维度冲突/弱证据惩罚。
     if summary.confidence:
         summary.confidence = round(
             max(
                 0.0,
-                min(summary.confidence, research_quality.coverage)
+                min(
+                    summary.confidence,
+                    research_quality.coverage,
+                    research_profile.readiness,
+                )
                 - review.confidence_penalty,
             ),
             3,
