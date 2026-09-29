@@ -1258,7 +1258,7 @@ def _build_a_share_structure_block(data: Optional[Dict]) -> str:
     qoq = data.get("institution_qoq") or []
     if qoq:
         prev = data.get("previous_report_period") or "前一披露期"
-        lines.append(f"机构季度快照变化 ({prev} → {data.get('report_period') or '本期'}):")
+        lines.append(f"机构披露快照变化 ({prev} → {data.get('report_period') or '本期'}):")
         for row in qoq:
             seg = f"  · {row.get('type')}: "
             parts = []
@@ -1474,7 +1474,7 @@ _ANALYSIS_TOOLS = [
     ),
     _analysis_tool(
         "analyze_a_share_structure",
-        "A股资金结构与市场风格: 优先引用'A股公开资金结构'里的基金/ETF明细、社保/QFII/保险、前十大流通股东与未来12个月限售解禁，再综合'大盘与风格'、'融资盘与流通盘'、雪球机构持仓、股东户数及知识库中的风格切换记录。解禁只代表潜在供给，不能自动等同于卖出；未提供汇金、证金、诚通、国新等具体持仓时必须写暂缺，严禁猜测'国家队正在买/卖'。",
+        "A股资金结构与市场风格: 优先引用'A股公开资金结构'里的基金/ETF明细、社保/QFII/保险、两个已披露机构快照的变化、前十大流通股东与未来12个月限售解禁，再综合'大盘与风格'、'融资盘与流通盘'、雪球机构持仓、股东户数及知识库中的风格切换记录。'本期新见/本期未再见'只表示披露名单变化，不能写成首次买入/全部卖出；解禁只代表潜在供给，不能自动等同于卖出；未提供汇金、证金、诚通、国新等具体持仓时必须写暂缺，严禁猜测'国家队正在买/卖'。",
     ),
     _analysis_tool(
         "analyze_risk_quality",
