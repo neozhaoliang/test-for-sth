@@ -1125,6 +1125,24 @@ def _build_research_quality_block(quality: Optional[ResearchQuality]) -> str:
     return "\n".join(lines)
 
 
+def _build_time_contract_block(inputs: Any) -> str:
+    mode = str(getattr(inputs, "research_mode", "live") or "live")
+    as_of = str(getattr(inputs, "as_of", "") or "")
+    if mode == "historical":
+        return (
+            f"模式=historical，研究截止日={as_of or '未知'}。\n"
+            "你必须把自己限制在这个截止日：只能使用本次输入数据块中明确给出的证据。"
+            "严禁使用模型记忆、常识库或后见之明补入截止日之后发生的股价、财报、公告、"
+            "分红实施结果、机构持仓、政策、战争、产品进展或任何事件。\n"
+            "若某个维度因历史源缺失而标注暂缺，就保持暂缺；不得用今天知道的结果倒推。"
+            "正文禁止使用“后来证明”“随后发生”“最终实现”等超出截止日视角的措辞。"
+        )
+    return (
+        f"模式=live，研究基准日={as_of or '当前日期'}。"
+        "仍然只能引用本次输入的数据块，不得凭模型记忆补数字或未提供的公司事实。"
+    )
+
+
 def _build_prompt(inputs: Any, candidates: List[CandidateOpinion]) -> str:
     quote = inputs.quote
     if quote:
@@ -1136,6 +1154,7 @@ def _build_prompt(inputs: Any, candidates: List[CandidateOpinion]) -> str:
         quote_line = "暂无实时数据"
 
     return _PROMPT_TEMPLATE.format(
+        time_contract_block=_build_time_contract_block(inputs),
         stock_code=inputs.stock_code,
         stock_name=inputs.stock_name or inputs.stock_code,
         quote_line=quote_line,
