@@ -203,6 +203,63 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
             params.update({"bvid": bvid})
         return await self.get(uri, params, enable_params_sign=False)
 
+    async def get_video_subtitle_tracks(
+        self,
+        aid: int,
+        cid: int,
+        bvid: str = "",
+    ) -> List[Dict]:
+        """
+        获取播放器字幕轨道。登录态下人工字幕/AI 字幕会出现在
+        data.subtitle.subtitles；无字幕时返回空列表，不做任何文本猜测。
+        """
+        if not aid or not cid:
+            return []
+        params: Dict[str, Any] = {"aid": aid, "cid": cid}
+        if bvid:
+            params["bvid"] = bvid
+        try:
+            data = await self.get("/x/player/wbi/v2", params, enable_params_sign=True)
+        except Exception as e:
+            utils.logger.warning(
+                f"[BilibiliClient.get_video_subtitle_tracks] aid={aid} cid={cid} failed: {e}"
+            )
+            return []
+        subtitle = (data or {}).get("subtitle") or {}
+        tracks = subtitle.get("subtitles") or []
+        return [x for x in tracks if isinstance(x, dict) and x.get("subtitle_url")]
+
+    async def get_subtitle_json(self, subtitle_url: str) -> Optional[Dict]:
+        """下载字幕 JSON。subtitle_url 常为 //aisubtitle.hdslb.com/...。"""
+        url = (subtitle_url or "").strip()
+        if not url:
+            return None
+        if url.startswith("//"):
+            url = "https:" + url
+        elif url.startswith("/"):
+            url = "https://www.bilibili.com" + url
+
+        try:
+            await self._refresh_proxy_if_expired()
+            async with make_async_client(proxy=self.proxy, follow_redirects=True) as client:
+                response = await client.get(
+                    url,
+                    timeout=min(self.timeout, 30),
+                    headers={
+                        **self.headers,
+                        "Referer": "https://www.bilibili.com/",
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+        except Exception as e:
+            utils.logger.warning(
+                f"[BilibiliClient.get_subtitle_json] subtitle download failed: "
+                f"{type(e).__name__}: {str(e)[:160]}"
+            )
+            return None
+        return data if isinstance(data, dict) else None
+
     async def get_video_play_url(self, aid: int, cid: int) -> Dict:
         """
         Bilibli web video play url api
