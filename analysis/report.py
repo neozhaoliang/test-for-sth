@@ -39,6 +39,11 @@ from analysis.macro_rates import get_macro_rate_context
 from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.primary_sources import get_cninfo_primary_evidence
+from analysis.point_in_time_financials import (
+    get_point_in_time_financials,
+    to_historical_fundamentals,
+    to_historical_profitability,
+)
 from analysis.policy_context import get_policy_event_context
 from analysis.realtime_price import get_historical_quote, get_realtime_quote, get_stock_name
 from analysis.rd_team import get_rd_team_composition
@@ -117,6 +122,16 @@ async def generate_report(
     if not stock_name:
         stock_name = await get_stock_name(stock_code) or ""
 
+    historical_mode = request.mode == ResearchMode.HISTORICAL
+    if historical_mode:
+        pit_financials_task = get_point_in_time_financials(stock_code, request.as_of)
+        fundamentals_task = asyncio.sleep(0, result=None)
+        profitability_task = asyncio.sleep(0, result=None)
+    else:
+        pit_financials_task = asyncio.sleep(0, result=None)
+        fundamentals_task = get_ths_fundamentals(stock_code)
+        profitability_task = get_profitability_trend(stock_code)
+
     (
         knowledge_excerpts,
         shareholder_trend,
@@ -131,6 +146,7 @@ async def generate_report(
         valuation_history,
         macro_rates,
         filing_calendar,
+        point_in_time_financials,
     ) = await asyncio.gather(
         load_knowledge_excerpts(
             as_of=request.as_of
@@ -140,8 +156,8 @@ async def generate_report(
         get_shareholder_count_trend(stock_code, as_of=request.as_of),
         get_dividend_history(stock_code, as_of=request.as_of),
         get_buyback_history(stock_code, as_of=request.as_of),
-        get_profitability_trend(stock_code),
-        get_ths_fundamentals(stock_code),
+        profitability_task,
+        fundamentals_task,
         get_market_context(stock_code, as_of=request.as_of),
         get_margin_signal(stock_code, as_of=request.as_of),
         get_cninfo_primary_evidence(stock_code, as_of=request.as_of),
@@ -149,10 +165,17 @@ async def generate_report(
         get_valuation_history(stock_code, as_of=request.as_of),
         get_macro_rate_context(as_of=request.as_of),
         get_financial_filing_calendar(stock_code, as_of=request.as_of),
+        pit_financials_task,
     )
 
+    if historical_mode:
+        fundamentals = to_historical_fundamentals(point_in_time_financials)
+        profitability_trend = to_historical_profitability(point_in_time_financials)
+
     rd_team: Optional[Dict] = None
-    if _should_fetch_rd_team(fundamentals):
+    if historical_mode:
+        rd_team = None
+    elif _should_fetch_rd_team(fundamentals):
         rd_team = await get_rd_team_composition(stock_code)
     else:
         utils.logger.info(
