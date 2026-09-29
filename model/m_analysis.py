@@ -123,6 +123,10 @@ class AnalysisReport(BaseModel):
     management_capital: Optional[dict] = Field(
         default=None, description="管理层利益绑定、经营执行与5/10年资本分配长期账本"
     )
+    filing_calendar: List[dict] = Field(
+        default_factory=list,
+        description="巨潮周期报告的报告期、实际发布日期与原始版本链接",
+    )
     research_profile: ResearchProfile = Field(
         default_factory=ResearchProfile,
         description="按行业/研发/资本回报确定的公司研究画像与重点证据准备度",
