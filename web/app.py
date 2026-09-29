@@ -26,6 +26,7 @@
 
 import asyncio
 import glob
+from datetime import date
 import json
 import os
 import sys
@@ -43,6 +44,12 @@ from analysis.knowledge_base import (
 )
 from analysis.realtime_price import resolve_stock_code
 from analysis.report import generate_report
+from analysis.research_context import (
+    ResearchRequest,
+    assert_request_supported,
+    historical_readiness,
+    SOURCE_TEMPORAL_CAPABILITIES,
+)
 from media_platform.xueqiu.help import normalize_user_id
 from tools.utils import utils
 
@@ -66,16 +73,23 @@ async def _preload_knowledge_base() -> None:
 
 class AnalyzeRequest(BaseModel):
     stock_code: str
+    mode: str = "live"
+    as_of: Optional[date] = None
+    save_snapshot: bool = False
 
 
 class AnalyzeResponse(BaseModel):
     task_id: str
 
 
-async def _run_analysis(task_id: str, stock_code: str) -> None:
+async def _run_analysis(
+    task_id: str,
+    stock_code: str,
+    research_request: ResearchRequest,
+) -> None:
     _tasks[task_id]["status"] = "running"
     try:
-        report = await generate_report(stock_code)
+        report = await generate_report(stock_code, request=research_request)
         _tasks[task_id]["status"] = "done"
         _tasks[task_id]["result"] = report.model_dump()
     except Exception as e:
@@ -94,10 +108,53 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     if not stock_code:
         raise HTTPException(status_code=404, detail=f"未找到股票: {raw_input}")
 
+    try:
+        research_request = ResearchRequest(
+            stock_code=stock_code,
+            mode=req.mode,
+            as_of=req.as_of,
+            save_snapshot=req.save_snapshot,
+        )
+        assert_request_supported(research_request)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except NotImplementedError as e:
+        readiness = historical_readiness()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "historical_ready": readiness.ready,
+                "safe_sources": readiness.safe_sources,
+                "blocking_sources": readiness.blocking_sources,
+                "reasons": readiness.reasons,
+            },
+        ) from e
+
     task_id = str(uuid.uuid4())
-    _tasks[task_id] = {"status": "pending", "result": None, "error": None}
-    asyncio.create_task(_run_analysis(task_id, stock_code))
+    _tasks[task_id] = {
+        "status": "pending",
+        "result": None,
+        "error": None,
+        "request": research_request.model_dump(mode="json"),
+    }
+    asyncio.create_task(_run_analysis(task_id, stock_code, research_request))
     return AnalyzeResponse(task_id=task_id)
+
+
+@app.get("/api/research/time-capabilities")
+async def get_research_time_capabilities() -> Dict:
+    readiness = historical_readiness()
+    return {
+        "historical_ready": readiness.ready,
+        "safe_sources": readiness.safe_sources,
+        "blocking_sources": readiness.blocking_sources,
+        "reasons": readiness.reasons,
+        "sources": {
+            name: item.model_dump(mode="json")
+            for name, item in SOURCE_TEMPORAL_CAPABILITIES.items()
+        },
+    }
 
 
 @app.get("/api/tasks/{task_id}")
