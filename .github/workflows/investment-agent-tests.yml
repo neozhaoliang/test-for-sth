@@ -49,6 +49,7 @@ jobs:
             analysis/report_validation.py \
             analysis/report_blocks.py \
             analysis/report_synthesis.py \
+            analysis/report_social.py \
             analysis/report.py \
             analysis/knowledge_base.py \
             analysis/fundamentals.py \
