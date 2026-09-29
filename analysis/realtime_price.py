@@ -23,11 +23,13 @@
 
 import re
 import time
+from datetime import date, timedelta
 from typing import Dict, Optional, Tuple
 
 import akshare as ak
 import pandas as pd
 
+from backtest.price_source import get_price_history
 from tools.utils import utils
 
 _CACHE_TTL_SECONDS = 180
@@ -138,6 +140,45 @@ async def get_realtime_quote(stock_code: str) -> Optional[Dict]:
         "change_pct": float(row["涨跌幅"]),
         "volume": float(row["成交量"]),
         "timestamp": str(row["时间戳"]),
+    }
+
+
+async def get_historical_quote(
+    stock_code: str,
+    as_of: date,
+) -> Optional[Dict]:
+    """
+    Point-in-time daily-close quote for historical research.
+
+    The current price cache stores close only, so volume is intentionally left None.
+    change_pct is computed against the previous available trading day's close.
+    """
+    start = as_of - timedelta(days=14)
+    try:
+        df = await get_price_history(stock_code, start, end=as_of)
+    except Exception as e:
+        utils.logger.error(
+            f"[realtime_price] historical quote {stock_code}@{as_of} failed: {e}"
+        )
+        return None
+    if df is None or df.empty:
+        return None
+
+    rows = df.sort_values("date").reset_index(drop=True)
+    last = rows.iloc[-1]
+    latest = float(last["close"])
+    change_pct = None
+    if len(rows) >= 2:
+        prev = float(rows.iloc[-2]["close"])
+        if prev:
+            change_pct = (latest / prev - 1) * 100
+    return {
+        "latest_price": latest,
+        "change_pct": round(change_pct, 3) if change_pct is not None else None,
+        "volume": None,
+        "timestamp": str(last["date"]),
+        "date": str(last["date"]),
+        "quote_mode": "historical_daily_close",
     }
 
 
