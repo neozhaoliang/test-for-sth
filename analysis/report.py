@@ -36,9 +36,11 @@ from analysis.knowledge_base import ensure_loaded as ensure_knowledge_base_loade
 from analysis.margin import get_margin_signal
 from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
+from analysis.primary_sources import get_cninfo_primary_evidence
 from analysis.realtime_price import get_realtime_quote, get_stock_name
 from analysis.debate import derive_sentiment, get_debate
-from analysis.evidence import build_evidence_ledger, evaluate_research_quality
+from analysis.evidence import EvidenceItem, build_evidence_ledger, evaluate_research_quality
+from analysis.reviewer import ResearchReview, review_dimension_analyses
 from analysis.session import AnalysisBrowserSession
 from analysis.shareholder import get_buyback_history, get_dividend_history, get_shareholder_count_trend
 from analysis.xueqiu_stock import get_xueqiu_stock_data
@@ -74,7 +76,7 @@ _PROMPT_TEMPLATE = """你是一名证券研究助手。你的任务不是预测�
 - **输出中禁止出现"六查""第N步""检查项"等内部流程用语**——结论直接陈述事实与判断，不得提及分析流程本身。
 - **正文立场一律用中文表述 (看多/看空/中性)**——bullish/bearish/neutral 这类英文枚举值只允许出现在 JSON 字段值里，禁止写进论述文字。
 - **禁止声称"外部核实""公开披露""据我所知"等无法溯源的说法**——你只能引用下方数据块给出的数字；数据块里没有的数字一律写"该维度数据暂缺"，不得用"外部数据"的说法为编造或凭记忆补全的数字背书。
-- **管理层评价只能基于"治理与股东回报记录"块的客观事实** (任职年限、薪酬与持股、分红回购、再融资记录、减持/处罚/问询记录)；该块没有的记录一律写"该维度数据暂缺"，禁止凭印象评价管理层人品或美誉度。
+- **管理层评价只能基于"一手公告证据"与"治理与股东回报记录"块的客观事实** (任职年限、薪酬与持股、分红回购、再融资记录、减持/处罚/问询记录)；一手公告优先于第三方聚合页，二者冲突时必须指出冲突，不得凭印象评价管理层人品或美誉度。
 - **知识库优先于模板推断**: 解释股东户数与股价联动、市场风格切换、板块涨跌、资金动向等市场行为时，必须先查知识库背景资料中该时期的真实记录 (如公募调仓、风格切换)；知识库有相关记录时必须引用并以其为准，禁止用"户数增加→筹码派发"这类模板推断覆盖真实背景。知识库没有相关记录时才能用数据块内的模板推断，且要注明这是推断而非事实。
 - **讨论区情绪是反向指标**: 引用雪球讨论区情绪块的数字。一致看多 (看多占方向性表态≥80% 且方向性样本≥10) 必须作为拥挤风险写进结论 (风险提示或关键论据)，一致看空同理提示悲观极点。禁止把多数人的看多当作看多论据。该块暂缺时写"该维度数据暂缺"。
 - **多空辩论必须正面处理**: 结论必须回应"多空辩论"块——引用双方核心论点与历史验证统计 (哪一方有时间范围的股价预测被验证过、命中率如何)，说明你的结论接受了哪方论据、驳斥或保留哪方论据；辩论块标注哪方更合理时，与其相反的方向判断必须额外给出反驳理由。该块暂缺时写"该维度数据暂缺"。
@@ -90,7 +92,10 @@ _PROMPT_TEMPLATE = """你是一名证券研究助手。你的任务不是预测�
 研发能力 (科技企业重点维度: 专利/技术护城河/研发投入与强度/员工人数/董事长学历):
 {rd_block}
 
-近期重大事项 (公司公告/股东会等，判断再融资、分红调整等事件的摊薄/增厚影响):
+一手公告证据 (巨潮资讯，S级；治理/分红/再融资/股权变动/风险提示等，优先于第三方聚合):
+{primary_evidence_block}
+
+近期重大事项 (第三方F10聚合，需与一手公告交叉核对):
 {major_events_block}
 
 汇率敞口 (判断汇率变动对收入的影响方向):
@@ -186,6 +191,7 @@ class AnalysisInputs:
     margin_signal: Optional[Dict] = None
     market_context: Optional[Dict] = None
     freight_signal: Optional[Dict] = None
+    primary_evidence: List[Dict] = field(default_factory=list)
 
 
 def _credibility_note(hit_rate: float, correct: int, incorrect: int) -> str:
@@ -911,6 +917,19 @@ def _build_knowledge_block(knowledge_excerpts: List[KnowledgeExcerpt]) -> str:
     return "\n".join(lines)
 
 
+def _build_primary_evidence_block(primary_evidence: List[Dict]) -> str:
+    if not primary_evidence:
+        return "暂缺 (本次未能取得巨潮公告元数据；治理/资本运作相关结论应降低置信度)"
+    lines = []
+    for item in primary_evidence[:24]:
+        date = item.get("published_at") or "日期未知"
+        category = item.get("category") or "公告"
+        title = item.get("title") or ""
+        url = item.get("url") or ""
+        lines.append(f"  · {date} [{category}] {title}" + (f" | {url}" if url else ""))
+    return "\n".join(lines)
+
+
 def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) -> str:
     quote = inputs.quote
     if quote:
@@ -928,6 +947,7 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         valuation_block=_build_valuation_block(inputs.valuation, quote),
         fundamentals_block=_build_fundamentals_block(inputs.fundamentals),
         rd_block=_build_rd_block(inputs.fundamentals, inputs.executive_profile),
+        primary_evidence_block=_build_primary_evidence_block(inputs.primary_evidence),
         major_events_block=_build_major_events_block(inputs.major_events),
         governance_block=_build_governance_block(
             inputs.refinancing_history, inputs.executive_profile, inputs.governance_alerts
@@ -1010,7 +1030,7 @@ _ANALYSIS_TOOL_NAMES = [
 _ANALYSIS_TOOLS = [
     _analysis_tool(
         "analyze_management",
-        "管理层人品与能力: 只能引用'治理与股东回报记录'块的客观事实 (高管画像/任职年限/薪酬持股/减持处罚/再融资/分红回购记录) 评价管理层是否值得信任; 该块没有的记录写'该维度数据暂缺', 禁止凭印象评价人品。",
+        "管理层人品与能力: 优先引用'一手公告证据'，并用'治理与股东回报记录'块的客观事实交叉核对 (高管画像/任职年限/薪酬持股/减持处罚/再融资/分红回购记录) 评价管理层是否值得信任; 该块没有的记录写'该维度数据暂缺', 禁止凭印象评价人品。",
     ),
     _analysis_tool(
         "analyze_business_fundamentals",
@@ -1042,7 +1062,7 @@ _ANALYSIS_TOOLS = [
     ),
     _analysis_tool(
         "analyze_shareholder_returns",
-        "股东回报历史: 正面=持续分红+真实回购 (引用分红/回购历史块的具体数字); 负面=定增/配股、大股东减持、无分红、低息借款给大股东等 (引用'治理与股东回报记录'块的再融资与警示事件); 该块没有的记录写暂缺。",
+        "股东回报历史: 优先核对'一手公告证据'中的权益分派/股权变动/再融资，再结合第三方历史数据。正面=持续分红+真实回购 (引用分红/回购历史块的具体数字); 负面=定增/配股、大股东减持、无分红、低息借款给大股东等 (引用'治理与股东回报记录'块的再融资与警示事件); 该块没有的记录写暂缺。",
     ),
     _analysis_tool(
         "analyze_growth_elasticity",
@@ -1054,7 +1074,7 @@ _ANALYSIS_TOOLS = [
     ),
     _analysis_tool(
         "analyze_risk_quality",
-        "财务质量与尾部风险: 综合经营现金流质量、应收/存货/负债/盈利率趋势、客户供应商集中度、再融资、质押、处罚问询、重大事项等。区分正常经营波动和可能永久损害股东价值的风险；没有数据的风险不得反向断言为不存在。",
+        "财务质量与尾部风险: 优先检查'一手公告证据'中的风险提示/补充更正/股权变动，再综合经营现金流质量、应收/存货/负债/盈利率趋势、客户供应商集中度、再融资、质押、处罚问询、重大事项等。区分正常经营波动和可能永久损害股东价值的风险；没有数据的风险不得反向断言为不存在。",
     ),
 ]
 
@@ -1176,7 +1196,11 @@ async def _score_dimensions(
     return scores if len(scores) >= 8 else None
 
 
-async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) -> StructuredSummary:
+async def _generate_summary(
+    inputs: AnalysisInputs,
+    candidates: List[CandidateOpinion],
+    evidence: List[EvidenceItem],
+) -> tuple[StructuredSummary, ResearchReview]:
     prompt = _build_prompt(inputs, candidates)
 
     # 工具调用路径: 强制十二维度逐一分析后提交
@@ -1216,19 +1240,23 @@ async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOp
             f"[analysis.report] {inputs.stock_code} 摘要生成失败 "
             f"(tool_reason={tool_reason}, parsed={'dict' if isinstance(parsed, dict) else type(parsed).__name__})"
         )
-        return StructuredSummary(
-            lynch_category="",
-            stance="",
-            thesis_summary="",
-            core_counter_evidence="",
-            invalidation_condition="",
-            risk_notes="LLM 生成失败，请参考以上原始数据自行判断。",
+        return (
+            StructuredSummary(
+                lynch_category="",
+                stance="",
+                thesis_summary="",
+                core_counter_evidence="",
+                invalidation_condition="",
+                risk_notes="LLM 生成失败，请参考以上原始数据自行判断。",
+            ),
+            ResearchReview(),
         )
     lynch_category = parsed.get("lynch_category", "")
     if lynch_category not in _VALID_LYNCH_CATEGORIES:
         lynch_category = "unclear"
     dimension_scores = await _score_dimensions(analyses, inputs.stock_code)
-    return StructuredSummary(
+    review = review_dimension_analyses(analyses, evidence)
+    summary = StructuredSummary(
         lynch_category=lynch_category,
         stance=parsed.get("stance", ""),
         company_quality_stance=parsed.get("company_quality_stance", ""),
@@ -1245,6 +1273,7 @@ async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOp
         dimension_scores=dimension_scores,
         dimension_analyses=analyses or None,
     )
+    return summary, review
 
 
 def _resolve_stock_name(stock_code: str, candidate_scores) -> str:
@@ -1272,6 +1301,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         fundamentals,
         market_context,
         margin_signal,
+        primary_evidence,
     ) = await asyncio.gather(
         _load_knowledge_excerpts(),
         get_shareholder_count_trend(stock_code),
@@ -1281,6 +1311,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         get_ths_fundamentals(stock_code),
         get_market_context(stock_code),
         get_margin_signal(stock_code),
+        get_cninfo_primary_evidence(stock_code),
     )
 
     # 行业反查的起点是 F10 公司概要页里的申万行业名，所以必须等 fundamentals 回来。
@@ -1342,6 +1373,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         market_context=market_context,
         freight_signal=freight_signal,
         margin_signal=margin_signal,
+        primary_evidence=primary_evidence,
     )
 
     # 雪球个股数据必须借道已登录的浏览器会话，且只在会话存活期内可用；
@@ -1381,10 +1413,17 @@ async def generate_report(stock_code: str) -> AnalysisReport:
 
     evidence = build_evidence_ledger(inputs, candidates)
     research_quality = evaluate_research_quality(evidence)
-    summary = await _generate_summary(inputs, candidates)
-    # 置信度不能高于证据覆盖质量；避免模型在缺数据时仍自报高置信度。
+    summary, review = await _generate_summary(inputs, candidates, evidence)
+    # 置信度先受证据覆盖率上限约束，再扣除跨维度冲突/弱证据惩罚。
     if summary.confidence:
-        summary.confidence = round(min(summary.confidence, research_quality.coverage), 3)
+        summary.confidence = round(
+            max(
+                0.0,
+                min(summary.confidence, research_quality.coverage)
+                - review.confidence_penalty,
+            ),
+            3,
+        )
 
     return AnalysisReport(
         stock_code=stock_code,
@@ -1404,8 +1443,10 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         xueqiu_stock=inputs.xueqiu_stock,
         debate=inputs.debate,
         sentiment=inputs.sentiment,
+        primary_evidence=primary_evidence,
         evidence=evidence,
         research_quality=research_quality,
+        review=review,
         dividend_chart=_build_dividend_chart(
             dividend_history, buyback_history, valuation, quote
         ),
