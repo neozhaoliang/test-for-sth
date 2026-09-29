@@ -170,7 +170,7 @@ async def generate_report(
         get_profitability_trend(stock_code),
         get_ths_fundamentals(stock_code),
         get_market_context(stock_code, as_of=request.as_of),
-        get_margin_signal(stock_code),
+        get_margin_signal(stock_code, as_of=request.as_of),
         get_cninfo_primary_evidence(stock_code, as_of=request.as_of),
         get_a_share_structure(stock_code),
         get_valuation_history(stock_code, as_of=request.as_of),
