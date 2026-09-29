@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from analysis.evidence import build_evidence_ledger, evaluate_research_quality
+from analysis.evidence import EvidenceItem, build_evidence_ledger, evaluate_research_quality
 
 
 def _inputs(**kwargs):
