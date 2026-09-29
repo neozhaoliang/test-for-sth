@@ -21,6 +21,7 @@ A股历史日线价格数据源，基于 akshare，本地 CSV 缓存避免重复
 """
 
 import asyncio
+import logging
 import pathlib
 from collections import defaultdict
 from datetime import date, datetime, timedelta
@@ -30,7 +31,8 @@ import akshare as ak
 import pandas as pd
 
 import config
-from tools.utils import utils
+
+logger = logging.getLogger("MediaCrawler")
 
 # 按股票代码分别加锁，不同股票的缓存读写/网络请求可以并发，
 # 同一股票的并发请求仍序列化以避免缓存文件读写竞态。
@@ -89,7 +91,7 @@ async def get_price_history(code: str, start: date, end: Optional[date] = None) 
                 cached = cached.dropna(subset=["date"])
                 cached = cached[cached["date"].str.match(r"^\d{4}-\d{2}-\d{2}$", na=False)]
             except Exception as e:
-                utils.logger.warning(f"[price_source] Failed to read cache for {code}: {e}")
+                logger.warning(f"[price_source] Failed to read cache for {code}: {e}")
                 cached = pd.DataFrame(columns=["date", "close"])
 
         need_fetch = True
@@ -110,7 +112,7 @@ async def get_price_history(code: str, start: date, end: Optional[date] = None) 
                     end.strftime("%Y%m%d"),
                 )
             except Exception as e:
-                utils.logger.error(f"[price_source] akshare fetch failed for {code}: {e}")
+                logger.error(f"[price_source] akshare fetch failed for {code}: {e}")
                 fresh = pd.DataFrame(columns=["date", "close"])
 
             if not fresh.empty:
