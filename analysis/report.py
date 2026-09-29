@@ -252,7 +252,12 @@ async def _load_knowledge_excerpts() -> List[KnowledgeExcerpt]:
     """知识库不按股票筛选，全量加载 (原文已在知识库加载阶段由 LLM 提炼为投资观点摘要)。"""
     entries = await ensure_knowledge_base_loaded()
     return [
-        KnowledgeExcerpt(source=e.source, title=e.title, distilled=e.distilled)
+        KnowledgeExcerpt(
+            source=e.source,
+            title=e.title,
+            distilled=e.distilled,
+            source_url=e.source_url,
+        )
         for e in entries
         if e.distilled
     ]
@@ -922,7 +927,8 @@ def _build_candidates_block(candidates: List[CandidateOpinion]) -> str:
 def _build_knowledge_block(knowledge_excerpts: List[KnowledgeExcerpt]) -> str:
     lines = []
     for k in knowledge_excerpts:
-        lines.append(f"- 《{k.title}》 ({k.source})")
+        link = f" | {k.source_url}" if k.source_url else ""
+        lines.append(f"- 《{k.title}》 ({k.source}){link}")
         lines.append(f"    {k.distilled}")
     if not lines:
         lines.append("(暂无背景资料)")
