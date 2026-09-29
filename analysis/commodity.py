@@ -32,13 +32,16 @@
 """
 
 import asyncio
+import logging
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import akshare as ak
 
-from tools.utils import utils
+
+logger = logging.getLogger("MediaCrawler")
+
 
 _COPPER_KEYWORDS = ("铜矿", "铜冶炼", "铜加工", "电解铜", "阴极铜")
 
@@ -193,7 +196,7 @@ async def _get_futures_anchor(name: str, symbol: str, unit: str) -> Optional[Dic
     try:
         df = await asyncio.to_thread(ak.futures_main_sina, symbol=symbol)
     except Exception as e:
-        utils.logger.warning(f"[commodity] futures_main_sina({symbol}) failed: {e}")
+        logger.warning(f"[commodity] futures_main_sina({symbol}) failed: {e}")
         return None
     if df is None or df.empty or "收盘价" not in df.columns:
         return None
@@ -274,7 +277,7 @@ async def _get_sh_copper_price() -> Optional[float]:
     try:
         df = await asyncio.to_thread(ak.futures_main_sina, symbol="CU0")
     except Exception as e:
-        utils.logger.error(f"[commodity] futures_main_sina(CU0) failed: {e}")
+        logger.error(f"[commodity] futures_main_sina(CU0) failed: {e}")
         return None
     if df is None or df.empty:
         return None
@@ -285,7 +288,7 @@ async def _get_comex_copper_price() -> Optional[float]:
     try:
         df = await asyncio.to_thread(ak.futures_global_spot_em)
     except Exception as e:
-        utils.logger.error(f"[commodity] futures_global_spot_em failed: {e}")
+        logger.error(f"[commodity] futures_global_spot_em failed: {e}")
         return None
     if df is None or df.empty:
         return None
@@ -300,7 +303,7 @@ async def _get_rmb_trend() -> Optional[str]:
     try:
         df = await asyncio.to_thread(ak.currency_boc_safe)
     except Exception as e:
-        utils.logger.error(f"[commodity] currency_boc_safe failed: {e}")
+        logger.error(f"[commodity] currency_boc_safe failed: {e}")
         return None
     if df is None or df.empty or len(df) < 30:
         return None
@@ -329,7 +332,7 @@ async def get_rmb_trend_signal() -> Optional[Dict]:
 
     trend = await _get_rmb_trend()
     if trend is None:
-        utils.logger.warning("[commodity] 人民币汇率趋势获取失败，本维度记为暂缺")
+        logger.warning("[commodity] 人民币汇率趋势获取失败，本维度记为暂缺")
         return None
 
     value = {
