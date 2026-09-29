@@ -213,4 +213,5 @@ async def get_macro_rate_context() -> Optional[Dict]:
         "us": us,
         "china": china,
         "warnings": warnings,
+        "source_tier": "A" if us else "B",
     }
