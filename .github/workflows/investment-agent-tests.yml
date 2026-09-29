@@ -50,4 +50,4 @@ jobs:
           node --check /tmp/investment-webui.js
 
       - name: Run investment core unit tests
-        run: pytest -q tests/test_analysis_evidence.py tests/test_analysis_reviewer.py tests/test_management_capital.py tests/test_macro_rates.py tests/test_rd_team.py
+        run: pytest -q tests/test_analysis_evidence.py tests/test_analysis_reviewer.py tests/test_management_capital.py tests/test_macro_rates.py tests/test_a_share_structure.py tests/test_primary_sources.py tests/test_rd_team.py
