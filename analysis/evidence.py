@@ -136,27 +136,32 @@ def _stale_evidence(
     today: Optional[date] = None,
 ) -> List[Dict[str, Any]]:
     today = today or datetime.now(ZoneInfo("Asia/Shanghai")).date()
-    rows: List[Dict[str, Any]] = []
-    seen_categories = set()
+    by_category: Dict[str, List[tuple[EvidenceItem, date]]] = {}
     for item in evidence:
-        max_age = _FRESHNESS_DAYS.get(item.category)
-        if max_age is None or item.category in seen_categories:
+        if item.category not in _FRESHNESS_DAYS:
             continue
         as_of = _parse_as_of_date(item.as_of)
-        if as_of is None:
+        if as_of is not None:
+            by_category.setdefault(item.category, []).append((item, as_of))
+
+    rows: List[Dict[str, Any]] = []
+    for category, dated_items in by_category.items():
+        max_age = _FRESHNESS_DAYS[category]
+        newest_item, newest_date = max(dated_items, key=lambda pair: pair[1])
+        age = (today - newest_date).days
+        # A current item in the same category rescues older snapshots from being treated as
+        # the category's active evidence vintage.
+        if age <= max_age:
             continue
-        age = (today - as_of).days
-        if age > max_age:
-            seen_categories.add(item.category)
-            rows.append(
-                {
-                    "category": item.category,
-                    "label": item.label,
-                    "as_of": as_of.isoformat(),
-                    "age_days": age,
-                    "max_age_days": max_age,
-                }
-            )
+        rows.append(
+            {
+                "category": category,
+                "label": newest_item.label,
+                "as_of": newest_date.isoformat(),
+                "age_days": age,
+                "max_age_days": max_age,
+            }
+        )
     rows.sort(key=lambda x: x["age_days"], reverse=True)
     return rows
 
@@ -602,12 +607,15 @@ def evaluate_research_quality(
     *,
     today: Optional[date] = None,
 ) -> ResearchQuality:
+    stale = _stale_evidence(evidence, today=today)
+    stale_categories = {x["category"] for x in stale}
     categories = {e.category for e in evidence}
+    effective_categories = categories - stale_categories
     covered: List[str] = []
     missing: List[str] = []
 
     for dim, needs in _DIMENSION_REQUIREMENTS.items():
-        if any(category in categories for category in needs):
+        if any(category in effective_categories for category in needs):
             covered.append(dim)
         else:
             missing.append(dim)
@@ -625,7 +633,6 @@ def evaluate_research_quality(
     )
 
     warnings: List[str] = []
-    stale = _stale_evidence(evidence, today=today)
     if stale:
         detail = "；".join(
             f"{x['label']}截止{x['as_of']}（{x['age_days']}天前）"
