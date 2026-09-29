@@ -749,6 +749,54 @@ function renderManagementCapitalBlock(mc) {
   return html;
 }
 
+function renderMacroRatesBlock(m) {
+  if (!m) {
+    return '<div class="evidence-block missing"><b>中美利率环境:</b> 暂缺；不据此讨论加息/降息影响</div>';
+  }
+  let html = '<div class="evidence-block"><b>中美利率环境:</b><ul>';
+  const us = m.us || {};
+  const ffFresh = !!((us.fed_target_freshness || {}).fresh);
+  if (ffFresh && us.fed_target_lower_pct !== null && us.fed_target_lower_pct !== undefined &&
+      us.fed_target_upper_pct !== null && us.fed_target_upper_pct !== undefined) {
+    html += '<li>Fed目标区间: ' + us.fed_target_lower_pct + '%~' + us.fed_target_upper_pct +
+      '%（' + escapeHtml(us.fed_target_upper_as_of || '') + '），上限较约180日前 ' +
+      (us.fed_target_upper_change_180d_pp >= 0 ? '+' : '') + us.fed_target_upper_change_180d_pp + 'pct</li>';
+  } else {
+    html += '<li>Fed目标区间: 数据缺失或过期</li>';
+  }
+  const u10Fresh = !!((us.us10y_freshness || {}).fresh);
+  if (u10Fresh && us.us10y_yield_pct !== null && us.us10y_yield_pct !== undefined) {
+    html += '<li>美国10Y国债: ' + us.us10y_yield_pct + '%（' + escapeHtml(us.us10y_as_of || '') +
+      '），30日变化 ' + (us.us10y_change_30d_pp >= 0 ? '+' : '') + us.us10y_change_30d_pp +
+      'pct，90日变化 ' + (us.us10y_change_90d_pp >= 0 ? '+' : '') + us.us10y_change_90d_pp + 'pct</li>';
+  } else {
+    html += '<li>美国10Y国债: 数据缺失或过期</li>';
+  }
+
+  const cn = m.china || {};
+  const cnFresh = !!((cn.freshness || {}).fresh);
+  if (cnFresh) {
+    html += '<li>中国LPR: 1年期 ' + cn.lpr_1y_pct + '%，5年期 ' + cn.lpr_5y_pct +
+      '%（' + escapeHtml(cn.as_of || '') + '）</li>';
+  } else {
+    html += '<li>中国LPR: 数据缺失或过期</li>';
+  }
+  html += '</ul>';
+  if (us.source_urls) {
+    const links = [];
+    if (us.source_urls.target_upper) links.push(safeExternalLink(us.source_urls.target_upper, 'Fed目标上限/FRED'));
+    if (us.source_urls.us10y) links.push(safeExternalLink(us.source_urls.us10y, '美国10Y/FRED'));
+    if (links.length) html += '<div>' + links.join(' · ') + '</div>';
+  }
+  if (cn.source_url) html += '<div>' + safeExternalLink(cn.source_url, '中国LPR来源') + '</div>';
+  (m.warnings || []).forEach(x => {
+    html += '<div class="credibility-note">⚠ ' + escapeHtml(x) + '</div>';
+  });
+  html += '<div class="credibility-note">LPR是贷款市场报价利率，不等同于央行政策利率；过期序列不会作为当前宏观证据。</div>';
+  html += '</div>';
+  return html;
+}
+
 function renderXueqiuBlock(x) {
   if (!x) {
     return '<div class="evidence-block missing"><b>雪球个股维度:</b> 暂缺 (本次未能取到机构持仓/讨论热度)</div>';
@@ -985,6 +1033,7 @@ function renderEvidenceSection(report) {
   html += renderFundamentalsBlock(report.fundamentals);
   html += renderRdTeamBlock(report.rd_team);
   html += renderManagementCapitalBlock(report.management_capital);
+  html += renderMacroRatesBlock(report.macro_rates);
   html += renderXueqiuBlock(report.xueqiu_stock);
 
   const db = report.debate;
