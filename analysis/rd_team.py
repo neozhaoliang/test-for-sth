@@ -86,8 +86,18 @@ def parse_rd_team_text(text: str) -> Optional[Dict]:
     normalized = text.replace("\u3000", " ")
     normalized = re.sub(r"[ \t]+", " ", normalized)
 
+    # 年报附近往往还存在“全体员工教育结构”表。研发学历/年龄只能在
+    # “研发人员数量/研发人员情况”之后的局部窗口内解析，避免串表。
+    anchors = [
+        normalized.find("研发人员数量"),
+        normalized.find("研发人员的数量"),
+        normalized.find("研发人员情况"),
+    ]
+    anchors = [x for x in anchors if x >= 0]
+    scoped = normalized[min(anchors): min(anchors) + 10000] if anchors else normalized
+
     headcount = _first_match(
-        normalized,
+        scoped,
         [
             r"(?:公司)?研发人员(?:的)?数量\s*[（(]?人?[）)]?\s*[：:]?\s*([\d,]+)",
             r"研发人员人数\s*[：:]?\s*([\d,]+)",
@@ -95,7 +105,7 @@ def parse_rd_team_text(text: str) -> Optional[Dict]:
         _to_int,
     )
     ratio = _first_match(
-        normalized,
+        scoped,
         [
             r"研发人员数量占公司总人数的比例\s*[（(]?%[）)]?\s*[：:]?\s*([\d.]+)",
             r"研发人员(?:人数)?占比\s*[：:]?\s*([\d.]+)\s*%",
@@ -104,7 +114,7 @@ def parse_rd_team_text(text: str) -> Optional[Dict]:
     )
 
     education = _parse_labeled_counts(
-        normalized,
+        scoped,
         {
             "doctor": [r"博士研究生", r"博士"],
             "master": [r"硕士研究生", r"硕士"],
@@ -114,7 +124,7 @@ def parse_rd_team_text(text: str) -> Optional[Dict]:
         },
     )
     age = _parse_labeled_counts(
-        normalized,
+        scoped,
         {
             "under_30": [r"30\s*岁以下（不含\s*30\s*岁）", r"30\s*岁以下"],
             "30_to_40": [r"30\s*[-—至]\s*40\s*岁[^\d\n]*"],
@@ -123,6 +133,15 @@ def parse_rd_team_text(text: str) -> Optional[Dict]:
             "60_or_above": [r"60\s*岁及以上", r"60\s*岁以上"],
         },
     )
+
+    if headcount:
+        edu_sum = sum(education.values()) if education else 0
+        age_sum = sum(age.values()) if age else 0
+        # OCR/PDF 文本顺序异常时宁可丢掉结构数据，也不要把别的员工表拼进来。
+        if edu_sum and not (headcount * 0.7 <= edu_sum <= headcount * 1.3):
+            education = {}
+        if age_sum and not (headcount * 0.7 <= age_sum <= headcount * 1.3):
+            age = {}
 
     if headcount is None and ratio is None and not education and not age:
         return None
