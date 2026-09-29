@@ -259,7 +259,7 @@ async def generate_report(
     candidates = await collect_live_social_context(inputs, candidate_scores)
 
     evidence = build_evidence_ledger(inputs, candidates)
-    research_quality = evaluate_research_quality(evidence)
+    research_quality = evaluate_research_quality(evidence, today=request.as_of)
     research_profile = classify_research_profile(
         fundamentals=inputs.fundamentals,
         management_capital=inputs.management_capital,
