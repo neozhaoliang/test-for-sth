@@ -887,7 +887,8 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
             f"(疑似同花顺改版, 行业涨跌家数维度会退化为暂缺)"
         )
 
-    sources = [_URLS[p].format(code6=code6) for p in _PAGES if pages.get(p)]
+    source_map = {p: _URLS[p].format(code6=code6) for p in _PAGES if pages.get(p)}
+    sources = list(source_map.values())
 
     return {
         "facts": facts,
@@ -903,6 +904,7 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
         "governance_alerts": governance_alerts,
         "missing": missing,
         "sources": sources,
+        "source_map": source_map,
     }
 
 
