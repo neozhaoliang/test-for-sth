@@ -72,8 +72,11 @@ def test_management_capital_builds_5y_10y_record_without_scalar_score():
     assert record["five_year"]["refinancing_records"] == 1
     assert record["five_year"]["insider_reduction_announcements"] == 1
     assert record["five_year"]["governance_negative_announcements"] == 1
-    assert record["execution"]["roe_avg_pct"] == 5.5
+    assert record["execution"]["roe_start_pct"] == 4.0
+    assert record["execution"]["roe_latest_pct"] == 7.0
+    assert record["execution"]["roe_change_pp"] == 3.0
     assert record["execution"]["net_profit_growth_positive_periods"] == 3
+    assert record["five_year"]["primary_refinancing_announcements"] == 1
 
 
 def test_management_capital_without_primary_is_b_tier_and_notes_limit():
