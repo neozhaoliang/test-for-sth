@@ -139,3 +139,33 @@ def test_stale_evidence_is_warning_not_structural_failure():
 
     assert result.ok
     assert any(x.code == "stale_evidence_present" for x in result.warnings)
+
+
+
+def test_historical_report_rejects_evidence_available_after_cutoff():
+    report = valid_report()
+    report.research_mode = "historical"
+    report.as_of = "2024-06-30"
+    report.evidence[0].period = "2024-03-31"
+    report.evidence[0].published_at = "2024-04-25"
+    report.evidence[0].available_at = "2024-07-01"
+
+    result = validate_report(report)
+
+    assert not result.ok
+    assert any(x.code == "future_evidence" for x in result.errors)
+
+
+def test_historical_report_allows_later_retrieval_time():
+    report = valid_report()
+    report.research_mode = "historical"
+    report.as_of = "2024-06-30"
+    report.evidence[0].period = "2024-03-31"
+    report.evidence[0].published_at = "2024-04-25"
+    report.evidence[0].available_at = "2024-04-25"
+    report.evidence[0].retrieved_at = "2026-09-29T12:00:00+08:00"
+
+    result = validate_report(report)
+
+    assert result.ok
+    assert not any(x.code == "future_evidence" for x in result.errors)
