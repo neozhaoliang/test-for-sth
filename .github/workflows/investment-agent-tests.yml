@@ -61,6 +61,7 @@ jobs:
             analysis/knowledge_base.py \
             analysis/fundamentals.py \
             analysis/filing_calendar.py \
+            analysis/filing_archive.py \
             model/m_analysis.py \
             config/bilibili_config.py \
             media_platform/bilibili/client.py \
@@ -118,5 +119,6 @@ jobs:
             tests/test_a_share_structure.py \
             tests/test_primary_sources.py \
             tests/test_filing_calendar.py \
+            tests/test_filing_archive.py \
             tests/test_policy_context.py \
             tests/test_rd_team.py
