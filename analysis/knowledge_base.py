@@ -404,6 +404,12 @@ async def ensure_loaded() -> List[KnowledgeEntry]:
     return _cache
 
 
+def invalidate_cache() -> None:
+    """数据抓取完成后调用；下次分析会重新扫描原始文件，但复用逐条蒸馏缓存。"""
+    global _cache
+    _cache = None
+
+
 def get_all_distilled() -> List[KnowledgeEntry]:
     """返回已加载的知识库条目 (仅供已调用过 ensure_loaded() 之后使用)，不做任何筛选。"""
     return _cache or []
