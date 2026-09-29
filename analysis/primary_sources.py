@@ -80,6 +80,14 @@ def _is_a_share_code(code6: str) -> bool:
     return code6.startswith(("0", "3", "6", "4", "8", "9"))
 
 
+def _query_window(as_of: date, lookback_years: int) -> Tuple[str, str]:
+    try:
+        start = as_of.replace(year=as_of.year - lookback_years)
+    except ValueError:
+        start = as_of - timedelta(days=365 * lookback_years)
+    return start.strftime("%Y%m%d"), as_of.strftime("%Y%m%d")
+
+
 def _pick(row, *names):
     for name in names:
         if name not in row:
@@ -290,13 +298,7 @@ async def get_cninfo_primary_evidence(
         return []
 
     now = as_of or datetime.now(ZoneInfo("Asia/Shanghai")).date()
-    try:
-        start = now.replace(year=now.year - lookback_years)
-    except ValueError:
-        start = now - timedelta(days=365 * lookback_years)
-
-    start_date = start.strftime("%Y%m%d")
-    end_date = now.strftime("%Y%m%d")
+    start_date, end_date = _query_window(now, lookback_years)
     semaphore = asyncio.Semaphore(_CONCURRENCY)
 
     import httpx
