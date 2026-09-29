@@ -20,7 +20,10 @@ jobs:
           python-version: "3.11"
 
       - name: Install lightweight test dependencies
-        run: python -m pip install --upgrade pip pytest pytest-asyncio "pydantic>=2,<3" "pypdf>=5,<7"
+        run: python -m pip install --upgrade pip pytest pytest-asyncio uv "pydantic>=2,<3" "pypdf>=5,<7"
+
+      - name: Verify uv lock is in sync
+        run: uv lock --locked
 
       - name: Compile investment analysis modules
         run: python -m compileall -q analysis/evidence.py analysis/reviewer.py analysis/management_capital.py analysis/macro_rates.py analysis/a_share_structure.py analysis/valuation_history.py analysis/rd_team.py analysis/primary_sources.py analysis/report.py analysis/knowledge_base.py analysis/fundamentals.py model/m_analysis.py config/bilibili_config.py media_platform/bilibili/client.py media_platform/bilibili/core.py store/bilibili/__init__.py web/app.py
