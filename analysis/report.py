@@ -498,10 +498,11 @@ def _build_management_capital_block(data: Optional[Dict]) -> str:
         seg = [
             f"观察期 {execution.get('period_start')}~{execution.get('period_end')}",
         ]
-        if execution.get("roe_avg_pct") is not None:
+        if execution.get("roe_latest_pct") is not None:
             seg.append(
-                f"ROE均值 {execution.get('roe_avg_pct')}%，最低 {execution.get('roe_min_pct')}%，"
-                f"最新 {execution.get('roe_latest_pct')}%"
+                f"ROE从 {execution.get('roe_start_pct')}% 变为 {execution.get('roe_latest_pct')}% "
+                f"({execution.get('roe_change_pp'):+}pct；区间 "
+                f"{execution.get('roe_min_pct')}%~{execution.get('roe_max_pct')}%)"
             )
         if execution.get("net_profit_growth_observations"):
             seg.append(
@@ -525,7 +526,8 @@ def _build_management_capital_block(data: Optional[Dict]) -> str:
             f"累计每10股现金分红 {row.get('cash_dividend_per_10_total')} 元；"
             f"回购记录 {row.get('buyback_records')} 次，已回购金额合计 "
             f"{_yi(row.get('buyback_actual_amount_yuan'))}；"
-            f"再融资记录 {row.get('refinancing_records')} 次；"
+            f"F10再融资记录 {row.get('refinancing_records')} 次，"
+            f"巨潮再融资公告 {row.get('primary_refinancing_announcements')} 条；"
             f"巨潮减持公告 {row.get('insider_reduction_announcements')} 条；"
             f"处罚/警示/问询等治理负面公告 {row.get('governance_negative_announcements')} 条"
         )
