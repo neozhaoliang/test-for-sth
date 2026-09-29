@@ -45,11 +45,15 @@ def _exchange_of(stock_code: str) -> Optional[str]:
     return None
 
 
-def _fetch_series(exchange: str, symbol: str) -> List[Dict]:
+def _fetch_series(
+    exchange: str,
+    symbol: str,
+    as_of: Optional[datetime.date] = None,
+) -> List[Dict]:
     series: List[Dict] = []
-    today = datetime.date.today()
+    reference = as_of or datetime.date.today()
     for back in range(0, _MAX_CALENDAR_BACK):
-        d = (today - datetime.timedelta(days=back)).strftime("%Y%m%d")
+        d = (reference - datetime.timedelta(days=back)).strftime("%Y%m%d")
         try:
             if exchange == "sse":
                 df = ak.stock_margin_detail_sse(date=d)
@@ -68,7 +72,11 @@ def _fetch_series(exchange: str, symbol: str) -> List[Dict]:
     return series
 
 
-async def get_margin_signal(stock_code: str) -> Optional[Dict]:
+async def get_margin_signal(
+    stock_code: str,
+    *,
+    as_of: Optional[datetime.date] = None,
+) -> Optional[Dict]:
     """
     该股近几个交易日的融资余额序列。样本少于 3 天或接口不可用时返回 None
     (不影响报告其他维度)。
@@ -79,7 +87,7 @@ async def get_margin_signal(stock_code: str) -> Optional[Dict]:
     symbol = stock_code.strip().upper()[2:]
     try:
         series = await asyncio.wait_for(
-            asyncio.to_thread(_fetch_series, exchange, symbol), timeout=_FETCH_BUDGET_S
+            asyncio.to_thread(_fetch_series, exchange, symbol, as_of), timeout=_FETCH_BUDGET_S
         )
     except asyncio.TimeoutError:
         utils.logger.warning(f"[margin] {stock_code} 融资融券数据获取超时, 跳过该维度")
