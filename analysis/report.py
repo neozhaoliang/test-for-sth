@@ -38,6 +38,7 @@ from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.realtime_price import get_realtime_quote, get_stock_name
 from analysis.debate import derive_sentiment, get_debate
+from analysis.evidence import build_evidence_ledger, evaluate_research_quality
 from analysis.session import AnalysisBrowserSession
 from analysis.shareholder import get_buyback_history, get_dividend_history, get_shareholder_count_trend
 from analysis.xueqiu_stock import get_xueqiu_stock_data
@@ -50,7 +51,7 @@ _MAX_LATEST_POSTS = 5
 _MAX_HISTORICAL_THESIS = 5
 _MIN_CORROBORATING_RECORDS = 2  # 历史验证记录 < 该值时提示"参考价值有限"
 
-_PROMPT_VERSION = "v11-nine-dimension-tools"
+_PROMPT_VERSION = "v12-evidence-12-dimension"
 
 # 实测: 300308 的 v7 prompt 输出 6060 tokens，其中约 5000 花在 thinking 块上。
 # 报告类 prompt 的思考预算随输入维度数量增长，上限必须留足余量，否则截断到 len=0。
@@ -61,7 +62,7 @@ _VALID_LYNCH_CATEGORIES = {
     "fast_grower", "stalwart", "cyclical", "turnaround", "asset_play", "slow_grower", "unclear",
 }
 
-_PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类似彼得林奇: 先判断这是哪一类机会，再给出一个明确、可被证伪的结论。禁止给"多空都有可能""需持续观察"这类模糊结论——你必须选边站，哪怕证据不完美。
+_PROMPT_TEMPLATE = """你是一名证券研究助手。你的任务不是预测短期股价，而是基于可核验数据形成可被证伪的研究判断。最终给出看多/中性/看空之一；证据不足或公司质量与当前赔率明显冲突时允许中性，但必须明确说明冲突来自哪里。
 
 **第一原则: 这是判断，不是叙述。** 市场上关于一只股票的研报和新闻，绝大多数是股价上涨之后才出现的追认叙事——它们只能解释"它为什么涨了"，回答不了"它在什么情况下会崩"。你的任务是拿可核验的披露数据去找出这家公司的脆弱性，而不是复述市场上的看多故事。一家公司当前涨得好，和它是否脆弱，是两个可以同时成立的判断。
 
@@ -137,8 +138,9 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 {freight_block}
 
 你必须通过**调用工具**完成全部维度分析，任何一个维度都不允许跳过，每个维度的分析都要落到数据块的具体数字上：
-1. 依次调用 analyze_management、analyze_business_fundamentals、analyze_chip_flow、analyze_price_position、analyze_cycle_position、analyze_policy_geopolitics、analyze_retail_sentiment、analyze_shareholder_returns、analyze_growth_elasticity 九个工具，在每个工具的 analysis 参数里写出该维度的完整分析；
-2. 全部九个维度完成后，调用 submit_report 提交最终结构化报告。维度分析里用过的数据块数字必须体现在最终报告字段中。
+1. 依次调用 analyze_management、analyze_business_fundamentals、analyze_rd_capability、analyze_chip_flow、analyze_price_position、analyze_cycle_position、analyze_policy_geopolitics、analyze_retail_sentiment、analyze_shareholder_returns、analyze_growth_elasticity、analyze_a_share_structure、analyze_risk_quality 十二个工具；
+2. 全部十二个维度完成后，调用 submit_report 提交最终结构化报告。维度分析里用过的数据块数字必须体现在最终报告字段中。
+3. 必须把“企业长期质量”和“当前股票赔率”分开判断：前者主要看治理、基本面、研发、股东回报、成长、财务风险；后者主要看估值位置、周期、筹码、政策、散户情绪和A股资金结构。优秀公司在价格过高时可以给中性；普通公司在极端低估时也不能仅凭便宜自动看多。
 
 **结论约束 (违反即视为不合格输出):**
 - analyze_business_fundamentals 中客户/供应商集中度 ≥50%、经营现金流/净利润 <0.8、研发强度 <3% 任一项成立，或 analyze_price_position 中静态市盈率 >50 / 市净率 >8 成立，就**不得**给出 bullish——除非能用数据块里的具体数字正面反驳 (例如证明集中度多报告期持续下降、现金流低是明确的季节性且有往期数字佐证)。空泛的辩护不算反驳。
@@ -154,7 +156,7 @@ _PROMPT_TEMPLATE = """你是一名有明确立场的证券分析师，风格类�
 - 工具名、"维度"、"数据块"、"命中/未命中"、"六查"、"第 N 步"、步骤编号，全部是给你自己推理用的流程语言。`thesis_summary` 等字段是写给投资者看的结论，**一律不得出现这些词**，也不得出现"经检查""多维验证""反证"这类自我描述。
 - 要表达某项脆弱性成立，就直接把它作为事实陈述出来: 写"前五大客户占营收 75.98%，单一客户流失即可重创业绩"，而不是写"客户集中度一项命中"。语气要像研究员写给基金经理的段落，不是分析流程的日志。
 - **分条列举时必须换行**: 每个要点独占一行，行首用 "1. " / "2. " 或 "· "，行与行之间用 \\n 分隔 (JSON 字符串里的换行必须写成 \\n 这个转义序列)。不要把多个要点挤成一行连续的文字，也不要整段不分行。
-- **`thesis_summary` 必须按十个维度逐一展开详细阐述**: 每个维度独立成段 (编号 1-10，顺序与工具一致: 管理层→基本面→研发能力→筹码→股价位置→周期→政策形势→散户情绪→股东回报→成长弹性)，每段保留该维度分析里的关键数字、判断与推理链，不得把某个维度压缩成一句话带过，也不得跳过任何一个维度。总长 1500 字以内。十个维度都写完后，再加一段综合立场。"""
+- **`thesis_summary` 必须按十二个维度逐一展开详细阐述**: 每个维度独立成段 (编号 1-12，顺序与工具一致: 管理层→基本面→研发能力→筹码→股价位置→周期→政策形势→散户情绪→股东回报→成长弹性→A股资金结构→财务质量与尾部风险)，每段保留关键数字、判断与推理链，不得跳过。总长 1800 字以内。十二个维度都写完后，再加一段综合立场。"""
 
 
 @dataclass
@@ -1001,6 +1003,8 @@ _ANALYSIS_TOOL_NAMES = [
     "analyze_retail_sentiment",
     "analyze_shareholder_returns",
     "analyze_growth_elasticity",
+    "analyze_a_share_structure",
+    "analyze_risk_quality",
 ]
 
 _ANALYSIS_TOOLS = [
@@ -1044,15 +1048,23 @@ _ANALYSIS_TOOLS = [
         "analyze_growth_elasticity",
         "股票弹性 (未来增长预期): 引用'估值'块静态vs动态PE差与'盈利能力与成本弹性'块趋势, 判断当前股价隐含的增长预期是透支还是过度悲观, 以及增长来自哪里。",
     ),
+    _analysis_tool(
+        "analyze_a_share_structure",
+        "A股资金结构与市场风格: 综合'大盘与风格'、'融资盘与流通盘'、雪球机构持仓聚合、股东户数以及知识库中的公募/险资/国家资本/ETF/风格切换记录。只使用本报告实际提供的公开数据；未提供汇金、证金、诚通、国新、险资、公募等具体持仓时必须写暂缺，严禁猜测'国家队正在买/卖'。",
+    ),
+    _analysis_tool(
+        "analyze_risk_quality",
+        "财务质量与尾部风险: 综合经营现金流质量、应收/存货/负债/盈利率趋势、客户供应商集中度、再融资、质押、处罚问询、重大事项等。区分正常经营波动和可能永久损害股东价值的风险；没有数据的风险不得反向断言为不存在。",
+    ),
 ]
 
 _SUBMIT_REPORT_TOOL = {
     "name": "submit_report",
     "description": (
-        "九个维度全部分析完成后提交最终结构化报告。字段要求: "
+        "十二个维度全部分析完成后提交最终结构化报告。字段要求: "
         "lynch_category 从 fast_grower/stalwart/cyclical/turnaround/asset_play/slow_grower/unclear 中选; "
-        "stance 从 bullish/bearish/neutral 中选 (neutral 仅在证据真正相互抵消时才能选, 不能用来逃避判断); "
-        "thesis_summary 必须按十个维度逐一展开详细阐述: 每个维度独立成段 (编号1-10, 顺序同分析工具), "
+        "stance 从 bullish/bearish/neutral 中选; company_quality_stance 与 current_odds_stance 也从同一枚举中选，分别表示企业长期质量和当前股票赔率; "
+        "thesis_summary 必须按十二个维度逐一展开详细阐述: 每个维度独立成段 (编号1-12, 顺序同分析工具), "
         "每段保留该维度的关键数字与推理链, 不得压缩成一句话或跳过; 十个维度写完后加一段综合立场; "
         "引用至少四个不同方面的具体数字并正面回应对结论不利的脆弱性事实, 1500字以内, 分条每点一行; "
         "core_counter_evidence 必须填写与结论相悖的最强证据并带具体数字, 一条都没有才写'未发现'; "
@@ -1067,6 +1079,9 @@ _SUBMIT_REPORT_TOOL = {
                 "enum": list(_VALID_LYNCH_CATEGORIES),
             },
             "stance": {"type": "string", "enum": list(_VALID_STANCES)},
+            "company_quality_stance": {"type": "string", "enum": list(_VALID_STANCES)},
+            "current_odds_stance": {"type": "string", "enum": list(_VALID_STANCES)},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
             "thesis_summary": {"type": "string"},
             "core_counter_evidence": {"type": "string"},
             "invalidation_condition": {"type": "string"},
@@ -1075,6 +1090,9 @@ _SUBMIT_REPORT_TOOL = {
         "required": [
             "lynch_category",
             "stance",
+            "company_quality_stance",
+            "current_odds_stance",
+            "confidence",
             "thesis_summary",
             "core_counter_evidence",
             "invalidation_condition",
@@ -1084,7 +1102,7 @@ _SUBMIT_REPORT_TOOL = {
 }
 
 _REPAIR_REQUIREMENTS = (
-    "必须是 JSON 对象，且必须包含字段: stance (取值限 bullish/bearish/neutral)、"
+    "必须是 JSON 对象，且必须包含字段: stance、company_quality_stance、current_odds_stance (三者取值限 bullish/bearish/neutral)、confidence (0到1)、"
     "lynch_category (取值限 fast_grower/stalwart/cyclical/turnaround/"
     "asset_play/slow_grower/unclear)、thesis_summary、core_counter_evidence、"
     "invalidation_condition、risk_notes (后五个均为字符串)"
@@ -1101,9 +1119,11 @@ _DIMENSION_LABELS = {
     "retail_sentiment": "散户情绪",
     "shareholder_returns": "股东回报",
     "growth_elasticity": "成长弹性",
+    "a_share_structure": "A股资金结构",
+    "risk_quality": "财务质量与尾部风险",
 }
 
-_SCORE_PROMPT = """以下是对一只股票十个维度的分析。请对每个维度打分: -10 表示极度利空, +10 表示极度利多, 0 表示中性。维度名固定为以下十个: management, fundamentals, rd, chip_flow, price_position, cycle_position, policy_geopolitics, retail_sentiment, shareholder_returns, growth_elasticity。
+_SCORE_PROMPT = """以下是对一只股票十二个维度的分析。请对每个维度打分: -10 表示极度利空, +10 表示极度利多, 0 表示中性。维度名固定为: management, fundamentals, rd, chip_flow, price_position, cycle_position, policy_geopolitics, retail_sentiment, shareholder_returns, growth_elasticity, a_share_structure, risk_quality。
 
 输出 JSON 数组 (10 个元素, 不要任何其他文字):
 [{{"dimension": "management", "score": -3, "note": "一句理由 (15字以内)"}}]
@@ -1111,13 +1131,13 @@ _SCORE_PROMPT = """以下是对一只股票十个维度的分析。请对每个�
 维度分析:
 {analyses_block}"""
 
-_SCORE_REPAIR = "必须是 JSON 数组且恰有 10 个元素, 每个元素含 dimension (取值限 management/fundamentals/rd/chip_flow/price_position/cycle_position/policy_geopolitics/retail_sentiment/shareholder_returns/growth_elasticity)、score (-10 到 10 的数字)、note (短字符串)"
+_SCORE_REPAIR = "必须是 JSON 数组且恰有 12 个元素, 每个元素含 dimension (取值限 management/fundamentals/rd/chip_flow/price_position/cycle_position/policy_geopolitics/retail_sentiment/shareholder_returns/growth_elasticity/a_share_structure/risk_quality)、score (-10 到 10 的数字)、note (短字符串)"
 
 
 async def _score_dimensions(
     analyses: Dict[str, str], stock_code: str
 ) -> Optional[List[Dict]]:
-    """对九个维度分析打分 (-10 利空 ~ +10 利多), 供雷达图展示。失败返回 None。"""
+    """对十二个维度分析打分 (-10 利空 ~ +10 利多), 供 UI 展示。失败返回 None。"""
     block = "\n\n".join(f"### {name}\n{text}" for name, text in analyses.items() if text)
     if not block:
         return None
@@ -1153,7 +1173,7 @@ async def _score_dimensions(
                 "note": str(item.get("note", "") or "")[:30],
             }
         )
-    return scores if len(scores) >= 6 else None
+    return scores if len(scores) >= 8 else None
 
 
 async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) -> StructuredSummary:
@@ -1170,14 +1190,14 @@ async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOp
     if parsed and parsed.get("stance") in _VALID_STANCES:
         utils.logger.info(
             f"[analysis.report] {inputs.stock_code} 工具调用完成: "
-            f"{len(analyses)}/9 个维度, 提交正常"
+            f"{len(analyses)}/12 个维度, 提交正常"
         )
     else:
         # 回退: 网关/模型不支持工具或未走完流程时, 用维度分析拼接后走普通 JSON 调用
         if analyses:
             utils.logger.warning(
                 f"[analysis.report] {inputs.stock_code} 工具调用未完成 "
-                f"({len(analyses)}/9, reason={tool_reason}), 回退为拼接调用"
+                f"({len(analyses)}/12, reason={tool_reason}), 回退为拼接调用"
             )
             prompt = (
                 prompt
@@ -1211,6 +1231,9 @@ async def _generate_summary(inputs: AnalysisInputs, candidates: List[CandidateOp
     return StructuredSummary(
         lynch_category=lynch_category,
         stance=parsed.get("stance", ""),
+        company_quality_stance=parsed.get("company_quality_stance", ""),
+        current_odds_stance=parsed.get("current_odds_stance", ""),
+        confidence=max(0.0, min(1.0, float(parsed.get("confidence", 0.0) or 0.0))),
         thesis_summary=_scrub_process_terms(parsed.get("thesis_summary", "") or "", inputs.stock_code),
         core_counter_evidence=_scrub_process_terms(
             parsed.get("core_counter_evidence", "") or "", inputs.stock_code
@@ -1356,7 +1379,12 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         if started:
             await session.close()
 
+    evidence = build_evidence_ledger(inputs, candidates)
+    research_quality = evaluate_research_quality(evidence)
     summary = await _generate_summary(inputs, candidates)
+    # 置信度不能高于证据覆盖质量；避免模型在缺数据时仍自报高置信度。
+    if summary.confidence:
+        summary.confidence = round(min(summary.confidence, research_quality.coverage), 3)
 
     return AnalysisReport(
         stock_code=stock_code,
@@ -1376,6 +1404,8 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         xueqiu_stock=inputs.xueqiu_stock,
         debate=inputs.debate,
         sentiment=inputs.sentiment,
+        evidence=evidence,
+        research_quality=research_quality,
         dividend_chart=_build_dividend_chart(
             dividend_history, buyback_history, valuation, quote
         ),
