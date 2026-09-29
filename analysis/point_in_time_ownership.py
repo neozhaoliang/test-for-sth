@@ -3,11 +3,11 @@
 Point-in-time ownership structure from exact CNINFO periodic-report PDFs.
 
 Historical mode deliberately prefers a smaller but provably available ownership snapshot
-over today's reconstructed institutional-holding database.  We parse the latest filing
+over today's reconstructed institutional-holding database. We parse the latest filing
 version published by as_of and extract identifiable top-shareholder names from the original
 report text.
 
-This does NOT claim to recover all fund holdings.  It only reports what is visible in the
+This does NOT claim to recover all fund holdings. It only reports what is visible in the
 filing's top-shareholder section.
 """
 
@@ -26,7 +26,6 @@ from analysis.filing_calendar import (
     get_financial_filing_calendar,
     latest_available_filing_by_period,
 )
-
 
 _PARSE_TIMEOUT_S = 60
 
@@ -52,15 +51,13 @@ _SECTION_MARKERS = (
 )
 
 _NAME_PATTERNS = (
-    # Common institutional holders.
     re.compile(
-        r"([一-鿿A-Za-z0-9（）()·-—]{4,100}?"
+        r"([\u4e00-\u9fffA-Za-z0-9（）()·\-—]{4,100}?"
         r"(?:有限责任公司|股份有限公司|有限公司|中央结算有限公司|"
         r"证券投资基金|基金|资产管理计划|集合资产管理计划|组合|"
         r"银行|保险|人寿|证券|信托))"
     ),
-    # Social-security portfolio names do not always end with a company suffix.
-    re.compile(r"(全国社保基金[一二三四五六七八九十零〇d]+组合)"),
+    re.compile(r"(全国社保基金[一二三四五六七八九十零〇\d]+组合)"),
 )
 
 
@@ -82,25 +79,24 @@ def _extract_holder_section(pdf_bytes: bytes) -> str:
             text = ""
         if not text:
             continue
-        if any(marker in text.replace(" ", "") for marker in _SECTION_MARKERS):
+        compact = text.replace(" ", "")
+        if any(marker in compact for marker in _SECTION_MARKERS):
             selected.append(text)
-    return "
-".join(selected)
+    return "\n".join(selected)
 
 
 def parse_top_holder_names(text: str) -> List[Dict]:
     if not text:
         return []
-    normalized = text.replace("　", " ")
-    normalized = re.sub(r"[ 	]+", " ", normalized)
+    normalized = text.replace("\u3000", " ")
+    normalized = re.sub(r"[ \t]+", " ", normalized)
 
     names: List[str] = []
     for pattern in _NAME_PATTERNS:
         for match in pattern.finditer(normalized):
-            name = re.sub(r"s+", "", match.group(1)).strip("：:，,；;")
+            name = re.sub(r"\s+", "", match.group(1)).strip("：:，,；;")
             if len(name) < 4:
                 continue
-            # Skip table headers / generic phrases.
             if name in {
                 "股东名称",
                 "股东性质",
@@ -112,19 +108,19 @@ def parse_top_holder_names(text: str) -> List[Dict]:
             if name not in names:
                 names.append(name)
 
-    rows: List[Dict] = []
-    for name in names[:30]:
-        rows.append(
-            {
-                "name": name,
-                "categories": classify_holder_name(name),
-                "source_scope": "periodic_report_top_holders",
-            }
-        )
-    return rows
+    return [
+        {
+            "name": name,
+            "categories": classify_holder_name(name),
+            "source_scope": "periodic_report_top_holders",
+        }
+        for name in names[:30]
+    ]
 
 
-def _summaries(rows: List[Dict]) -> tuple[List[Dict], Dict[str, List[Dict]], List[Dict]]:
+def _summaries(
+    rows: List[Dict],
+) -> tuple[List[Dict], Dict[str, List[Dict]], List[Dict]]:
     special: Dict[str, List[Dict]] = {key: [] for key in _SPECIAL_PATTERNS}
     for row in rows:
         for category in row.get("categories") or []:
@@ -170,17 +166,15 @@ async def get_point_in_time_ownership(
         lookback_years=lookback_years,
     )
     selected = latest_available_filing_by_period(calendar, as_of)
-    rows = sorted(
+    filings = sorted(
         selected.values(),
         key=lambda x: (str(x.get("period") or ""), str(x.get("published_at") or "")),
         reverse=True,
     )
-    if not rows:
+    if not filings:
         return None
 
-    # Try newest filings first because some short-form quarterly reports may omit the full
-    # top-holder table.  Stop at the first exact filing that yields names.
-    for item in rows[:6]:
+    for item in filings[:6]:
         url = str(item.get("url") or "")
         if not url:
             continue
