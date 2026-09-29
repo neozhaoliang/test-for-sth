@@ -99,6 +99,8 @@ jobs:
             tests/test_research_context.py \
             tests/test_snapshot_store.py \
             tests/test_valuation_history_asof.py \
+            tests/test_market_context_asof.py \
+            tests/test_realtime_price_asof.py \
             tests/test_management_capital.py \
             tests/test_macro_rates.py \
             tests/test_commodity_cycle.py \
