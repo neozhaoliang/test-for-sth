@@ -52,8 +52,17 @@ def _is_a_share_code(code6: str) -> bool:
 
 def _pick(row, *names):
     for name in names:
-        if name in row and row[name] not in (None, ""):
-            return row[name]
+        if name not in row:
+            continue
+        value = row[name]
+        if value is None or value == "":
+            continue
+        try:
+            if value != value:  # NaN
+                continue
+        except Exception:
+            pass
+        return value
     return None
 
 
