@@ -58,6 +58,7 @@ jobs:
             media_platform/bilibili/core.py \
             store/bilibili/__init__.py \
             tools/live_public_acceptance.py \
+            tools/live_report_acceptance.py \
             web/app.py
 
       - name: Check embedded WebUI JavaScript syntax
