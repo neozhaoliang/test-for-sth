@@ -191,8 +191,10 @@ def _summarize_institutions(df) -> tuple[List[Dict], List[Dict], List[Dict]]:
                 ),
                 reverse=True,
             )
-            fund_details = details[:20]
-            etf_details = [x for x in details if _ETF_RE.search(x.get("name") or "")][:20]
+            # Keep the full disclosed fund list internally so quarter-to-quarter matching
+            # is not biased to only the current top 20.  The public report is sliced later.
+            fund_details = details
+            etf_details = [x for x in details if _ETF_RE.search(x.get("name") or "")]
 
     return rows, fund_details, etf_details
 
