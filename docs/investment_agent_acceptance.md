@@ -190,3 +190,120 @@ Evidence ledger 已经记录：
 - 高可信用户评分不能用未来验证结果
 
 在这些数据源都支持日期截断之前，禁止把 live report 接口伪装成历史回测接口。
+
+
+---
+
+## 6. Snapshot：冻结输入，公平比较模型/Prompt
+
+Live 报告可以选择保存标准研究快照。
+
+完整报告验收时：
+
+```bash
+python tools/live_report_acceptance.py \
+  --snapshot-root data/investment_snapshots
+```
+
+每个快照目录现在包含：
+
+```text
+manifest.json
+request.json
+research_inputs.json
+evidence.json
+report.json
+```
+
+其中：
+
+- `request.json`：当时的研究请求与 as-of；
+- `research_inputs.json`：**最终 LLM 综合之前**的冻结研究输入；
+- `evidence.json`：证据账本；
+- `report.json`：当时生成的最终报告；
+- `manifest.json`：Prompt 版本、Git SHA、模型标识、source vintages 和 SHA-256。
+
+### 校验快照是否被改过
+
+```bash
+python tools/snapshot_cli.py verify \
+  data/investment_snapshots/600036/2026-09-29/<snapshot_id>
+```
+
+如果任何冻结文件被修改，文件哈希或语义哈希会失败。
+
+### 查看 manifest
+
+```bash
+python tools/snapshot_cli.py show <snapshot_path>
+```
+
+### 查看冻结的 pre-synthesis 输入
+
+```bash
+python tools/snapshot_cli.py inputs <snapshot_path>
+```
+
+### 用当前模型 / 当前 Prompt 离线重放同一份数据
+
+```bash
+python tools/snapshot_cli.py replay <snapshot_path>
+```
+
+Replay 的边界非常重要：
+
+- 不重新抓行情；
+- 不重新抓巨潮；
+- 不重新抓机构持仓；
+- 不重新访问雪球；
+- 不重新读取新的 KOL 内容；
+- 只重新运行 12 维综合、reviewer、评分与最终合同校验。
+
+因此它适合比较：
+
+```text
+同一份证据
+Prompt v12 vs Prompt v13
+
+同一份证据
+Model A vs Model B
+```
+
+而不把“数据变了”和“模型变了”混在一起。
+
+**Snapshot replay 不是 historical backtest。**
+
+一个 2026-09-29 保存的 live snapshot 即使以后重放，也仍然代表
+“2026-09-29 当时冻结的信息”，不能改名冒充 2024 年快照。
+
+---
+
+## 7. as-of 数据源状态
+
+接口：
+
+```text
+GET /api/research/time-capabilities
+```
+
+会返回每一路数据的 temporal capability。
+
+目前已经具备 point-in-time 截断能力的路径包括：
+
+- 历史价格 / quote
+- PE/PB 历史估值
+- 巨潮公告
+- 巨潮周期报告 filing calendar
+- 市场/指数价格环境
+- 融资余额
+- 中美利率
+- KOL 知识发布时间过滤
+- 历史高可信用户评分的“预测时间 + 验证时间”双截断
+- 股东户数：按**公告日期**截断，不按统计期提前使用
+- 分红 / 回购：按公告可得日期截断
+
+仍然阻塞完整 historical mode 的数据源会继续显示在
+`blocking_sources` 中。
+
+在 blocking sources 没有清零之前，
+`mode=historical` 会返回明确错误，不会偷偷回退成 live 数据。
