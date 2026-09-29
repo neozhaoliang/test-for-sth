@@ -347,6 +347,28 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         tags=("valuation", "percentile", "history"),
     )
 
+    filing_calendar = _get(inputs, "filing_calendar") or []
+    if filing_calendar:
+        latest_filing = max(
+            filing_calendar,
+            key=lambda x: str(x.get("published_at") or ""),
+        )
+        _add(
+            out,
+            category="filing_calendar",
+            label="周期财报实际发布日期日历",
+            source="analysis.filing_calendar",
+            tier="S",
+            kind="fact",
+            value=filing_calendar,
+            as_of=str(latest_filing.get("published_at") or "") or None,
+            period=str(latest_filing.get("period") or "") or None,
+            published_at=str(latest_filing.get("published_at") or "") or None,
+            available_at=str(latest_filing.get("published_at") or "") or None,
+            tags=("financials", "filing", "availability", "as_of"),
+            url=latest_filing.get("url"),
+        )
+
     profitability = _get(inputs, "profitability_trend")
     _add(
         out,
