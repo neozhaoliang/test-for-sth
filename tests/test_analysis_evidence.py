@@ -91,3 +91,65 @@ def test_evidence_ids_are_stable_for_same_payload():
     first = build_evidence_ledger(inputs)
     second = build_evidence_ledger(inputs)
     assert [e.id for e in first] == [e.id for e in second]
+
+
+def test_stale_time_sensitive_evidence_no_longer_counts_as_current_coverage():
+    from datetime import date
+
+    evidence = [
+        EvidenceItem(
+            id="old-val",
+            category="valuation_history",
+            label="历史估值",
+            source="test",
+            source_tier="B",
+            kind="derived",
+            as_of="2025-01-01",
+            value={"pe": 10},
+        ),
+        EvidenceItem(
+            id="fund",
+            category="fundamentals",
+            label="基本面",
+            source="test",
+            source_tier="B",
+            kind="fact",
+            as_of="2026-06-30",
+            value={"revenue": 1},
+        ),
+    ]
+    q = evaluate_research_quality(evidence, today=date(2026, 9, 29))
+
+    assert any(x["category"] == "valuation_history" for x in q.stale_evidence)
+    assert "价格与估值位置" in q.missing_dimensions
+    assert any("新鲜度" in x for x in q.warnings)
+
+
+def test_newer_same_category_snapshot_prevents_false_stale_flag():
+    from datetime import date
+
+    evidence = [
+        EvidenceItem(
+            id="old-margin",
+            category="margin",
+            label="融资盘旧快照",
+            source="test",
+            source_tier="B",
+            kind="derived",
+            as_of="2026-01-01",
+            value={"balance": 1},
+        ),
+        EvidenceItem(
+            id="new-margin",
+            category="margin",
+            label="融资盘新快照",
+            source="test",
+            source_tier="B",
+            kind="derived",
+            as_of="2026-09-25",
+            value={"balance": 2},
+        ),
+    ]
+    q = evaluate_research_quality(evidence, today=date(2026, 9, 29))
+
+    assert not any(x["category"] == "margin" for x in q.stale_evidence)
