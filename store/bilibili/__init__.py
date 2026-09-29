@@ -25,7 +25,8 @@
 from typing import List, Optional
 
 import config
-from var import source_keyword_var
+from var import crawler_type_var, source_keyword_var
+from tools.async_file_writer import AsyncFileWriter
 
 from ._store_impl import *
 from .bilibilli_store_media import *
@@ -80,6 +81,22 @@ async def update_bilibili_video(video_item: Dict):
     }
     utils.logger.info(f"[store.bilibili.update_bilibili_video] bilibili video id:{video_id}, title:{save_content_item.get('title')}")
     await BiliStoreFactory.create_store().store_content(content_item=save_content_item)
+
+
+async def update_bilibili_video_transcript(transcript_item: Dict):
+    """
+    字幕是投资知识库的原始材料，固定写入 JSONL sidecar。
+    即使 SAVE_DATA_OPTION 是 DB/CSV，也保留一份可追溯文本语料；
+    无字幕记录也会写入 status=none，但 knowledge_base 不会把空文本送去蒸馏。
+    """
+    writer = AsyncFileWriter(
+        crawler_type=crawler_type_var.get(),
+        platform="bili",
+    )
+    await writer.write_to_jsonl(
+        item=transcript_item,
+        item_type="transcripts",
+    )
 
 
 async def update_up_info(video_item: Dict):
