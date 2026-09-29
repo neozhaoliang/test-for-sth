@@ -25,8 +25,11 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from analysis.evidence import EvidenceItem, ResearchQuality
+from analysis.report_inputs import AnalysisInputs
 from analysis.research_context import ResearchRequest
-from model.m_analysis import AnalysisReport
+from analysis.research_profile import ResearchProfile
+from model.m_analysis import AnalysisReport, CandidateOpinion, KnowledgeExcerpt
 
 
 class SnapshotManifest(BaseModel):
@@ -198,6 +201,61 @@ def load_snapshot_manifest(path: str | Path) -> SnapshotManifest:
         p = p / "manifest.json"
     return SnapshotManifest.model_validate_json(p.read_text(encoding="utf-8"))
 
+
+
+def frozen_research_inputs_to_analysis_inputs(
+    payload: Dict,
+) -> tuple[AnalysisInputs, List[CandidateOpinion], List[EvidenceItem]]:
+    """Rebuild the pure pre-synthesis input contract from research_inputs.json."""
+    candidates = [
+        CandidateOpinion.model_validate(x)
+        for x in payload.get("candidates") or []
+    ]
+    evidence = [
+        EvidenceItem.model_validate(x)
+        for x in payload.get("evidence") or []
+    ]
+    knowledge = [
+        KnowledgeExcerpt.model_validate(x)
+        for x in payload.get("knowledge_excerpts") or []
+    ]
+
+    inputs = AnalysisInputs(
+        stock_code=str(payload.get("stock_code") or ""),
+        stock_name=str(payload.get("stock_name") or ""),
+        quote=payload.get("realtime_quote") or {},
+        knowledge_excerpts=knowledge,
+        industry_comparison=payload.get("industry_comparison"),
+        shareholder_trend=payload.get("shareholder_trend"),
+        dividend_history=payload.get("dividend_history") or [],
+        buyback_history=payload.get("buyback_history") or [],
+        profitability_trend=payload.get("profitability_trend"),
+        commodity_signal=payload.get("commodity_signal"),
+        rmb_signal=payload.get("rmb_signal"),
+        macro_rates=payload.get("macro_rates"),
+        policy_events=payload.get("policy_events"),
+        fundamentals=payload.get("fundamentals"),
+        valuation=payload.get("valuation"),
+        valuation_history=payload.get("valuation_history"),
+        rd_team=payload.get("rd_team"),
+        xueqiu_stock=payload.get("xueqiu_stock"),
+        debate=payload.get("debate"),
+        sentiment=payload.get("sentiment"),
+        margin_signal=payload.get("margin_signal"),
+        market_context=payload.get("market_context"),
+        freight_signal=payload.get("freight_signal"),
+        primary_evidence=payload.get("primary_evidence") or [],
+        a_share_structure=payload.get("a_share_structure"),
+        management_capital=payload.get("management_capital"),
+        filing_calendar=payload.get("filing_calendar") or [],
+        research_profile=ResearchProfile.model_validate(
+            payload.get("research_profile") or {}
+        ),
+        research_quality=ResearchQuality.model_validate(
+            payload.get("research_quality") or {}
+        ),
+    )
+    return inputs, candidates, evidence
 
 
 def load_snapshot_report(path: str | Path) -> AnalysisReport:
