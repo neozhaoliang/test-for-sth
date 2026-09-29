@@ -136,8 +136,16 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
     "industry_cycle": TemporalCapability(
         source="industry_cycle",
         capability=SourceTemporalCapability.LIVE_ONLY,
-        reason="commodity/freight/industry helpers are not uniformly as-of aware",
+        reason="commodity/freight series are as-of truncated, but strict historical industry classification is not yet archived; historical mode safely omits the route when classification is unavailable",
         implemented=False,
+        required_for_historical=False,
+    ),
+    "policy_news": TemporalCapability(
+        source="policy_news",
+        capability=SourceTemporalCapability.LIVE_ONLY,
+        reason="current finance-news feeds are not a historical archive; historical mode deliberately omits them instead of backfilling today's news",
+        implemented=False,
+        required_for_historical=False,
     ),
     "xueqiu_live": TemporalCapability(
         source="xueqiu_live",
