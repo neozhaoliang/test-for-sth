@@ -285,6 +285,8 @@ async def generate_report(
     inputs = AnalysisInputs(
         stock_code=stock_code,
         stock_name=stock_name,
+        research_mode=request.mode.value,
+        as_of=str(request.as_of or ""),
         quote=quote or {},
         knowledge_excerpts=knowledge_excerpts,
         industry_comparison=industry_comparison,
