@@ -88,6 +88,11 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
         reason="F10 parser currently returns the latest visible report and may include future publications",
         implemented=False,
     ),
+    "filing_calendar": TemporalCapability(
+        source="filing_calendar",
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="official CNINFO periodic filings are queried and versioned by actual publication date <= as_of",
+    ),
     "profitability": TemporalCapability(
         source="profitability",
         capability=SourceTemporalCapability.LIVE_ONLY,
