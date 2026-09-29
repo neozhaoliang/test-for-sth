@@ -63,10 +63,10 @@ def _sha256(value) -> str:
 def _source_vintages(report: AnalysisReport) -> Dict[str, str]:
     out: Dict[str, str] = {}
     for item in report.evidence:
-        if not item.as_of:
+        value = str(item.available_at or item.as_of or "")
+        if not value:
             continue
         current = out.get(item.category)
-        value = str(item.as_of)
         if current is None or value > current:
             out[item.category] = value
     return out
