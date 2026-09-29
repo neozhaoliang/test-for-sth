@@ -26,6 +26,30 @@ jobs:
         run: |
           python -m compileall -q             analysis/evidence.py             analysis/reviewer.py             analysis/primary_sources.py             analysis/report.py             analysis/knowledge_base.py             analysis/fundamentals.py             model/m_analysis.py
 
+      - name: Check embedded WebUI JavaScript syntax
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          source = Path("web/app.py").read_text(encoding="utf-8")
+          tree = ast.parse(source)
+          html = None
+          for node in tree.body:
+              if isinstance(node, ast.Assign):
+                  if any(isinstance(t, ast.Name) and t.id == "_INDEX_HTML" for t in node.targets):
+                      if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                          html = node.value.value
+                          break
+          if html is None:
+              raise SystemExit("_INDEX_HTML not found")
+          if "<script>" not in html or "</script>" not in html:
+              raise SystemExit("inline script not found")
+          script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+          Path("/tmp/investment-webui.js").write_text(script, encoding="utf-8")
+          PY
+          node --check /tmp/investment-webui.js
+
       - name: Run investment core unit tests
         run: |
           pytest -q             tests/test_analysis_evidence.py             tests/test_analysis_reviewer.py
