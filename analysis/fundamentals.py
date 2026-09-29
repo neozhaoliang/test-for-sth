@@ -857,6 +857,16 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
         "operating_cash_flow_yoy_pct",
     )
     _fill_metric("rd_investment_yuan", ("研发投入(元)", "研发费用(元)"), "rd_investment_yoy_pct")
+    _fill_metric(
+        "accounts_receivable_yuan",
+        ("应收账款(元)", "应收票据及应收账款(元)", "应收款项(元)"),
+        "accounts_receivable_yoy_pct",
+    )
+    _fill_metric(
+        "inventory_yuan",
+        ("存货(元)",),
+        "inventory_yoy_pct",
+    )
 
     if not metrics:
         missing.append("财务指标表")
@@ -873,6 +883,18 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
     facts["overseas_revenue_pct"] = (
         round(facts["overseas_revenue_yuan"] / facts["revenue"] * 100, 2)
         if facts.get("overseas_revenue_yuan") and facts.get("revenue")
+        else None
+    )
+    # 仅在同一“变动科目”报告期同时取得营收与资产项目时计算。
+    # 季报营收为累计流量，因此这里只作为营运资金压力代理，不作为行业横向估值指标。
+    facts["receivable_to_revenue_pct"] = (
+        round(facts["accounts_receivable_yuan"] / facts["revenue"] * 100, 2)
+        if facts.get("accounts_receivable_yuan") is not None and facts.get("revenue")
+        else None
+    )
+    facts["inventory_to_revenue_pct"] = (
+        round(facts["inventory_yuan"] / facts["revenue"] * 100, 2)
+        if facts.get("inventory_yuan") is not None and facts.get("revenue")
         else None
     )
 
