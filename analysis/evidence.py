@@ -47,7 +47,7 @@ class ResearchQuality(BaseModel):
 
 
 _DIMENSION_REQUIREMENTS: Dict[str, tuple[str, ...]] = {
-    "management": ("governance", "shareholder_return"),
+    "management": ("management_capital", "governance", "shareholder_return"),
     "fundamentals": ("fundamentals", "profitability"),
     "rd": ("rd_team", "rd"),
     "chip_flow": ("shareholder_count", "margin"),
@@ -55,7 +55,7 @@ _DIMENSION_REQUIREMENTS: Dict[str, tuple[str, ...]] = {
     "cycle_position": ("industry", "cycle_signal"),
     "policy_geopolitics": ("fx", "major_events", "knowledge"),
     "retail_sentiment": ("sentiment", "debate"),
-    "shareholder_returns": ("shareholder_return", "governance"),
+    "shareholder_returns": ("management_capital", "shareholder_return", "governance"),
     "growth_elasticity": ("profitability", "valuation_history", "valuation"),
     "a_share_structure": ("a_share_structure", "market_context", "margin", "institutional", "knowledge"),
     "risk_quality": ("fundamentals", "profitability", "governance"),
@@ -321,6 +321,19 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         if shareholder_return["dividend_history"] or shareholder_return["buyback_history"]
         else None,
         tags=("dividend", "buyback", "capital_allocation"),
+    )
+
+    management_capital = _get(inputs, "management_capital")
+    _add(
+        out,
+        category="management_capital",
+        label="管理层与长期资本分配账本",
+        source="analysis.management_capital",
+        tier="S",
+        kind="derived",
+        value=management_capital,
+        as_of=str((management_capital or {}).get("as_of") or "") or None,
+        tags=("management", "capital_allocation", "dividend", "buyback", "refinancing", "governance"),
     )
 
     governance = {
