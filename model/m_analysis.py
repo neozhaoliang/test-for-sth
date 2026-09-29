@@ -81,6 +81,8 @@ class AnalysisReport(BaseModel):
     """单只股票的综合分析报告"""
     stock_code: str = Field(default="", description="股票代码")
     stock_name: str = Field(default="", description="股票名称")
+    research_mode: str = Field(default="live", description="live|historical")
+    as_of: str = Field(default="", description="本报告允许使用信息的截止日期 YYYY-MM-DD")
     realtime_quote: Optional[dict] = Field(default=None, description="实时行情快照 (最新价/涨跌幅/成交量等)")
     candidates: List[CandidateOpinion] = Field(default_factory=list, description="候选高可信度用户列表")
     knowledge_excerpts: List[KnowledgeExcerpt] = Field(default_factory=list, description="知识库背景资料 (全量，未按股票筛选)")
