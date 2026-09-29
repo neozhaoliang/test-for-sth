@@ -41,12 +41,12 @@ _CONCURRENCY = 4
 
 
 def _bare_code(stock_code: str) -> str:
-    return re.sub(r"D", "", stock_code)[-6:]
+    return re.sub(r"\D", "", stock_code)[-6:]
 
 
 def _period_from_title(title: str, report_type: str) -> Optional[str]:
     clean = re.sub(r"</?em>", "", title or "").strip()
-    m = re.search(r"(20d{2})年", clean)
+    m = re.search(r"(20\d{2})年", clean)
     if not m:
         return None
     year = int(m.group(1))
@@ -64,10 +64,10 @@ def _is_full_report(title: str, report_type: str) -> bool:
     if any(x in clean for x in ("摘要", "英文版", "审计报告", "取消披露")):
         return False
     patterns = {
-        "annual": r"20d{2}年年度报告(?:（[^）]+）)?$",
-        "semiannual": r"20d{2}年半年度报告(?:（[^）]+）)?$",
-        "q1": r"20d{2}年第一季度报告(?:（[^）]+）)?$",
-        "q3": r"20d{2}年第三季度报告(?:（[^）]+）)?$",
+        "annual": r"20\d{2}年年度报告(?:（[^）]+）)?$",
+        "semiannual": r"20\d{2}年半年度报告(?:（[^）]+）)?$",
+        "q1": r"20\d{2}年第一季度报告(?:（[^）]+）)?$",
+        "q3": r"20\d{2}年第三季度报告(?:（[^）]+）)?$",
     }
     pattern = patterns.get(report_type)
     return bool(pattern and re.search(pattern, clean))
