@@ -44,6 +44,7 @@ from analysis.point_in_time_financials import (
     to_historical_fundamentals,
     to_historical_profitability,
 )
+from analysis.point_in_time_ownership import get_point_in_time_ownership
 from analysis.policy_context import get_policy_event_context
 from analysis.realtime_price import get_historical_quote, get_realtime_quote, get_stock_name
 from analysis.rd_team import get_rd_team_composition
@@ -125,12 +126,16 @@ async def generate_report(
     historical_mode = request.mode == ResearchMode.HISTORICAL
     if historical_mode:
         pit_financials_task = get_point_in_time_financials(stock_code, request.as_of)
+        ownership_task = get_point_in_time_ownership(stock_code, request.as_of)
         fundamentals_task = asyncio.sleep(0, result=None)
         profitability_task = asyncio.sleep(0, result=None)
+        live_a_share_structure_task = asyncio.sleep(0, result=None)
     else:
         pit_financials_task = asyncio.sleep(0, result=None)
+        ownership_task = asyncio.sleep(0, result=None)
         fundamentals_task = get_ths_fundamentals(stock_code)
         profitability_task = get_profitability_trend(stock_code)
+        live_a_share_structure_task = get_a_share_structure(stock_code)
 
     (
         knowledge_excerpts,
@@ -147,6 +152,7 @@ async def generate_report(
         macro_rates,
         filing_calendar,
         point_in_time_financials,
+        point_in_time_ownership,
     ) = await asyncio.gather(
         load_knowledge_excerpts(
             as_of=request.as_of
@@ -161,16 +167,18 @@ async def generate_report(
         get_market_context(stock_code, as_of=request.as_of),
         get_margin_signal(stock_code, as_of=request.as_of),
         get_cninfo_primary_evidence(stock_code, as_of=request.as_of),
-        get_a_share_structure(stock_code),
+        live_a_share_structure_task,
         get_valuation_history(stock_code, as_of=request.as_of),
         get_macro_rate_context(as_of=request.as_of),
         get_financial_filing_calendar(stock_code, as_of=request.as_of),
         pit_financials_task,
+        ownership_task,
     )
 
     if historical_mode:
         fundamentals = to_historical_fundamentals(point_in_time_financials)
         profitability_trend = to_historical_profitability(point_in_time_financials)
+        a_share_structure = point_in_time_ownership
 
     rd_team: Optional[Dict] = None
     if historical_mode:
