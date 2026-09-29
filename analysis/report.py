@@ -29,7 +29,7 @@ from typing import Dict, List, Optional
 
 from analysis.a_share_structure import get_a_share_structure
 from analysis.candidates import find_candidates
-from analysis.commodity import get_copper_spread_signal, get_rmb_trend_signal
+from analysis.commodity import get_cycle_commodity_signal, get_rmb_trend_signal
 from analysis.freight import get_container_freight_signal
 from analysis.fundamentals import get_ths_fundamentals
 from analysis.industry import get_industry_comparison
@@ -301,7 +301,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
     if industry_comparison:
         industry_name = industry_comparison.get("industry_name") or industry_comparison.get("sw_industry")
     commodity_signal, rmb_signal = await asyncio.gather(
-        get_copper_spread_signal(stock_code, industry_name),
+        get_cycle_commodity_signal(stock_code, industry_name, fundamentals),
         get_rmb_trend_signal(),
     )
     # 运价景气度同样依赖申万行业名做触发判断，与铜价信号并行获取。
