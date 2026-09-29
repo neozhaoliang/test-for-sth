@@ -651,7 +651,8 @@ def _build_dividend_chart(
     if not by_year:
         return None
     out = []
-    for y in sorted(by_year):
+    selected_years = sorted(by_year)[-10:]
+    for y in selected_years:
         g = by_year[y]
         total = g["div_per_10"] + g["buyback_per_10"]
         yield_pct = None
@@ -783,7 +784,7 @@ def _build_shareholder_block(
 
     if dividend_history:
         lines.append("历史分红记录:")
-        for d in dividend_history:
+        for d in dividend_history[:12]:
             lines.append(
                 f"  · {d.get('announce_date')}: 每10股派息 {d.get('dividend_per_10_shares')} 元 ({d.get('progress')})"
             )
@@ -792,7 +793,7 @@ def _build_shareholder_block(
 
     if buyback_history:
         lines.append("历史回购记录:")
-        for b in buyback_history:
+        for b in buyback_history[:10]:
             lines.append(
                 f"  · {b.get('announce_date')}: 计划金额区间 {b.get('planned_amount_range')}，"
                 f"已回购 {b.get('actual_amount')} ({b.get('progress')})"
