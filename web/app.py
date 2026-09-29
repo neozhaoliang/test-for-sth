@@ -1064,7 +1064,7 @@ function renderHolderChart(series) {
     dots + xLabels + legend + '</svg>' + table;
 }
 
-// 九维度雷达图 (内联 SVG): 顶点=维度, 值=-10(利空)~+10(利多)。
+// 十二维度雷达图 (内联 SVG): 顶点=维度, 值=-10(利空)~+10(利多)。
 // 极性除颜色外还有位置(相对0环)与数字双重编码; 正红负绿沿用本界面方向色。
 function renderDimensionRadar(scores) {
   const n = scores.length;
