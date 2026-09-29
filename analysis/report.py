@@ -208,23 +208,39 @@ async def generate_report(
         evidence=[],
     )
     commodity_signal, rmb_signal = await asyncio.gather(
-        get_cycle_commodity_signal(stock_code, industry_name, fundamentals),
-        get_rmb_trend_signal(),
+        get_cycle_commodity_signal(
+            stock_code,
+            industry_name,
+            fundamentals,
+            as_of=request.as_of if historical_mode else None,
+        ),
+        get_rmb_trend_signal(
+            as_of=request.as_of if historical_mode else None,
+        ),
     )
     # 运价与近期政策/地缘事件线索都依赖已经识别出的行业/暴露路径。
     # 新闻只作为低权重线索，不替代巨潮公告、官方政策或市场数据。
     facts_for_exposure = (fundamentals or {}).get("facts") or {}
     sw_industry = facts_for_exposure.get("sw_industry")
-    freight_signal, policy_events = await asyncio.gather(
-        get_container_freight_signal(stock_code, sw_industry),
-        get_policy_event_context(
+    policy_task = (
+        asyncio.sleep(0, result=None)
+        if historical_mode
+        else get_policy_event_context(
             stock_code,
             stock_name,
             archetype=preliminary_profile.archetype,
             industry=str(sw_industry or industry_name or ""),
             commodity_route=(commodity_signal or {}).get("route"),
             overseas_revenue_pct=facts_for_exposure.get("overseas_revenue_pct"),
+        )
+    )
+    freight_signal, policy_events = await asyncio.gather(
+        get_container_freight_signal(
+            stock_code,
+            sw_industry,
+            as_of=request.as_of if historical_mode else None,
         ),
+        policy_task,
     )
     knowledge_excerpts = await filter_relevant_knowledge(
         knowledge_excerpts, stock_code, stock_name, industry_name
