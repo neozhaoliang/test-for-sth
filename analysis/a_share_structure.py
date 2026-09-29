@@ -12,13 +12,16 @@ China Reform / Chengtong when they actually appear in the shareholder list.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 
-from tools.utils import utils
+
+
+logger = logging.getLogger("MediaCrawler")
 
 
 _FETCH_TIMEOUT_S = 15
@@ -89,7 +92,7 @@ async def _fetch_institute_detail(code6: str, quarter_code: str):
             timeout=_FETCH_TIMEOUT_S,
         )
     except Exception as e:
-        utils.logger.warning(
+        logger.warning(
             f"[a_share_structure] institution detail {code6}/{quarter_code} failed: "
             f"{type(e).__name__}: {str(e)[:140]}"
         )
@@ -108,7 +111,7 @@ async def _fetch_unlock_queue(code6: str):
             timeout=_FETCH_TIMEOUT_S,
         )
     except Exception as e:
-        utils.logger.warning(
+        logger.warning(
             f"[a_share_structure] unlock queue {code6} failed: "
             f"{type(e).__name__}: {str(e)[:140]}"
         )
@@ -128,7 +131,7 @@ async def _fetch_top10(code6: str, report_date: str):
             timeout=_FETCH_TIMEOUT_S,
         )
     except Exception as e:
-        utils.logger.warning(
+        logger.warning(
             f"[a_share_structure] top10 holders {code6}/{report_date} failed: "
             f"{type(e).__name__}: {str(e)[:140]}"
         )
