@@ -141,9 +141,8 @@ SOURCE_TEMPORAL_CAPABILITIES: Dict[str, TemporalCapability] = {
     ),
     "kol_knowledge": TemporalCapability(
         source="kol_knowledge",
-        capability=SourceTemporalCapability.LIVE_ONLY,
-        reason="knowledge retrieval does not yet filter cards by original publication date <= as_of",
-        implemented=False,
+        capability=SourceTemporalCapability.AS_OF_SAFE,
+        reason="raw KOL entries are normalized to publication epoch seconds and historical mode excludes unknown/future timestamps before retrieval",
     ),
     "candidate_credibility": TemporalCapability(
         source="candidate_credibility",
