@@ -109,7 +109,7 @@ _REQUIRED_CATEGORIES = {
     "analyze_retail_sentiment": {"sentiment", "debate"},
     "analyze_shareholder_returns": {"shareholder_return", "governance", "primary"},
     "analyze_growth_elasticity": {"profitability", "valuation"},
-    "analyze_a_share_structure": {"market_context", "margin", "institutional", "knowledge"},
+    "analyze_a_share_structure": {"a_share_structure", "market_context", "margin", "institutional", "knowledge"},
     "analyze_risk_quality": {"fundamentals", "profitability", "governance", "primary"},
 }
 
