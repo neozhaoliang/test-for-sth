@@ -99,6 +99,9 @@ class AnalysisReport(BaseModel):
     fundamentals: Optional[dict] = Field(default=None, description="同花顺 F10 结构性事实 (集中度/海外占比/现金流质量/研发强度/股东人数/公司自述风险)")
     valuation: Optional[dict] = Field(default=None, description="估值快照 (PE/PB/每股指标/股权质押)")
     xueqiu_stock: Optional[dict] = Field(default=None, description="雪球个股维度 (机构持仓/讨论热度，仅聚合数字)")
+    a_share_structure: Optional[dict] = Field(
+        default=None, description="A股公开机构持股、前十大流通股东与特殊资金类型"
+    )
     sentiment: Optional[dict] = Field(default=None, description="雪球讨论区情绪聚合 (看多/看空比例, 一致看多预警, 反向指标)")
     debate: Optional[dict] = Field(default=None, description="雪球多空辩论 (双方核心论点 + 历史验证统计 + 哪方更合理)")
     primary_evidence: List[dict] = Field(default_factory=list, description="巨潮等一手公告元数据")
