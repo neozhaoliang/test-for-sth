@@ -276,6 +276,7 @@ async def get_cninfo_primary_evidence(
     stock_code: str,
     *,
     lookback_years: int = _LOOKBACK_YEARS,
+    as_of: Optional[datetime.date] = None,
 ) -> List[Dict]:
     """
     Fetch recent official disclosure metadata from CNINFO for governance/capital-allocation
@@ -288,7 +289,7 @@ async def get_cninfo_primary_evidence(
     if not _is_a_share_code(code6):
         return []
 
-    now = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    now = as_of or datetime.now(ZoneInfo("Asia/Shanghai")).date()
     try:
         start = now.replace(year=now.year - lookback_years)
     except ValueError:
