@@ -35,6 +35,7 @@ import asyncio
 import logging
 import re
 import time
+from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
 import akshare as ak
@@ -192,7 +193,13 @@ def _series_stats(dates: List[str], closes: List[float]) -> Dict[str, Any]:
     }
 
 
-async def _get_futures_anchor(name: str, symbol: str, unit: str) -> Optional[Dict]:
+async def _get_futures_anchor(
+    name: str,
+    symbol: str,
+    unit: str,
+    *,
+    as_of: Optional[date] = None,
+) -> Optional[Dict]:
     try:
         df = await asyncio.to_thread(ak.futures_main_sina, symbol=symbol)
     except Exception as e:
@@ -200,6 +207,19 @@ async def _get_futures_anchor(name: str, symbol: str, unit: str) -> Optional[Dic
         return None
     if df is None or df.empty or "收盘价" not in df.columns:
         return None
+
+    date_col = "日期" if "日期" in df.columns else None
+    if as_of is not None:
+        if date_col is None:
+            # Historical mode must not silently use an undated current series.
+            return None
+        import pandas as pd
+        temp = df.copy()
+        temp["_parsed_date"] = pd.to_datetime(temp[date_col], errors="coerce")
+        temp = temp[temp["_parsed_date"].dt.date <= as_of]
+        if temp.empty:
+            return None
+        df = temp
 
     dates: List[str] = []
     closes: List[float] = []
@@ -229,6 +249,8 @@ async def get_cycle_commodity_signal(
     stock_code: str,
     industry_name: Optional[str],
     fundamentals: Optional[Dict] = None,
+    *,
+    as_of: Optional[date] = None,
 ) -> Optional[Dict]:
     """
     Return product-matched futures proxies for cyclical industries.
@@ -242,7 +264,7 @@ async def get_cycle_commodity_signal(
 
     anchors = await asyncio.gather(
         *(
-            _get_futures_anchor(name, symbol, unit)
+            _get_futures_anchor(name, symbol, unit, as_of=as_of)
             for name, symbol, unit in route["anchors"]
         )
     )
@@ -261,10 +283,14 @@ async def get_cycle_commodity_signal(
     }
 
     # Copper gets the extra domestic/COMEX context; other resource industries do not.
-    if route["name"] == "copper":
+    if route["name"] == "copper" and as_of is None:
         spread = await _get_copper_cross_market_context()
         if spread:
             result["copper_cross_market"] = spread
+    elif route["name"] == "copper" and as_of is not None:
+        result["historical_note"] = (
+            "历史模式不使用当前COMEX现货/跨市场快照，只保留截至as_of的沪铜历史序列。"
+        )
     return result
 
 
@@ -298,14 +324,30 @@ async def _get_comex_copper_price() -> Optional[float]:
     return float(row.iloc[0]["最新价"])
 
 
-async def _get_rmb_trend() -> Optional[str]:
+async def _get_rmb_trend(as_of: Optional[date] = None) -> Optional[str]:
     """近 30 个交易日美元/人民币中间价趋势 (报价为每 100 美元兑人民币)。"""
     try:
         df = await asyncio.to_thread(ak.currency_boc_safe)
     except Exception as e:
         logger.error(f"[commodity] currency_boc_safe failed: {e}")
         return None
-    if df is None or df.empty or len(df) < 30:
+    if df is None or df.empty:
+        return None
+    if as_of is not None:
+        date_col = next(
+            (x for x in ("日期", "date", "时间") if x in df.columns),
+            None,
+        )
+        if date_col is None:
+            return None
+        import pandas as pd
+        temp = df.copy()
+        temp["_parsed_date"] = pd.to_datetime(temp[date_col], errors="coerce")
+        temp = temp[temp["_parsed_date"].dt.date <= as_of]
+        if temp.empty:
+            return None
+        df = temp
+    if len(df) < 30:
         return None
 
     recent = df["美元"].tail(30)
@@ -318,7 +360,10 @@ async def _get_rmb_trend() -> Optional[str]:
     return "stable"
 
 
-async def get_rmb_trend_signal() -> Optional[Dict]:
+async def get_rmb_trend_signal(
+    *,
+    as_of: Optional[date] = None,
+) -> Optional[Dict]:
     """
     人民币汇率趋势 (独立于铜价，不按行业设门槛)。
 
@@ -327,15 +372,16 @@ async def get_rmb_trend_signal() -> Optional[Dict]:
     (恰恰是汇率敞口最大的) 反而永远拿不到数据。
     取不到就返回 None，调用方写"暂缺"，绝不猜方向。
     """
-    if time.time() < (_rmb_cache.get("expire_at") or 0):
+    if as_of is None and time.time() < (_rmb_cache.get("expire_at") or 0):
         return _rmb_cache["value"]  # type: ignore[return-value]
 
-    trend = await _get_rmb_trend()
+    trend = await _get_rmb_trend(as_of=as_of)
     if trend is None:
         logger.warning("[commodity] 人民币汇率趋势获取失败，本维度记为暂缺")
         return None
 
     value = {
+        "as_of": as_of.isoformat() if as_of is not None else None,
         "rmb_trend": trend,
         "rmb_trend_note": {
             "appreciating": "人民币近期升值 (近 30 个交易日美元兑人民币中间价下行)",
@@ -343,8 +389,9 @@ async def get_rmb_trend_signal() -> Optional[Dict]:
             "stable": "人民币近期基本稳定 (近 30 个交易日中间价波动幅度小于 0.3%)",
         }.get(trend, trend),
     }
-    _rmb_cache["value"] = value
-    _rmb_cache["expire_at"] = time.time() + _RMB_TTL_SECONDS
+    if as_of is None:
+        _rmb_cache["value"] = value
+        _rmb_cache["expire_at"] = time.time() + _RMB_TTL_SECONDS
     return value
 
 
