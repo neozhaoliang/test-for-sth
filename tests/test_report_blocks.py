@@ -3,6 +3,7 @@ from analysis.report_blocks import (
     _build_a_share_structure_block,
     _build_fundamentals_block,
     _build_research_quality_block,
+    _build_time_contract_block,
     _build_valuation_history_block,
 )
 
@@ -134,3 +135,17 @@ def test_fundamentals_block_surfaces_working_capital_pressure():
     assert "应收增速较营收高 +20.0" in text
     assert "存货" in text
     assert "存货增速较营收高 +13.0" in text
+
+
+
+def test_historical_time_contract_forbids_model_memory_and_hindsight():
+    class Inputs:
+        research_mode = "historical"
+        as_of = "2024-06-30"
+
+    text = _build_time_contract_block(Inputs())
+
+    assert "2024-06-30" in text
+    assert "严禁使用模型记忆" in text
+    assert "截止日之后" in text
+    assert "后来证明" in text
