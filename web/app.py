@@ -439,6 +439,18 @@ _INDEX_HTML = """<!DOCTYPE html>
   .search-bar { display: flex; gap: 8px; margin: 20px 0 8px; }
   .research-options { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin:0 0 14px; color:#666; font-size:12px; }
   .research-options label { display:flex; align-items:center; gap:5px; }
+  .research-mode-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .research-mode-controls select, .research-mode-controls input[type="date"] {
+    padding:6px 8px; border:1px solid #ccc; border-radius:4px; background:#fff;
+  }
+  .historical-banner {
+    margin:10px 0; padding:10px 12px; border-left:4px solid #b26a00;
+    background:#fff6e5; border-radius:4px; font-size:13px;
+  }
+  .live-banner {
+    margin:10px 0; padding:8px 12px; border-left:4px solid #1a73e8;
+    background:#eef6ff; border-radius:4px; font-size:13px;
+  }
   .temporal-status { padding:6px 9px; border-radius:4px; background:#f5f7fa; border:1px solid #e0e4e8; }
   input { padding: 8px; font-size: 14px; width: 200px; border: 1px solid #ccc; border-radius: 4px; }
   button { padding: 8px 20px; font-size: 14px; cursor: pointer; background: #1a73e8; color: #fff; border: none; border-radius: 4px; }
@@ -489,7 +501,21 @@ _INDEX_HTML = """<!DOCTYPE html>
   <button id="submitBtn">分析</button>
 </div>
 <div class="research-options">
-  <label><input type="checkbox" id="saveSnapshot" /> 保存标准研究快照</label>
+  <div class="research-mode-controls">
+    <label>研究模式
+      <select id="researchMode">
+        <option value="live">Live：按今天可用信息分析</option>
+        <option value="historical">Historical：站在过去某天分析</option>
+      </select>
+    </label>
+    <label id="asOfLabel" style="display:none;">截止日期
+      <input type="date" id="asOfDate" />
+    </label>
+    <label><input type="checkbox" id="saveSnapshot" /> 保存标准研究快照</label>
+  </div>
+  <div id="historicalHint" class="crawl-hint" style="display:none;">
+    历史模式只使用截止日当时已可获得的信息；缺失数据保持缺失，不会用今天的数据回填。
+  </div>
   <span id="temporalStatus" class="temporal-status">检查 historical/as-of 能力...</span>
 </div>
 <div class="watchlist">
@@ -568,6 +594,17 @@ function renderWatchlist() {
   });
 }
 
+function syncResearchModeControls() {
+  const mode = document.getElementById('researchMode').value;
+  const historical = mode === 'historical';
+  document.getElementById('asOfLabel').style.display = historical ? 'inline-flex' : 'none';
+  document.getElementById('historicalHint').style.display = historical ? 'block' : 'none';
+  if (historical) {
+    // Historical runs are expensive and should be reproducible by default.
+    document.getElementById('saveSnapshot').checked = true;
+  }
+}
+
 async function loadTemporalCapabilities() {
   const el = document.getElementById('temporalStatus');
   try {
@@ -600,6 +637,12 @@ async function submitAnalysis() {
     document.getElementById('status').textContent = '已有分析任务在跑，等它结束再提交 (一次分析要几分钟)';
     return;
   }
+  const mode = document.getElementById('researchMode').value;
+  const asOf = document.getElementById('asOfDate').value;
+  if (mode === 'historical' && !asOf) {
+    document.getElementById('status').textContent = '历史模式必须选择截止日期';
+    return;
+  }
   submitting = true;
   document.getElementById('result').innerHTML = '';
   document.getElementById('status').textContent = '提交中...';
@@ -610,7 +653,10 @@ async function submitAnalysis() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       stock_code: stockCode,
-      mode: 'live',
+      mode: document.getElementById('researchMode').value,
+      as_of: document.getElementById('researchMode').value === 'historical'
+        ? (document.getElementById('asOfDate').value || null)
+        : null,
       save_snapshot: document.getElementById('saveSnapshot').checked,
     }),
   });
@@ -1715,10 +1761,20 @@ function attachRadarTooltips() {
 function renderResult(report) {
   const el = document.getElementById('result');
   let html = '<h2>' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
+  const isHistorical = report.research_mode === 'historical';
+  if (isHistorical) {
+    html += '<div class="historical-banner"><b>历史研究</b> ｜ 截止日 ' +
+      escapeHtml(report.as_of || '未知') +
+      ' ｜ 结论只允许使用该日及之前已公开的信息；当前知识不会用于补全历史缺口。</div>';
+  } else {
+    html += '<div class="live-banner"><b>Live 研究</b> ｜ 基准日 ' +
+      escapeHtml(report.as_of || '今天') + '</div>';
+  }
 
   if (report.realtime_quote) {
     const q = report.realtime_quote;
-    html += '<p class="quote">最新价 ' + q.latest_price + ' 涨跌幅 ' + q.change_pct + '% 成交量 ' + q.volume + '</p>';
+    html += '<p class="quote">' + (isHistorical ? '截止日收盘/最近交易价 ' : '最新价 ') +
+      q.latest_price + ' 涨跌幅 ' + q.change_pct + '% 成交量 ' + q.volume + '</p>';
   }
 
   const summary = report.summary || {};
@@ -1907,6 +1963,8 @@ document.getElementById('digestBtn').addEventListener('click', () => submitCrawl
 document.getElementById('digestUserBtn').addEventListener('click', () => submitCrawl('digest_user'));
 document.getElementById('crawlOnlyBtn').addEventListener('click', () => submitCrawl('crawl_only'));
 renderWatchlist();
+document.getElementById('researchMode').addEventListener('change', syncResearchModeControls);
+syncResearchModeControls();
 loadTemporalCapabilities();
 loadCrawledUsers();
 
