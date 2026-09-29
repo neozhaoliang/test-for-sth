@@ -17,7 +17,7 @@ from typing import Dict, Iterable, List, Optional
 
 _NEGATIVE_GOV_RE = re.compile(r"立案|处罚|警示|违规|调查|问询|谴责|处分|诉讼|仲裁")
 _INSIDER_REDUCTION_RE = re.compile(r"减持|减持计划|减持股份")
-_REFINANCING_RE = re.compile(r"定增|增发|配股|可转债|发行股份|再融资|募集资金")
+_REFINANCING_RE = re.compile(r"定增|增发|配股|可转债|发行股份|发行股票|再融资|募集资金")
 _DIVIDEND_RE = re.compile(r"分红|利润分配|权益分派|现金红利")
 _BUYBACK_RE = re.compile(r"回购")
 
@@ -160,9 +160,11 @@ def _execution_record(profitability_trend: Optional[Dict]) -> Dict:
         "period_count": len(periods),
     }
     if valid_roe:
-        out["roe_avg_pct"] = round(sum(valid_roe) / len(valid_roe), 2)
+        out["roe_start_pct"] = round(valid_roe[0], 2)
         out["roe_latest_pct"] = round(valid_roe[-1], 2)
+        out["roe_change_pp"] = round(valid_roe[-1] - valid_roe[0], 2)
         out["roe_min_pct"] = round(min(valid_roe), 2)
+        out["roe_max_pct"] = round(max(valid_roe), 2)
     if valid_growth:
         out["net_profit_growth_positive_periods"] = sum(1 for x in valid_growth if x > 0)
         out["net_profit_growth_observations"] = len(valid_growth)
