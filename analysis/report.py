@@ -280,6 +280,7 @@ async def generate_report(
         primary_evidence=primary_evidence,
         executive_profile=executive_profile,
         profitability_trend=profitability_trend,
+        as_of=request.as_of,
     )
 
     inputs = AnalysisInputs(
