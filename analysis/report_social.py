@@ -12,12 +12,15 @@ That separation is important for:
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
 from analysis.debate import derive_sentiment, get_debate
-from analysis.knowledge_base import ensure_loaded as ensure_knowledge_base_loaded
+from analysis.knowledge_base import (
+    ensure_loaded as ensure_knowledge_base_loaded,
+    filter_entries_as_of,
+)
 from analysis.session import AnalysisBrowserSession
 from analysis.xueqiu_stock import get_xueqiu_stock_data
 from backtest.llm_client import call_json_ex
@@ -84,25 +87,15 @@ async def load_knowledge_excerpts(
     *,
     as_of: Optional[date] = None,
 ) -> List[KnowledgeExcerpt]:
-    entries = await ensure_knowledge_base_loaded()
-    cutoff_ts = None
-    if as_of is not None:
-        cutoff_ts = int(
-            datetime.combine(
-                as_of,
-                time(23, 59, 59),
-                tzinfo=ZoneInfo("Asia/Shanghai"),
-            ).timestamp()
-        )
+    entries = filter_entries_as_of(
+        await ensure_knowledge_base_loaded(),
+        as_of,
+    )
 
     out: List[KnowledgeExcerpt] = []
     for e in entries:
         if not e.distilled:
             continue
-        if cutoff_ts is not None:
-            # Historical mode is conservative: unknown publication time is excluded.
-            if e.timestamp <= 0 or e.timestamp > cutoff_ts:
-                continue
         published_at = ""
         if e.timestamp > 0:
             published_at = datetime.fromtimestamp(
