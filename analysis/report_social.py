@@ -13,17 +13,13 @@ That separation is important for:
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 from zoneinfo import ZoneInfo
 
-from analysis.debate import derive_sentiment, get_debate
 from analysis.knowledge_base import (
     ensure_loaded as ensure_knowledge_base_loaded,
     filter_entries_as_of,
 )
-from analysis.session import AnalysisBrowserSession
-from analysis.xueqiu_stock import get_xueqiu_stock_data
-from backtest.llm_client import call_json_ex
 from backtest.score import load_records
 from model.m_analysis import CandidateOpinion, KnowledgeExcerpt
 from tools.utils import utils
@@ -73,7 +69,7 @@ def historical_thesis(
 
 
 async def latest_relevant_posts(
-    session: AnalysisBrowserSession,
+    session: Any,
     user_id: str,
 ) -> List[str]:
     from backtest.extract import strip_html
@@ -155,6 +151,8 @@ async def filter_relevant_knowledge(
         industry_name=industry_name or "未知",
         items_block=items_block,
     )
+    from backtest.llm_client import call_json_ex
+
     parsed, _ = await call_json_ex(
         prompt,
         max_tokens=1024,
@@ -188,6 +186,13 @@ async def collect_live_social_context(
     All live social access is isolated here. Historical/as-of orchestration can skip this
     function entirely unless a dated snapshot implementation is available.
     """
+    # Heavy/browser/LLM-backed live dependencies are imported only on the live path.
+    # Historical candidate context stays importable in a lightweight deterministic test
+    # environment and can never accidentally initialize a browser/LLM client.
+    from analysis.debate import derive_sentiment, get_debate
+    from analysis.session import AnalysisBrowserSession
+    from analysis.xueqiu_stock import get_xueqiu_stock_data
+
     session = AnalysisBrowserSession()
     started = await session.start()
     if not started:
