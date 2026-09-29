@@ -33,6 +33,7 @@ EC0 反映欧线即期/结算运价的市场定价，是集运景气最常用的
 
 import asyncio
 import time
+from datetime import date
 from typing import Dict, Optional, Tuple
 
 import akshare as ak
@@ -52,13 +53,18 @@ def is_shipping_industry(industry_name: Optional[str]) -> bool:
     return any(kw in industry_name for kw in _SHIPPING_KEYWORDS)
 
 
-async def _get_ec_history() -> Optional[pd.Series]:
+async def _get_ec_history(
+    as_of: Optional[date] = None,
+) -> Optional[pd.Series]:
     """集运指数(欧线)主力连续日收盘序列 (index=日期)。"""
     import asyncio
 
     global _ec_cache
     if _ec_cache and (time.time() - _ec_cache[0]) < _TTL_SECONDS:
-        return _ec_cache[1]
+        series = _ec_cache[1]
+        if as_of is None:
+            return series
+        return series[series.index.date <= as_of]
 
     try:
         df = await asyncio.to_thread(ak.futures_main_sina, symbol="EC0")
@@ -73,6 +79,8 @@ async def _get_ec_history() -> Optional[pd.Series]:
     df["日期"] = pd.to_datetime(df["日期"])
     series = df.set_index("日期")["收盘价"].astype(float)
     _ec_cache = (time.time(), series)
+    if as_of is not None:
+        series = series[series.index.date <= as_of]
     return series
 
 
@@ -84,7 +92,10 @@ def _pct_rank(series: pd.Series, value: float) -> float:
 
 
 async def get_container_freight_signal(
-    stock_code: str, sw_industry: Optional[str] = None
+    stock_code: str,
+    sw_industry: Optional[str] = None,
+    *,
+    as_of: Optional[date] = None,
 ) -> Optional[Dict]:
     """
     集运运价景气度快照。行业归属不是航运/港口时返回 None。
@@ -97,8 +108,8 @@ async def get_container_freight_signal(
     if not is_shipping_industry(sw_industry):
         return None
 
-    series = await _get_ec_history()
-    if series is None:
+    series = await _get_ec_history(as_of=as_of)
+    if series is None or series.empty:
         return None
 
     last = float(series.iloc[-1])
