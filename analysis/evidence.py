@@ -75,6 +75,7 @@ _FRESHNESS_DAYS: Dict[str, int] = {
     "margin": 14,
     "shareholder_count": 190,
     "a_share_structure": 190,
+    "cycle_signal": 10,
     "profitability": 220,
     "fundamentals": 220,
     "rd_team": 550,
@@ -382,6 +383,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         tier="B",
         kind="derived",
         value=cycle_signal,
+        as_of=_latest_period_date(cycle_signal),
         tags=("cycle", "commodity", "freight"),
     )
 
