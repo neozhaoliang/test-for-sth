@@ -40,6 +40,7 @@ from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.primary_sources import get_cninfo_primary_evidence
 from analysis.realtime_price import get_realtime_quote, get_stock_name
+from analysis.valuation_history import get_valuation_history
 from analysis.debate import derive_sentiment, get_debate
 from analysis.evidence import EvidenceItem, build_evidence_ledger, evaluate_research_quality
 from analysis.reviewer import ResearchReview, review_dimension_analyses
@@ -89,6 +90,9 @@ _PROMPT_TEMPLATE = """你是一名证券研究助手。你的任务不是预测�
 当前行情: {quote_line}
 
 {valuation_block}
+
+历史估值位置 (PE/PB 3/5/10年分位；周期股需结合盈利周期解释):
+{valuation_history_block}
 
 {fundamentals_block}
 
@@ -187,6 +191,7 @@ class AnalysisInputs:
     rmb_signal: Optional[Dict] = None
     fundamentals: Optional[Dict] = None
     valuation: Optional[Dict] = None
+    valuation_history: Optional[Dict] = None
     major_events: List[Dict] = field(default_factory=list)
     refinancing_history: List[Dict] = field(default_factory=list)
     executive_profile: Optional[Dict] = None
@@ -924,6 +929,40 @@ def _build_knowledge_block(knowledge_excerpts: List[KnowledgeExcerpt]) -> str:
     return "\n".join(lines)
 
 
+def _build_valuation_history_block(data: Optional[Dict]) -> str:
+    if not data:
+        return "暂缺 (本次未取得历史估值序列，不能判断PE/PB历史分位)"
+    lines = [
+        f"数据截止 {data.get('as_of') or '未知'}，当前 PE(TTM) {data.get('current_pe_ttm')}，"
+        f"PB {data.get('current_pb')}，历史样本 {data.get('observations')} 个交易日"
+    ]
+    pe = data.get("pe_percentiles") or []
+    pb = data.get("pb_percentiles") or []
+    if pe:
+        lines.append(
+            "PE(TTM) 分位: " + "；".join(
+                f"{x.get('years')}年 {x.get('percentile')}% "
+                f"(中位 {x.get('median')}, 区间 {x.get('min')}~{x.get('max')})"
+                for x in pe
+            )
+        )
+    else:
+        lines.append("PE(TTM) 分位: 暂缺/不适用")
+    if pb:
+        lines.append(
+            "PB 分位: " + "；".join(
+                f"{x.get('years')}年 {x.get('percentile')}% "
+                f"(中位 {x.get('median')}, 区间 {x.get('min')}~{x.get('max')})"
+                for x in pb
+            )
+        )
+    else:
+        lines.append("PB 分位: 暂缺")
+    for note in data.get("notes") or []:
+        lines.append(f"注: {note}")
+    return "\n".join(lines)
+
+
 def _build_primary_evidence_block(primary_evidence: List[Dict]) -> str:
     if not primary_evidence:
         return "暂缺 (本次未能取得巨潮公告元数据；治理/资本运作相关结论应降低置信度)"
@@ -996,6 +1035,7 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         stock_name=inputs.stock_name or inputs.stock_code,
         quote_line=quote_line,
         valuation_block=_build_valuation_block(inputs.valuation, quote),
+        valuation_history_block=_build_valuation_history_block(inputs.valuation_history),
         fundamentals_block=_build_fundamentals_block(inputs.fundamentals),
         rd_block=_build_rd_block(inputs.fundamentals, inputs.executive_profile),
         primary_evidence_block=_build_primary_evidence_block(inputs.primary_evidence),
@@ -1102,7 +1142,7 @@ _ANALYSIS_TOOLS = [
     ),
     _analysis_tool(
         "analyze_price_position",
-        "当前股价位置: 引用'大盘与风格'块 (个股 vs 主要指数年内/上半年/下半年涨跌幅、52周与历史区间位置) 与'估值'块 (静态/动态PE、PB); 静态与动态PE差距大时说明股价隐含的未来增长预期。",
+        "当前股价位置: 优先引用'历史估值位置'的3/5/10年PE/PB分位，并结合'大盘与风格'块 (个股 vs 主要指数年内/上半年/下半年涨跌幅、52周与历史区间位置) 与'估值'块 (静态/动态PE、PB); 静态与动态PE差距大时说明股价隐含的未来增长预期。",
     ),
     _analysis_tool(
         "analyze_cycle_position",
@@ -1118,7 +1158,7 @@ _ANALYSIS_TOOLS = [
     ),
     _analysis_tool(
         "analyze_growth_elasticity",
-        "股票弹性 (未来增长预期): 引用'估值'块静态vs动态PE差与'盈利能力与成本弹性'块趋势, 判断当前股价隐含的增长预期是透支还是过度悲观, 以及增长来自哪里。",
+        "股票弹性 (未来增长预期): 引用'历史估值位置'、'估值'块静态vs动态PE差与'盈利能力与成本弹性'块趋势, 判断当前股价隐含的增长预期是透支还是过度悲观, 以及增长来自哪里。",
     ),
     _analysis_tool(
         "analyze_a_share_structure",
@@ -1403,6 +1443,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         margin_signal,
         primary_evidence,
         a_share_structure,
+        valuation_history,
     ) = await asyncio.gather(
         _load_knowledge_excerpts(),
         get_shareholder_count_trend(stock_code),
@@ -1414,6 +1455,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         get_margin_signal(stock_code),
         get_cninfo_primary_evidence(stock_code),
         get_a_share_structure(stock_code),
+        get_valuation_history(stock_code),
     )
 
     # 行业反查的起点是 F10 公司概要页里的申万行业名，所以必须等 fundamentals 回来。
@@ -1468,6 +1510,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         rmb_signal=rmb_signal,
         fundamentals=fundamentals,
         valuation=valuation,
+        valuation_history=valuation_history,
         major_events=major_events,
         refinancing_history=refinancing_history,
         executive_profile=executive_profile,
@@ -1543,6 +1586,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         rmb_signal=rmb_signal,
         fundamentals=inputs.fundamentals,
         valuation=inputs.valuation,
+        valuation_history=valuation_history,
         xueqiu_stock=inputs.xueqiu_stock,
         a_share_structure=a_share_structure,
         debate=inputs.debate,
