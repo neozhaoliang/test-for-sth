@@ -117,16 +117,20 @@ async def generate_report(
         else None,
     )
 
+    historical_mode = request.mode == ResearchMode.HISTORICAL
     stock_name = _resolve_stock_name(stock_code, candidate_scores)
     quote = (
         await get_historical_quote(stock_code, request.as_of)
-        if request.mode == ResearchMode.HISTORICAL
+        if historical_mode
         else await get_realtime_quote(stock_code)
     )
-    if not stock_name:
+    # Strict historical mode must not backfill a renamed company's current display name.
+    # If no as-of-safe name exists in historical candidate records, the code itself is safer.
+    if not stock_name and not historical_mode:
         stock_name = await get_stock_name(stock_code) or ""
+    if not stock_name:
+        stock_name = stock_code
 
-    historical_mode = request.mode == ResearchMode.HISTORICAL
     if historical_mode:
         pit_financials_task = get_point_in_time_financials(stock_code, request.as_of)
         ownership_task = get_point_in_time_ownership(stock_code, request.as_of)
@@ -185,6 +189,16 @@ async def generate_report(
     )
 
     if historical_mode:
+        historical_name = next(
+            (
+                str(x.get("stock_name") or "").strip()
+                for x in primary_evidence
+                if str(x.get("stock_name") or "").strip()
+            ),
+            "",
+        )
+        if historical_name:
+            stock_name = historical_name
         fundamentals = to_historical_fundamentals(point_in_time_financials)
         profitability_trend = to_historical_profitability(point_in_time_financials)
         a_share_structure = point_in_time_ownership
