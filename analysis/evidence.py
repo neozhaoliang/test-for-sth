@@ -51,12 +51,12 @@ _DIMENSION_REQUIREMENTS: Dict[str, tuple[str, ...]] = {
     "fundamentals": ("fundamentals", "profitability"),
     "rd": ("rd",),
     "chip_flow": ("shareholder_count", "margin"),
-    "price_position": ("valuation", "market_context"),
+    "price_position": ("valuation_history", "valuation", "market_context"),
     "cycle_position": ("industry", "cycle_signal"),
     "policy_geopolitics": ("fx", "major_events", "knowledge"),
     "retail_sentiment": ("sentiment", "debate"),
     "shareholder_returns": ("shareholder_return", "governance"),
-    "growth_elasticity": ("profitability", "valuation"),
+    "growth_elasticity": ("profitability", "valuation_history", "valuation"),
     "a_share_structure": ("a_share_structure", "market_context", "margin", "institutional", "knowledge"),
     "risk_quality": ("fundamentals", "profitability", "governance"),
 }
@@ -203,6 +203,19 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         as_of=str((valuation or {}).get("valuation_as_of") or "") or None,
         tags=("valuation", "shares"),
         url=source_map.get("profile"),
+    )
+
+    valuation_history = _get(inputs, "valuation_history")
+    _add(
+        out,
+        category="valuation_history",
+        label="历史PE/PB估值分位",
+        source="analysis.valuation_history",
+        tier="B",
+        kind="derived",
+        value=valuation_history,
+        as_of=str((valuation_history or {}).get("as_of") or "") or None,
+        tags=("valuation", "percentile", "history"),
     )
 
     profitability = _get(inputs, "profitability_trend")
