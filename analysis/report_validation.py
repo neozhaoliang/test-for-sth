@@ -79,7 +79,12 @@ def _issue(code: str, severity: str, message: str) -> ValidationIssue:
 def _dimension_score_keys(scores: Optional[List[dict]]) -> Set[str]:
     out: Set[str] = set()
     for row in scores or []:
-        key = str(row.get("dimension") or "").strip()
+        key = str(row.get("key") or "").strip()
+        if not key:
+            # Backward compatibility with older reports/tests that stored the English
+            # dimension key directly in "dimension".
+            raw = str(row.get("dimension") or "").strip()
+            key = raw if raw in _DIMENSION_KEYS else ""
         if key:
             out.add(key)
     return out
