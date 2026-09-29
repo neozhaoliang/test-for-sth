@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 from analysis.evidence import EvidenceItem, ResearchQuality
-from analysis.report import AnalysisInputs
+from analysis.report_inputs import AnalysisInputs
 from analysis.report_contract import _PROMPT_VERSION
 from analysis.report_synthesis import _generate_summary
 from analysis.report_validation import validate_report
