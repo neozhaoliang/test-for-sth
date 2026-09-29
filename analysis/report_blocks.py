@@ -1030,7 +1030,9 @@ def _build_a_share_structure_block(data: Optional[Dict]) -> str:
     unlocks = data.get("unlock_supply") or {}
     upcoming = unlocks.get("upcoming_12m") or []
     if upcoming:
-        lines.append("未来12个月限售解禁供给:")
+        lines.append(
+            "未来12个月限售解禁（仅代表潜在供给，不等同于实际卖出）:"
+        )
         for x in upcoming[:8]:
             lines.append(
                 f"  · {x.get('date')}: 解禁数量 {x.get('unlock_shares')} 股，"
