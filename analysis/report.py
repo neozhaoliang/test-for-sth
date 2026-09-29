@@ -174,7 +174,7 @@ async def generate_report(
         get_cninfo_primary_evidence(stock_code, as_of=request.as_of),
         get_a_share_structure(stock_code),
         get_valuation_history(stock_code, as_of=request.as_of),
-        get_macro_rate_context(),
+        get_macro_rate_context(as_of=request.as_of),
     )
 
     rd_team: Optional[Dict] = None
