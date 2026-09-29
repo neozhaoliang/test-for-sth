@@ -582,7 +582,7 @@ async function loadTemporalCapabilities() {
     } else {
       el.textContent = 'Historical/as-of 尚未开放：' + safe.length + ' 路已安全，' +
         blocking.length + ' 路仍阻塞';
-      el.title = blocking.map(x => x + ': ' + ((data.reasons || {})[x] || '')).join('\n');
+      el.title = blocking.map(x => x + ': ' + ((data.reasons || {})[x] || '')).join('\\n');
     }
   } catch (e) {
     el.textContent = 'Historical/as-of 能力状态读取失败';
