@@ -125,21 +125,22 @@ async def _run_case(
 
     # generate_report saves snapshot when requested. Locate the newest matching directory
     # only for an integrity sanity check; do not mutate it.
-    snapshot_candidates = sorted(
-        snapshot_root.glob(f"{code}/{as_of.isoformat()}/*"),
-        key=lambda p: p.stat().st_mtime if p.exists() else 0,
-        reverse=True,
-    )
     snapshot_integrity = None
-    if snapshot_candidates:
-        snapshot_integrity = verify_snapshot_integrity(snapshot_candidates[0])
-        if not snapshot_integrity.get("ok"):
-            failures.append(
-                "snapshot integrity failed: "
-                + "; ".join(snapshot_integrity.get("errors") or [])
-            )
+    latest_pointer = snapshot_root / code / as_of.isoformat() / "latest.json"
+    if latest_pointer.exists():
+        try:
+            pointer = json.loads(latest_pointer.read_text(encoding="utf-8"))
+            snapshot_path = Path(str(pointer.get("path") or ""))
+            snapshot_integrity = verify_snapshot_integrity(snapshot_path)
+            if not snapshot_integrity.get("ok"):
+                failures.append(
+                    "snapshot integrity failed: "
+                    + "; ".join(snapshot_integrity.get("errors") or [])
+                )
+        except Exception as e:
+            failures.append(f"snapshot pointer/integrity failed: {type(e).__name__}: {e}")
     else:
-        warnings.append("snapshot directory not found after save_snapshot=True")
+        warnings.append("snapshot latest.json not found after save_snapshot=True")
 
     return {
         "stock_code": code,
