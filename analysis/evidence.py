@@ -34,6 +34,10 @@ class EvidenceItem(BaseModel):
     source_tier: str = Field(description="S/A/B/C; S is strongest")
     kind: str = Field(description="fact|derived|opinion")
     as_of: Optional[str] = None
+    period: Optional[str] = Field(default=None, description="数据描述的报告期/观察期")
+    published_at: Optional[str] = Field(default=None, description="原始信息正式发布日期")
+    available_at: Optional[str] = Field(default=None, description="投资者最早可合法获得该信息的时间")
+    retrieved_at: Optional[str] = Field(default=None, description="本次研究抓取该信息的时间")
     summary: str = ""
     value: Any = None
     url: Optional[str] = None
@@ -201,6 +205,10 @@ def _add(
     summary: str = "",
     tags: Optional[Iterable[str]] = None,
     url: Optional[str] = None,
+    period: Optional[str] = None,
+    published_at: Optional[str] = None,
+    available_at: Optional[str] = None,
+    retrieved_at: Optional[str] = None,
 ) -> None:
     if value in (None, "", [], {}):
         return
@@ -213,6 +221,10 @@ def _add(
             source_tier=tier,
             kind=kind,
             as_of=as_of,
+            period=period,
+            published_at=published_at,
+            available_at=available_at,
+            retrieved_at=retrieved_at or datetime.now(ZoneInfo("UTC")).isoformat(),
             summary=summary,
             value=value,
             url=url,
@@ -330,6 +342,8 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         kind="derived",
         value=valuation_history,
         as_of=str((valuation_history or {}).get("as_of") or "") or None,
+        period=str((valuation_history or {}).get("as_of") or "") or None,
+        available_at=str((valuation_history or {}).get("as_of") or "") or None,
         tags=("valuation", "percentile", "history"),
     )
 
@@ -594,6 +608,8 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
                 "stock_name": item.get("stock_name"),
             },
             as_of=item.get("published_at") or None,
+            published_at=item.get("published_at") or None,
+            available_at=item.get("published_at") or None,
             summary=item.get("category") or "",
             tags=("primary", "announcement", item.get("category") or ""),
             url=item.get("url"),
