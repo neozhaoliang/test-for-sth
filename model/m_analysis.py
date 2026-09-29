@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from analysis.evidence import EvidenceItem, ResearchQuality
+from analysis.reviewer import ResearchReview
 
 
 class CandidateOpinion(BaseModel):
@@ -100,9 +101,13 @@ class AnalysisReport(BaseModel):
     xueqiu_stock: Optional[dict] = Field(default=None, description="雪球个股维度 (机构持仓/讨论热度，仅聚合数字)")
     sentiment: Optional[dict] = Field(default=None, description="雪球讨论区情绪聚合 (看多/看空比例, 一致看多预警, 反向指标)")
     debate: Optional[dict] = Field(default=None, description="雪球多空辩论 (双方核心论点 + 历史验证统计 + 哪方更合理)")
+    primary_evidence: List[dict] = Field(default_factory=list, description="巨潮等一手公告元数据")
     evidence: List[EvidenceItem] = Field(default_factory=list, description="本次研究实际使用/可用的证据账本")
     research_quality: ResearchQuality = Field(
         default_factory=ResearchQuality, description="证据覆盖率、来源质量与缺口"
+    )
+    review: ResearchReview = Field(
+        default_factory=ResearchReview, description="跨维度重复计分、潜在冲突与弱证据审查"
     )
     summary: StructuredSummary = Field(default_factory=StructuredSummary, description="LLM 生成的结构化分析摘要")
     prompt_version: str = Field(default="", description="生成本报告所用的 prompt 版本号")
