@@ -45,7 +45,7 @@ from analysis.realtime_price import get_realtime_quote, get_stock_name
 from analysis.rd_team import get_rd_team_composition
 from analysis.valuation_history import get_valuation_history
 from analysis.debate import derive_sentiment, get_debate
-from analysis.evidence import EvidenceItem, build_evidence_ledger, evaluate_research_quality
+from analysis.evidence import EvidenceItem, ResearchQuality, build_evidence_ledger, evaluate_research_quality
 from analysis.research_profile import (
     ResearchProfile,
     classify_research_profile,
@@ -64,7 +64,7 @@ _MAX_LATEST_POSTS = 5
 _MAX_HISTORICAL_THESIS = 5
 _MIN_CORROBORATING_RECORDS = 2  # 历史验证记录 < 该值时提示"参考价值有限"
 
-_PROMPT_VERSION = "v12-evidence-12-dimension"
+_PROMPT_VERSION = "v13-profile-freshness-12-dimension"
 
 # 实测: 300308 的 v7 prompt 输出 6060 tokens，其中约 5000 花在 thinking 块上。
 # 报告类 prompt 的思考预算随输入维度数量增长，上限必须留足余量，否则截断到 len=0。
@@ -98,6 +98,8 @@ _PROMPT_TEMPLATE = """你是一名证券研究助手。你的任务不是预测�
 当前行情: {quote_line}
 
 {research_profile_block}
+
+{research_quality_block}
 
 {valuation_block}
 
@@ -224,6 +226,7 @@ class AnalysisInputs:
     a_share_structure: Optional[Dict] = None
     management_capital: Optional[Dict] = None
     research_profile: Optional[ResearchProfile] = None
+    research_quality: Optional[ResearchQuality] = None
 
 
 def _credibility_note(hit_rate: float, correct: int, incorrect: int) -> str:
@@ -1369,6 +1372,27 @@ def _build_a_share_structure_block(data: Optional[Dict]) -> str:
     return "\n".join(lines)
 
 
+def _build_research_quality_block(quality: Optional[ResearchQuality]) -> str:
+    if quality is None:
+        return "证据时点审计: 暂缺"
+    lines = [
+        f"证据时点审计: 当前有效覆盖 {quality.covered_dimensions}/{quality.total_dimensions} "
+        f"({quality.coverage * 100:.0f}%)"
+    ]
+    if quality.stale_evidence:
+        lines.append("以下时点型证据已过新鲜度阈值，只能作历史背景，禁止当作当前状态:")
+        for item in quality.stale_evidence:
+            lines.append(
+                f"  · {item.get('label')}: 截止 {item.get('as_of')}，"
+                f"距今 {item.get('age_days')} 天，阈值 {item.get('max_age_days')} 天"
+            )
+    else:
+        lines.append("未发现已过新鲜度阈值的时点型证据。")
+    if quality.missing_dimensions:
+        lines.append("当前证据缺口: " + "、".join(quality.missing_dimensions))
+    return "\n".join(lines)
+
+
 def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) -> str:
     quote = inputs.quote
     if quote:
@@ -1386,6 +1410,7 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
         research_profile_block=profile_prompt_block(
             inputs.research_profile or ResearchProfile()
         ),
+        research_quality_block=_build_research_quality_block(inputs.research_quality),
         valuation_block=_build_valuation_block(inputs.valuation, quote),
         valuation_history_block=_build_valuation_history_block(inputs.valuation_history),
         fundamentals_block=_build_fundamentals_block(inputs.fundamentals),
@@ -1962,6 +1987,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         evidence=evidence,
     )
     inputs.research_profile = research_profile
+    inputs.research_quality = research_quality
     summary, review = await _generate_summary(inputs, candidates, evidence)
     # 置信度同时受全局证据覆盖率、公司画像重点证据准备度限制，
     # 再扣除跨维度冲突/弱证据惩罚。
