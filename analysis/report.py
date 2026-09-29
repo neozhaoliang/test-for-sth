@@ -28,6 +28,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from analysis.a_share_structure import get_a_share_structure
 from analysis.candidates import find_candidates
 from analysis.commodity import get_copper_spread_signal, get_rmb_trend_signal
 from analysis.freight import get_container_freight_signal
@@ -129,6 +130,9 @@ _PROMPT_TEMPLATE = """你是一名证券研究助手。你的任务不是预测�
 融资盘与流通盘 (流通盘大小 + 融资余额绝对值/占流通市值比例/近期增减趋势; 融资余额快速上升且股价高位=杠杆资金拥挤风险, 持续回落=去杠杆):
 {margin_block}
 
+A股公开资金结构 (基金/社保/QFII/保险 + 前十大流通股东中特殊资金，仅公开披露):
+{a_share_structure_block}
+
 知识库中该时期的资金与风格真实记录 (老木匠、军师祭咖啡等的专栏与发帖摘要中关于筹码/资金面/风格切换/政策偏好的记录):
 {kb_fund_flow_block}
 
@@ -194,6 +198,7 @@ class AnalysisInputs:
     market_context: Optional[Dict] = None
     freight_signal: Optional[Dict] = None
     primary_evidence: List[Dict] = field(default_factory=list)
+    a_share_structure: Optional[Dict] = None
 
 
 def _credibility_note(hit_rate: float, correct: int, incorrect: int) -> str:
@@ -932,6 +937,50 @@ def _build_primary_evidence_block(primary_evidence: List[Dict]) -> str:
     return "\n".join(lines)
 
 
+def _build_a_share_structure_block(data: Optional[Dict]) -> str:
+    if not data:
+        return "暂缺 (本次未取得公开机构持股/十大流通股东数据，不能推断国家队、公募、险资或外资动向)"
+    lines = [f"报告期: {data.get('report_period') or '未知'}"]
+    institutions = data.get("institution_summary") or []
+    if institutions:
+        lines.append("机构持股汇总:")
+        for row in institutions:
+            ratio = row.get("latest_float_ratio_pct")
+            change = row.get("float_ratio_change_pct")
+            seg = f"  · {row.get('type')}: {row.get('institutions')} 家"
+            if ratio is not None:
+                seg += f"，合计占流通股 {ratio}%"
+            if change is not None:
+                seg += f"，较前期变化 {change:+}%"
+            lines.append(seg)
+    else:
+        lines.append("机构持股汇总: 暂缺")
+
+    special = data.get("special_holders") or {}
+    labels = {
+        "national_team": "汇金/证金/国新/诚通等国家资本",
+        "social_security": "社保基金",
+        "insurance": "保险资金",
+        "foreign": "香港中央结算/QFII等境外资金",
+        "public_fund": "公募基金",
+    }
+    lines.append("前十大流通股东中特殊资金:")
+    for key, label in labels.items():
+        holders = special.get(key) or []
+        if not holders:
+            lines.append(f"  · {label}: 本期前十大未见")
+            continue
+        text = "；".join(
+            f"{h.get('name')} {h.get('float_ratio_pct')}%"
+            if h.get("float_ratio_pct") is not None else str(h.get("name"))
+            for h in holders[:5]
+        )
+        lines.append(f"  · {label}: {text}")
+    for note in data.get("notes") or []:
+        lines.append(f"注: {note}")
+    return "\n".join(lines)
+
+
 def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) -> str:
     quote = inputs.quote
     if quote:
@@ -966,6 +1015,7 @@ def _build_prompt(inputs: AnalysisInputs, candidates: List[CandidateOpinion]) ->
             inputs.shareholder_trend, inputs.dividend_history, inputs.buyback_history
         ),
         margin_block=_build_margin_block(inputs.margin_signal, inputs.valuation, inputs.quote),
+        a_share_structure_block=_build_a_share_structure_block(inputs.a_share_structure),
         kb_fund_flow_block=_build_kb_fund_flow_block(inputs.knowledge_excerpts),
         profitability_block=_build_profitability_block(inputs.profitability_trend),
         commodity_block=_build_commodity_block(inputs.commodity_signal),
@@ -1072,7 +1122,7 @@ _ANALYSIS_TOOLS = [
     ),
     _analysis_tool(
         "analyze_a_share_structure",
-        "A股资金结构与市场风格: 综合'大盘与风格'、'融资盘与流通盘'、雪球机构持仓聚合、股东户数以及知识库中的公募/险资/国家资本/ETF/风格切换记录。只使用本报告实际提供的公开数据；未提供汇金、证金、诚通、国新、险资、公募等具体持仓时必须写暂缺，严禁猜测'国家队正在买/卖'。",
+        "A股资金结构与市场风格: 优先引用'A股公开资金结构'里的基金/社保/QFII/保险及前十大流通股东记录，再综合'大盘与风格'、'融资盘与流通盘'、雪球机构持仓聚合、股东户数以及知识库中的公募/险资/国家资本/ETF/风格切换记录。只使用本报告实际提供的公开数据；未提供汇金、证金、诚通、国新、险资、公募等具体持仓时必须写暂缺，严禁猜测'国家队正在买/卖'。",
     ),
     _analysis_tool(
         "analyze_risk_quality",
@@ -1352,6 +1402,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         market_context,
         margin_signal,
         primary_evidence,
+        a_share_structure,
     ) = await asyncio.gather(
         _load_knowledge_excerpts(),
         get_shareholder_count_trend(stock_code),
@@ -1362,6 +1413,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         get_market_context(stock_code),
         get_margin_signal(stock_code),
         get_cninfo_primary_evidence(stock_code),
+        get_a_share_structure(stock_code),
     )
 
     # 行业反查的起点是 F10 公司概要页里的申万行业名，所以必须等 fundamentals 回来。
@@ -1424,6 +1476,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         freight_signal=freight_signal,
         margin_signal=margin_signal,
         primary_evidence=primary_evidence,
+        a_share_structure=a_share_structure,
     )
 
     # 雪球个股数据必须借道已登录的浏览器会话，且只在会话存活期内可用；
@@ -1491,6 +1544,7 @@ async def generate_report(stock_code: str) -> AnalysisReport:
         fundamentals=inputs.fundamentals,
         valuation=inputs.valuation,
         xueqiu_stock=inputs.xueqiu_stock,
+        a_share_structure=a_share_structure,
         debate=inputs.debate,
         sentiment=inputs.sentiment,
         primary_evidence=primary_evidence,
