@@ -11,9 +11,11 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from pathlib import Path
 
+from analysis.snapshot_replay import replay_snapshot
 from analysis.snapshot_store import (
     load_snapshot_manifest,
     load_snapshot_research_inputs,
@@ -27,7 +29,7 @@ def _dump(value) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["verify", "show", "inputs"])
+    parser.add_argument("command", choices=["verify", "show", "inputs", "replay"])
     parser.add_argument("path")
     args = parser.parse_args()
 
@@ -44,6 +46,11 @@ def main() -> None:
 
     if args.command == "inputs":
         _dump(load_snapshot_research_inputs(path))
+        return
+
+    if args.command == "replay":
+        report = asyncio.run(replay_snapshot(path))
+        _dump(report.model_dump(mode="json"))
         return
 
 
