@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import date
+from datetime import date, datetime
 from typing import Dict, List, Optional
 
 import akshare as ak
@@ -25,6 +25,27 @@ _WINDOWS = (3, 5, 10)
 
 def _bare_code(stock_code: str) -> str:
     return re.sub(r"\D", "", stock_code)[-6:]
+
+
+def _coerce_date(value) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    # pandas Timestamp and similar objects expose .date()
+    try:
+        d = value.date()
+        if isinstance(d, date):
+            return d
+    except Exception:
+        pass
+    text = str(value).strip()[:10]
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
 
 def _num(value) -> Optional[float]:
@@ -106,6 +127,8 @@ async def get_valuation_history(
 
     if df is None or df.empty or "数据日期" not in df.columns:
         return None
+    df = df.dropna(subset=["数据日期"]).copy()
+    df["数据日期"] = df["数据日期"].map(_coerce_date)
     df = df.dropna(subset=["数据日期"]).sort_values("数据日期").reset_index(drop=True)
     if as_of is not None:
         df = df[df["数据日期"] <= as_of].reset_index(drop=True)
