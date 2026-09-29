@@ -52,6 +52,7 @@ jobs:
             analysis/report_validation.py \
             analysis/research_context.py \
             analysis/snapshot_store.py \
+            analysis/snapshot_replay.py \
             analysis/report_blocks.py \
             analysis/report_synthesis.py \
             analysis/report_social.py \
