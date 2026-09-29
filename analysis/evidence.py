@@ -57,7 +57,7 @@ _DIMENSION_REQUIREMENTS: Dict[str, tuple[str, ...]] = {
     "retail_sentiment": ("sentiment", "debate"),
     "shareholder_returns": ("shareholder_return", "governance"),
     "growth_elasticity": ("profitability", "valuation"),
-    "a_share_structure": ("market_context", "margin", "institutional", "knowledge"),
+    "a_share_structure": ("a_share_structure", "market_context", "margin", "institutional", "knowledge"),
     "risk_quality": ("fundamentals", "profitability", "governance"),
 }
 
@@ -341,6 +341,19 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         kind="derived",
         value=rmb,
         tags=("fx", "macro"),
+    )
+
+    a_share_structure = _get(inputs, "a_share_structure")
+    _add(
+        out,
+        category="a_share_structure",
+        label="A股机构持股与特殊股东结构",
+        source="analysis.a_share_structure",
+        tier="B",
+        kind="derived",
+        value=a_share_structure,
+        as_of=str((a_share_structure or {}).get("report_period") or "") or None,
+        tags=("institution", "fund", "social_security", "insurance", "qfii", "national_team"),
     )
 
     xq_stock = _get(inputs, "xueqiu_stock") or {}
