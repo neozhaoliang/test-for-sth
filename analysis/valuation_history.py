@@ -84,7 +84,11 @@ def _monthly_history(df, max_months: int = 120) -> List[Dict]:
     return rows
 
 
-async def get_valuation_history(stock_code: str) -> Optional[Dict]:
+async def get_valuation_history(
+    stock_code: str,
+    *,
+    as_of: Optional[date] = None,
+) -> Optional[Dict]:
     code6 = _bare_code(stock_code)
     if len(code6) != 6:
         return None
@@ -103,6 +107,8 @@ async def get_valuation_history(stock_code: str) -> Optional[Dict]:
     if df is None or df.empty or "数据日期" not in df.columns:
         return None
     df = df.dropna(subset=["数据日期"]).sort_values("数据日期").reset_index(drop=True)
+    if as_of is not None:
+        df = df[df["数据日期"] <= as_of].reset_index(drop=True)
     if df.empty:
         return None
 
