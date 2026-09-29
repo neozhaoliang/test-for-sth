@@ -49,7 +49,7 @@ class ResearchQuality(BaseModel):
 _DIMENSION_REQUIREMENTS: Dict[str, tuple[str, ...]] = {
     "management": ("governance", "shareholder_return"),
     "fundamentals": ("fundamentals", "profitability"),
-    "rd": ("rd",),
+    "rd": ("rd_team", "rd"),
     "chip_flow": ("shareholder_count", "margin"),
     "price_position": ("valuation_history", "valuation", "market_context"),
     "cycle_position": ("industry", "cycle_signal"),
@@ -190,6 +190,28 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         tags=("rd", "patent", "technology"),
         url=source_map.get("operate"),
     )
+
+    rd_team = _get(inputs, "rd_team")
+    if rd_team and rd_team.get("parse_status") == "ok":
+        _add(
+            out,
+            category="rd_team",
+            label="官方年报研发人员结构",
+            source=rd_team.get("source_name") or "巨潮资讯年报",
+            tier=rd_team.get("source_tier") or "S",
+            kind="fact",
+            value={
+                "rd_headcount": rd_team.get("rd_headcount"),
+                "rd_staff_ratio_pct": rd_team.get("rd_staff_ratio_pct"),
+                "education": rd_team.get("education") or {},
+                "age": rd_team.get("age") or {},
+                "hit_pages": rd_team.get("hit_pages") or [],
+                "report_title": rd_team.get("title"),
+            },
+            as_of=rd_team.get("published_at") or None,
+            tags=("rd", "people", "education", "annual_report"),
+            url=rd_team.get("pdf_url"),
+        )
 
     valuation = _get(inputs, "valuation")
     _add(
