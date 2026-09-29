@@ -1694,6 +1694,22 @@ function renderResult(report) {
     html += '</div>';
   }
 
+  const validation = report.validation || {};
+  if (validation.ok === true) {
+    const vWarnings = validation.warnings || [];
+    html += '<details class="evidence-block"><summary style="cursor:pointer;"><b>报告合同校验通过</b>' +
+      (vWarnings.length ? '，' + vWarnings.length + ' 条非致命提示' : '') +
+      '</summary>';
+    if (vWarnings.length) {
+      html += '<ul>' + vWarnings.map(x =>
+        '<li>' + escapeHtml(x.message || '') + '</li>'
+      ).join('') + '</ul>';
+    } else {
+      html += '<div class="credibility-note">12维完整、三层立场合法、反方证据/失效条件齐全、置信度未越过证据上限。</div>';
+    }
+    html += '</details>';
+  }
+
   const review = report.review || {};
   const dup = review.duplicate_factors || [];
   const conflicts = review.possible_conflicts || [];
