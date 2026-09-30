@@ -43,6 +43,12 @@ _SPECIAL_PATTERNS = {
 _SECTION_MARKERS = (
     "前10名无限售条件股东持股情况",
     "前十名无限售条件股东持股情况",
+    "前10名无限售条件普通股股东持股情况",
+    "前十名无限售条件普通股股东持股情况",
+    "前10名普通股股东持股情况",
+    "前十名普通股股东持股情况",
+    "前10名A股股东持股情况",
+    "前十名A股股东持股情况",
     "前10名股东持股情况",
     "前十名股东持股情况",
 )
@@ -73,6 +79,11 @@ def _extract_holder_section(pages: List[str]) -> str:
             continue
         compact = re.sub(r"\s+", "", text)
         if any(marker in compact for marker in _SECTION_MARKERS):
+            selected.append(text)
+            continue
+        # Bank/dual-listed reports often omit “持股情况” from the exact heading and use
+        # “前十名普通股股东” / “前十名A股股东” as the table title.
+        if re.search(r"前(?:10|十)名(?:无限售条件)?(?:普通股|A股)?股东", compact):
             selected.append(text)
     return "\n".join(selected)
 
