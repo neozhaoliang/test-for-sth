@@ -223,6 +223,40 @@ required source 的 point-in-time 改造已经完成，`historical_readiness().r
 
 ---
 
+## Frozen-input Prompt / Model A-B 对比
+
+有了 `research_inputs_only` snapshot 后，不需要重新抓任何公网数据，就可以在不同
+Prompt 或不同模型环境下分别 replay：
+
+```bash
+python tools/snapshot_cli.py replay <snapshot_path> \
+  --out artifacts/replay-a.json
+
+# 切换 Prompt / 模型配置后，对同一 snapshot 再跑一次
+python tools/snapshot_cli.py replay <snapshot_path> \
+  --out artifacts/replay-b.json
+```
+
+然后做确定性差异比较：
+
+```bash
+python tools/snapshot_cli.py compare \
+  artifacts/replay-a.json \
+  artifacts/replay-b.json \
+  --out artifacts/replay-diff.json
+```
+
+比较器不会调用 LLM，也不会访问任何数据源。它会先验证两份结果来自同一个冻结
+snapshot / stock / as-of，再比较：
+
+- 三层 stance 是否变化
+- confidence 的变化
+- 各维度评分 `B - A` 的差值
+- 发生变化的维度数
+- 最大绝对维度分差
+
+这使 Prompt / Model A-B 的因果边界更清晰：**输入数据完全相同，只比较综合阶段本身。**
+
 ## Historical public source corpus
 
 完整 LLM Historical E2E 依赖模型密钥，但公网 point-in-time 数据本身可以先独立冻结：
