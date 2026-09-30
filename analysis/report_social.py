@@ -33,6 +33,13 @@ _MAX_LATEST_POSTS = 5
 _MAX_HISTORICAL_THESIS = 5
 _MIN_CORROBORATING_RECORDS = 2
 
+_KNOWLEDGE_AUTHOR_ALIASES = {
+    "bili_laomujiang": "买股票的老木匠",
+    "bili_laomujiang_transcript": "买股票的老木匠",
+    "xueqiu_3058599833": "买股票的老木匠",
+    "xueqiu_4780688814": "军师祭咖啡",
+}
+
 
 def credibility_note(hit_rate: float, correct: int, incorrect: int) -> str:
     total = correct + incorrect
@@ -118,6 +125,7 @@ async def load_knowledge_excerpts(
         out.append(
             KnowledgeExcerpt(
                 source=e.source,
+                author=_KNOWLEDGE_AUTHOR_ALIASES.get(e.source, ""),
                 title=e.title,
                 distilled=e.distilled,
                 source_url=e.source_url,
