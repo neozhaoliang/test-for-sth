@@ -1,8 +1,10 @@
 from analysis.evidence import ResearchQuality
 from analysis.report_blocks import (
     _build_a_share_structure_block,
+    _build_dividend_chart,
     _build_fundamentals_block,
     _build_management_capital_block,
+    _build_shareholder_block,
     _build_research_quality_block,
     _build_time_contract_block,
     _build_valuation_history_block,
@@ -178,3 +180,49 @@ def test_management_capital_block_does_not_render_unknown_dividend_amount_as_zer
     assert "分红覆盖 4/5" in text
     assert "累计金额暂缺" in text
     assert "累计每10股现金分红 0" not in text
+
+
+def test_unknown_historical_dividend_amount_is_not_rendered_or_charted_as_zero():
+    dividends = [
+        {
+            "announce_date": "2023-07-06",
+            "dividend_per_10_shares": None,
+            "progress": "implemented",
+        }
+    ]
+
+    text = _build_shareholder_block(None, dividends, [])
+    assert "每10股派息金额暂缺" in text
+    assert "每10股派息 0" not in text
+
+    assert _build_dividend_chart(
+        dividends,
+        [],
+        {"total_shares": 10_000_000_000},
+        {"latest_price": 34.19},
+    ) is None
+
+
+def test_management_capital_block_keeps_old_snapshot_amount_compatibility():
+    text = _build_management_capital_block(
+        {
+            "alignment": {},
+            "execution": {},
+            "five_year": {
+                "window_years": 5,
+                "dividend_years_count": 4,
+                "dividend_records": 4,
+                "cash_dividend_per_10_total": 14.0,
+                "buyback_records": 0,
+                "buyback_actual_amount_yuan": 0,
+                "refinancing_records": 0,
+                "primary_refinancing_announcements": 0,
+                "insider_reduction_announcements": 0,
+                "governance_negative_announcements": 0,
+            },
+            "notes": [],
+        }
+    )
+
+    assert "累计每10股现金分红 14.0 元" in text
+    assert "0/4 条记录" not in text
