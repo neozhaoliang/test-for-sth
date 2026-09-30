@@ -111,6 +111,25 @@ def parse_top_holder_names(text: str) -> List[Dict]:
     if stop_positions:
         normalized = normalized[:min(stop_positions)]
 
+    heading_patterns = (
+        r"前(?:10|十)名普通股股东及前(?:10|十)名无限售条件普通股股东持股情况(?:如下)?",
+        r"前(?:10|十)名无限售条件普通股股东持股情况(?:如下)?",
+        r"前(?:10|十)名无限售条件股东持股情况(?:如下)?",
+        r"前(?:10|十)名普通股股东持股情况(?:如下)?",
+        r"前(?:10|十)名A股股东持股情况(?:如下)?",
+        r"前(?:10|十)名股东持股情况(?:如下)?",
+    )
+    heading_hits = []
+    for pattern in heading_patterns:
+        m = re.search(pattern, normalized)
+        if m:
+            heading_hits.append((m.start(), m.end()))
+    if heading_hits:
+        # Start parsing immediately after the first matching table heading so the heading
+        # itself cannot be glued to the first company name when PDF whitespace is removed.
+        _, end = min(heading_hits, key=lambda x: x[0])
+        normalized = normalized[end:]
+
     names: List[str] = []
     for pattern in _NAME_PATTERNS:
         for match in pattern.finditer(normalized):
