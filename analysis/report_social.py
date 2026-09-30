@@ -139,8 +139,18 @@ async def filter_relevant_knowledge(
     stock_code: str,
     stock_name: str,
     industry_name: Optional[str],
+    *,
+    use_llm: bool = True,
 ) -> List[KnowledgeExcerpt]:
     if not knowledge_excerpts:
+        return knowledge_excerpts
+
+    # Historical research inputs must be reproducible independently of whichever model is
+    # configured today. The entries have already been strictly truncated by publication
+    # time in load_knowledge_excerpts(as_of=...). Keep that frozen set and let the final
+    # synthesis model decide which items are relevant. Live mode may still use the LLM
+    # relevance filter to reduce prompt size.
+    if not use_llm:
         return knowledge_excerpts
 
     items_block = "\n".join(
