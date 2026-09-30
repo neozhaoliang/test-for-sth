@@ -205,6 +205,10 @@ async def _run_case(
             f"research-input snapshot failed: {type(exc).__name__}: {exc}"
         )
 
+    if report.research_profile.readiness <= 0:
+        failures.append(
+            "research profile readiness is zero despite completed evidence collection"
+        )
     if report.research_quality.coverage < 0.50:
         warnings.append(
             f"low evidence coverage: {report.research_quality.coverage:.0%}"
