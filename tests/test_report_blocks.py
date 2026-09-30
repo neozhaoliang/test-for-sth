@@ -226,3 +226,35 @@ def test_management_capital_block_keeps_old_snapshot_amount_compatibility():
 
     assert "累计每10股现金分红 14.0 元" in text
     assert "0/4 条记录" not in text
+
+
+def test_bank_fundamentals_block_uses_bank_metrics_not_manufacturing_cashflow_rule():
+    text = _build_fundamentals_block(
+        {
+            "point_in_time": True,
+            "facts": {
+                "finance_period": "2024-03-31",
+                "financial_subtype": "bank",
+                "industry_hint": "银行",
+                "revenue": 86_417_000_000,
+                "net_profit": 38_077_000_000,
+                "operating_cash_flow": -1_208_000_000,
+                "cash_to_profit_ratio": -0.032,
+                "net_interest_margin_pct": 2.02,
+                "npl_ratio_pct": 0.92,
+                "provision_coverage_pct": 436.82,
+                "loan_provision_ratio_pct": 4.02,
+                "core_tier1_capital_adequacy_pct": 13.50,
+                "tier1_capital_adequacy_pct": 16.16,
+                "capital_adequacy_pct": 18.24,
+            },
+        }
+    )
+
+    assert "银行核心指标" in text
+    assert "净息差/净利息收益率 2.02%" in text
+    assert "不良贷款率 0.92%" in text
+    assert "拨备覆盖率 436.82%" in text
+    assert "核心一级资本充足率 13.5%" in text
+    assert "不得按制造业阈值判断经营质量" in text
+    assert "显著小于 1 说明账面利润没有同步变成现金" not in text
