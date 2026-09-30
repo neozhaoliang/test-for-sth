@@ -362,6 +362,53 @@ async def _distill_missing(raws: List[Dict], cache: Dict[str, Dict]) -> Dict[str
     return updated
 
 
+def load_cached_entries() -> List[KnowledgeEntry]:
+    """
+    Load only already-distilled, content-hash-matching knowledge entries.
+
+    This path never calls an LLM and never mutates the in-memory live cache. It is used by
+    strict historical input collection so pre-synthesis snapshots remain model-independent.
+    Raw entries whose current content has no matching distillation cache are omitted rather
+    than being distilled with today's model.
+    """
+    raws: List[Dict] = []
+    for source in _build_sources():
+        raws.extend(_load_raw_entries(source))
+
+    deduped: Dict[str, Dict] = {}
+    for raw in raws:
+        key = _cache_key(raw["source"], raw["entry_id"])
+        old = deduped.get(key)
+        if old is None or raw.get("timestamp", 0) >= old.get("timestamp", 0):
+            deduped[key] = raw
+
+    disk_cache = _read_distill_cache()
+    entries: List[KnowledgeEntry] = []
+    for raw in deduped.values():
+        key = _cache_key(raw["source"], raw["entry_id"])
+        rec = disk_cache.get(key)
+        if not rec:
+            continue
+        if rec.get("content_hash") != _content_hash(raw["content"]):
+            continue
+        distilled = _strip_self_intro(rec.get("distilled", "") or "")
+        if not distilled:
+            continue
+        entries.append(
+            KnowledgeEntry(
+                source=raw["source"],
+                entry_id=raw["entry_id"],
+                title=raw["title"],
+                raw_content=raw["content"],
+                distilled=distilled,
+                timestamp=raw["timestamp"],
+                source_url=raw.get("source_url", ""),
+            )
+        )
+    entries.sort(key=lambda e: e.timestamp, reverse=True)
+    return entries
+
+
 async def ensure_loaded() -> List[KnowledgeEntry]:
     """
     加载全部已注册知识库来源；原文若不在缓存中或内容有变化，先用 LLM 提炼投资观点
