@@ -94,6 +94,22 @@ def parse_top_holder_names(text: str) -> List[Dict]:
     # PDF table extraction often inserts spaces/newlines between every Chinese token.
     # Holder names are structural strings, so remove all whitespace before matching.
     normalized = re.sub(r"\s+", "", text.replace("\u3000", " "))
+    # Do not let explanatory notes / related-party paragraphs after the table create fake
+    # "holders".  These paragraphs frequently repeat company names from the table and their
+    # parent/subsidiary relationships.
+    stop_positions = [
+        pos for marker in (
+            "注：",
+            "注:",
+            "上述股东关联关系",
+            "上述股东中",
+            "前10名股东参与融资融券",
+            "前十名股东参与融资融券",
+        )
+        if (pos := normalized.find(marker)) > 0
+    ]
+    if stop_positions:
+        normalized = normalized[:min(stop_positions)]
 
     names: List[str] = []
     for pattern in _NAME_PATTERNS:
