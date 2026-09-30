@@ -78,10 +78,23 @@ def _first_number_after(text: str, labels: List[str]) -> Optional[float]:
 
 def _first_percent_after(text: str, labels: List[str]) -> Optional[float]:
     for label in labels:
+        # Common prose/table layout: "净资产收益率 12.50%"
         m = re.search(
             re.escape(label)
             + r"[^\d()\-]{0,60}"
             + r"([()\-—]?[\d,]+(?:\.\d+)?\)?)\s*%",
+            text,
+        )
+        if m:
+            return _num(m.group(1))
+
+        # Some bank reports put the unit in the column heading:
+        # "加权平均净资产收益率(%) 16.08".
+        m = re.search(
+            re.escape(label)
+            + r"[^\d\-]{0,40}(?:\(%\)|（%）|%)"
+            + r"[^\d()\-]{0,20}"
+            + r"([()\-—]?[\d,]+(?:\.\d+)?\)?)",
             text,
         )
         if m:
