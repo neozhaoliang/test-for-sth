@@ -294,6 +294,7 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
                 "core_tier1_capital_adequacy_pct",
                 "tier1_capital_adequacy_pct",
                 "capital_adequacy_pct",
+                "capital_adequacy_basis",
                 "roe_pct",
             )
             if facts.get(k) is not None
