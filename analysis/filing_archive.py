@@ -29,6 +29,9 @@ from analysis.filing_calendar import (
 
 _MAX_PDF_BYTES = 50 * 1024 * 1024
 _DOWNLOAD_TIMEOUT_S = 45
+_PDF_CACHE_MAX_ENTRIES = 16
+_pdf_cache: Dict[str, Optional[bytes]] = {}
+_pdf_inflight: Dict[str, asyncio.Task] = {}
 
 
 class ArchivedFiling(BaseModel):
@@ -54,7 +57,7 @@ def _safe_filename(period: str, announcement_id: str) -> str:
     return f"{period}_{suffix}.pdf".replace("/", "-")
 
 
-async def _download_pdf(url: str) -> Optional[bytes]:
+async def _download_pdf_uncached(url: str) -> Optional[bytes]:
     import httpx
 
     try:
@@ -78,6 +81,39 @@ async def _download_pdf(url: str) -> Optional[bytes]:
         return None
     if len(body) > _MAX_PDF_BYTES:
         return None
+    return body
+
+
+def _remember_pdf(url: str, body: Optional[bytes]) -> None:
+    _pdf_cache[url] = body
+    while len(_pdf_cache) > _PDF_CACHE_MAX_ENTRIES:
+        oldest = next(iter(_pdf_cache))
+        _pdf_cache.pop(oldest, None)
+
+
+async def _download_pdf(url: str) -> Optional[bytes]:
+    """
+    Download a filing PDF once per process and share the same in-flight request.
+
+    Historical financials, ownership and shareholder-count parsers commonly need the exact
+    same periodic report.  Without this cache a single report can be downloaded three times
+    concurrently, slowing acceptance runs and increasing CNINFO load.
+    """
+    if url in _pdf_cache:
+        return _pdf_cache[url]
+
+    task = _pdf_inflight.get(url)
+    if task is None:
+        task = asyncio.create_task(_download_pdf_uncached(url))
+        _pdf_inflight[url] = task
+
+    try:
+        body = await task
+    finally:
+        if _pdf_inflight.get(url) is task:
+            _pdf_inflight.pop(url, None)
+
+    _remember_pdf(url, body)
     return body
 
 
