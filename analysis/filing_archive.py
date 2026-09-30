@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
+from pypdf import PdfReader
 
 from analysis.filing_calendar import (
     get_financial_filing_calendar,
@@ -30,8 +32,11 @@ from analysis.filing_calendar import (
 _MAX_PDF_BYTES = 50 * 1024 * 1024
 _DOWNLOAD_TIMEOUT_S = 45
 _PDF_CACHE_MAX_ENTRIES = 16
+_PDF_TEXT_CACHE_MAX_ENTRIES = 8
 _pdf_cache: Dict[str, Optional[bytes]] = {}
 _pdf_inflight: Dict[str, asyncio.Task] = {}
+_pdf_pages_cache: Dict[str, Optional[List[str]]] = {}
+_pdf_pages_inflight: Dict[str, asyncio.Task] = {}
 
 
 class ArchivedFiling(BaseModel):
@@ -115,6 +120,60 @@ async def _download_pdf(url: str) -> Optional[bytes]:
 
     _remember_pdf(url, body)
     return body
+
+
+def _extract_pdf_pages(pdf_bytes: bytes) -> List[str]:
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    pages: List[str] = []
+    for page in reader.pages:
+        try:
+            pages.append(page.extract_text() or "")
+        except Exception:
+            pages.append("")
+    return pages
+
+
+def _remember_pdf_pages(url: str, pages: Optional[List[str]]) -> None:
+    _pdf_pages_cache[url] = pages
+    while len(_pdf_pages_cache) > _PDF_TEXT_CACHE_MAX_ENTRIES:
+        oldest = next(iter(_pdf_pages_cache))
+        _pdf_pages_cache.pop(oldest, None)
+
+
+async def _get_pdf_pages_text(url: str) -> Optional[List[str]]:
+    """
+    Extract each filing PDF to page text once per process and share the in-flight parse.
+
+    Financial, top-holder and shareholder-count adapters all inspect the same periodic
+    reports. PDF text extraction is substantially more expensive than the network request,
+    so caching bytes alone is not enough.
+    """
+    if url in _pdf_pages_cache:
+        pages = _pdf_pages_cache[url]
+        return list(pages) if pages is not None else None
+
+    task = _pdf_pages_inflight.get(url)
+    if task is None:
+        async def build_pages() -> Optional[List[str]]:
+            body = await _download_pdf(url)
+            if not body:
+                return None
+            try:
+                return await asyncio.to_thread(_extract_pdf_pages, body)
+            except Exception:
+                return None
+
+        task = asyncio.create_task(build_pages())
+        _pdf_pages_inflight[url] = task
+
+    try:
+        pages = await task
+    finally:
+        if _pdf_pages_inflight.get(url) is task:
+            _pdf_pages_inflight.pop(url, None)
+
+    _remember_pdf_pages(url, pages)
+    return list(pages) if pages is not None else None
 
 
 async def archive_financial_filings(
