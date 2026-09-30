@@ -91,3 +91,30 @@ def test_management_capital_without_primary_is_b_tier_and_notes_limit():
     assert record["five_year"]["dividend_years_count"] == 1
     assert any("巨潮" in note for note in record["notes"])
     assert any("高管" in note for note in record["notes"])
+
+
+def test_management_capital_counts_implemented_dividend_with_unknown_amount():
+    record = build_management_capital_record(
+        dividend_history=[
+            {
+                "announce_date": "2023-07-06",
+                "dividend_per_10_shares": None,
+                "progress": "implemented",
+                "title": "2022年年度A股分红派息实施公告",
+            },
+            {
+                "announce_date": "2024-03-26",
+                "dividend_per_10_shares": None,
+                "progress": "proposal",
+                "title": "2023年度利润分配方案公告",
+            },
+        ],
+        as_of=date(2024, 6, 30),
+    )
+
+    row = record["five_year"]
+    assert row["dividend_years_count"] == 1
+    assert row["dividend_records"] == 1
+    assert row["cash_dividend_per_10_total"] is None
+    assert row["cash_dividend_amount_records"] == 0
+    assert row["cash_dividend_amount_complete"] is False
