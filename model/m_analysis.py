@@ -39,8 +39,9 @@ class CandidateOpinion(BaseModel):
 
 
 class KnowledgeExcerpt(BaseModel):
-    """知识库背景资料 (非可信度验证类观点，始终全量加载作为背景参考)"""
+    """知识库背景资料 (观点/经验，不等于事实；用于提出待核验假设)"""
     source: str = Field(default="", description="知识库来源标识，如 bili_laomujiang")
+    author: str = Field(default="", description="可读作者名，如 买股票的老木匠/军师祭咖啡")
     title: str = Field(default="", description="资料标题")
     distilled: str = Field(default="", description="LLM 提炼后的投资观点摘要 (已去除闲聊)")
     source_url: str = Field(default="", description="原帖/专栏/视频来源链接")
