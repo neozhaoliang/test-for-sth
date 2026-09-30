@@ -17,6 +17,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -75,30 +76,63 @@ def _max_available_date(value) -> date | None:
     return max(candidates) if candidates else None
 
 
+async def _timed_source(name: str, awaitable, timeout_s: float):
+    started = time.monotonic()
+    print(f"[probe] START {name}", flush=True)
+    try:
+        value = await asyncio.wait_for(awaitable, timeout=timeout_s)
+        elapsed = round(time.monotonic() - started, 2)
+        print(f"[probe] DONE  {name} {elapsed}s available={bool(value)}", flush=True)
+        return {"value": value, "error": None, "elapsed_s": elapsed}
+    except asyncio.TimeoutError:
+        elapsed = round(time.monotonic() - started, 2)
+        msg = f"timeout after {timeout_s}s"
+        print(f"[probe] TIMEOUT {name} {elapsed}s", flush=True)
+        return {"value": None, "error": msg, "elapsed_s": elapsed}
+    except Exception as e:
+        elapsed = round(time.monotonic() - started, 2)
+        msg = f"{type(e).__name__}: {e}"
+        print(f"[probe] ERROR {name} {elapsed}s {msg}", flush=True)
+        return {"value": None, "error": msg, "elapsed_s": elapsed}
+
+
 async def _one_case(code: str, as_of: date, label: str) -> Dict:
-    (
-        quote,
-        valuation,
-        market,
-        margin,
-        macro,
-        primary,
-        calendar,
-        pit_financials,
-        ownership,
-        shareholder,
-    ) = await asyncio.gather(
-        get_historical_quote(code, as_of),
-        get_valuation_history(code, as_of=as_of),
-        get_market_context(code, as_of=as_of),
-        get_margin_signal(code, as_of=as_of),
-        get_macro_rate_context(as_of=as_of),
-        get_cninfo_primary_evidence(code, as_of=as_of),
-        get_financial_filing_calendar(code, as_of=as_of),
-        get_point_in_time_financials(code, as_of),
-        get_point_in_time_ownership(code, as_of),
-        get_point_in_time_shareholder_trend(code, as_of),
+    print(f"\n[probe] CASE {code}@{as_of.isoformat()} {label}", flush=True)
+    names = [
+        "quote",
+        "valuation_history",
+        "market_context",
+        "margin",
+        "macro_rates",
+        "primary_evidence",
+        "filing_calendar",
+        "financials",
+        "ownership",
+        "shareholder_count",
+    ]
+    results = await asyncio.gather(
+        _timed_source("quote", get_historical_quote(code, as_of), 60),
+        _timed_source("valuation_history", get_valuation_history(code, as_of=as_of), 90),
+        _timed_source("market_context", get_market_context(code, as_of=as_of), 90),
+        _timed_source("margin", get_margin_signal(code, as_of=as_of), 60),
+        _timed_source("macro_rates", get_macro_rate_context(as_of=as_of), 60),
+        _timed_source("primary_evidence", get_cninfo_primary_evidence(code, as_of=as_of), 90),
+        _timed_source("filing_calendar", get_financial_filing_calendar(code, as_of=as_of), 90),
+        _timed_source("financials", get_point_in_time_financials(code, as_of), 240),
+        _timed_source("ownership", get_point_in_time_ownership(code, as_of), 240),
+        _timed_source("shareholder_count", get_point_in_time_shareholder_trend(code, as_of), 240),
     )
+    source_results = dict(zip(names, results))
+    quote = source_results["quote"]["value"]
+    valuation = source_results["valuation_history"]["value"]
+    market = source_results["market_context"]["value"]
+    margin = source_results["margin"]["value"]
+    macro = source_results["macro_rates"]["value"]
+    primary = source_results["primary_evidence"]["value"]
+    calendar = source_results["filing_calendar"]["value"]
+    pit_financials = source_results["financials"]["value"]
+    ownership = source_results["ownership"]["value"]
+    shareholder = source_results["shareholder_count"]["value"]
 
     fundamentals = to_historical_fundamentals(pit_financials)
     profitability = to_historical_profitability(pit_financials)
@@ -180,7 +214,18 @@ async def _one_case(code: str, as_of: date, label: str) -> Dict:
         "dividend_event_count": len(dividends),
         "buyback_event_count": len(buybacks),
         "future_leaks": future_leaks,
-        "warnings": warnings,
+        "source_diagnostics": {
+            name: {
+                "elapsed_s": source_results[name]["elapsed_s"],
+                "error": source_results[name]["error"],
+            }
+            for name in names
+        },
+        "warnings": warnings + [
+            f"{name}: {source_results[name]['error']}"
+            for name in names
+            if source_results[name]["error"]
+        ],
         "failures": failures,
         "ok": not failures,
     }
