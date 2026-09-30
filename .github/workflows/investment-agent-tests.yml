@@ -62,6 +62,7 @@ jobs:
             analysis/report_social.py \
             analysis/report.py \
             analysis/knowledge_base.py \
+            analysis/knowledge_context.py \
             analysis/fundamentals.py \
             analysis/filing_calendar.py \
             analysis/filing_archive.py \
@@ -124,6 +125,7 @@ jobs:
             tests/test_realtime_price_asof.py \
             tests/test_margin_asof.py \
             tests/test_knowledge_asof.py \
+            tests/test_knowledge_context.py \
             tests/test_score_asof.py \
             tests/test_shareholder_asof.py \
             tests/test_management_capital.py \

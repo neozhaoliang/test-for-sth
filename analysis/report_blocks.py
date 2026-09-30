@@ -13,6 +13,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from analysis.evidence import ResearchQuality
+from analysis.knowledge_context import build_knowledge_hypotheses, format_knowledge_hypotheses
 from analysis.research_profile import ResearchProfile, profile_prompt_block
 from analysis.report_contract import _PROMPT_TEMPLATE
 from model.m_analysis import CandidateOpinion, KnowledgeExcerpt
@@ -42,13 +43,31 @@ def _build_kb_fund_flow_block(knowledge_excerpts: List[KnowledgeExcerpt]) -> str
     if not hits:
         return "(知识库中无相关的资金/风格/筹码记录)"
     lines = [
-        "知识库中该时期的资金与风格真实记录 (专栏/发帖摘要原文, 含来源与日期; "
-        "解释股价与户数联动、板块涨跌、风格切换时必须先引用这里的记录, 模板推断仅在其缺位时使用):"
+        "知识库中的资金与风格假设 (专栏/发帖摘要，含来源与日期；仅作为待核验机制，"
+        "必须与持股数量、主动/被动资金、股东户数、融资余额和指数风格交叉验证):"
     ]
     for e in hits[:10]:
-        lines.append(f"  · [{e.source} {e.title[:50]}] {e.distilled[:400]}")
+        who = e.author or e.source
+        lines.append(f"  · [{who} {e.title[:50]}] {e.distilled[:400]}")
     return "\n".join(lines)
 
+
+
+def _build_knowledge_hypotheses_block(inputs: Any) -> str:
+    profile = inputs.research_profile or ResearchProfile()
+    fundamentals = inputs.fundamentals or {}
+    facts = fundamentals.get("facts") or {}
+    industry = profile.industry or str(facts.get("sw_industry") or facts.get("industry_hint") or "")
+    hypotheses = build_knowledge_hypotheses(
+        inputs.knowledge_excerpts,
+        inputs.stock_code,
+        inputs.stock_name or inputs.stock_code,
+        industry,
+        archetype=profile.archetype,
+        fundamentals=fundamentals,
+        limit=24,
+    )
+    return format_knowledge_hypotheses(hypotheses)
 
 def _build_margin_block(
     margin_signal: Optional[Dict], valuation: Optional[Dict], quote: Optional[Dict]
@@ -1006,7 +1025,8 @@ def _build_knowledge_block(knowledge_excerpts: List[KnowledgeExcerpt]) -> str:
     lines = []
     for k in knowledge_excerpts:
         link = f" | {k.source_url}" if k.source_url else ""
-        lines.append(f"- 《{k.title}》 ({k.source}){link}")
+        who = k.author or k.source
+        lines.append(f"- 《{k.title}》 ({who}; {k.source}){link}")
         lines.append(f"    {k.distilled}")
     if not lines:
         lines.append("(暂无背景资料)")
@@ -1275,6 +1295,7 @@ def _build_prompt(inputs: Any, candidates: List[CandidateOpinion]) -> str:
         sentiment_block=_build_sentiment_block(inputs.sentiment),
         candidates_block=_build_candidates_block(candidates),
         knowledge_block=_build_knowledge_block(inputs.knowledge_excerpts),
+        knowledge_hypotheses_block=_build_knowledge_hypotheses_block(inputs),
         industry_block=_build_industry_block(inputs.industry_comparison),
         market_block=_build_market_block(inputs.market_context),
         shareholder_block=_build_shareholder_block(

@@ -1,8 +1,13 @@
+from types import SimpleNamespace
+
 from analysis.evidence import ResearchQuality
+from analysis.research_profile import ResearchProfile
+from model.m_analysis import KnowledgeExcerpt
 from analysis.report_blocks import (
     _build_a_share_structure_block,
     _build_dividend_chart,
     _build_fundamentals_block,
+    _build_knowledge_hypotheses_block,
     _build_management_capital_block,
     _build_profitability_block,
     _build_shareholder_block,
@@ -306,3 +311,43 @@ def test_bank_profitability_block_renders_quality_trends_and_bank_rows():
     assert "核心一级资本充足率从 12.31% 上升至 14.07%" in text
     assert "2024-03-31" in text
     assert "毛利率/主营业务利润率" not in text
+
+
+def test_knowledge_hypotheses_block_marks_kol_claims_as_hypotheses():
+    inputs = SimpleNamespace(
+        stock_code="300308",
+        stock_name="中际旭创",
+        research_profile=ResearchProfile(
+            archetype="technology",
+            label="科技/先进制造",
+            industry="通信设备",
+            readiness=1.0,
+        ),
+        fundamentals={
+            "facts": {
+                "sw_industry": "通信设备",
+                "overseas_revenue_pct": 94.8,
+                "top5_customer_pct": 75.9,
+            }
+        },
+        knowledge_excerpts=[
+            KnowledgeExcerpt(
+                source="xueqiu_4780688814",
+                title="AI资本开支的资金来源",
+                distilled=(
+                    "【原则】如果AI资本开支越来越依赖企业债，需要警惕需求质量。"
+                    "【机制】融资成本上升会传导到数据中心Capex。"
+                    "【适用条件】算力投资高景气阶段。"
+                    "【失效条件】自由现金流持续覆盖资本开支。"
+                ),
+                published_at="2026-09-01 10:00:00",
+            )
+        ],
+    )
+
+    text = _build_knowledge_hypotheses_block(inputs)
+
+    assert "待核验假设" in text
+    assert "不是事实" in text
+    assert "终端需求质量与融资来源" in text
+    assert "下游资本开支由自由现金流还是新增债务" in text
