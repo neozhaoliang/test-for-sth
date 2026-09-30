@@ -9,14 +9,11 @@ published by the cutoff date, rather than from today's reconstructed historical 
 from __future__ import annotations
 
 import asyncio
-import io
 import re
 from datetime import date
 from typing import Dict, List, Optional
 
-from pypdf import PdfReader
-
-from analysis.filing_archive import _download_pdf
+from analysis.filing_archive import _get_pdf_pages_text
 from analysis.filing_calendar import (
     get_financial_filing_calendar,
     latest_available_filing_by_period,
@@ -36,28 +33,24 @@ def _num(text: str) -> Optional[int]:
     return value if value >= 0 else None
 
 
-def _extract_relevant_text(pdf_bytes: bytes) -> str:
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    pages: List[str] = []
-    for page in reader.pages:
-        try:
-            text = page.extract_text() or ""
-        except Exception:
-            text = ""
-        if "股东总数" in text or "普通股股东" in text:
-            pages.append(text)
-    return "\n".join(pages)
+def _extract_relevant_text(pages: List[str]) -> str:
+    selected: List[str] = []
+    for text in pages:
+        compact = re.sub(r"\s+", "", text or "")
+        if "股东总数" in compact or "普通股股东" in compact:
+            selected.append(text)
+    return "\n".join(selected)
 
 
 def parse_shareholder_count_text(text: str) -> Optional[int]:
     if not text:
         return None
-    normalized = text.replace("\u3000", " ")
-    normalized = re.sub(r"[ \t]+", " ", normalized)
+    # Periodic-report table text may split the label across spaces/newlines.
+    normalized = re.sub(r"\s+", "", text.replace("\u3000", " "))
     patterns = (
-        r"报告期末普通股股东总数(?:（户）|\(户\)|（如有）)?\s*[：:]?\s*([\d,，]+)",
-        r"期末普通股股东总数(?:（户）|\(户\))?\s*[：:]?\s*([\d,，]+)",
-        r"普通股股东总数\s*[：:]?\s*([\d,，]+)",
+        r"报告期末普通股股东总数(?:（户）|\(户\)|（如有）)?[：:]?([\d,，]+)",
+        r"期末普通股股东总数(?:（户）|\(户\))?[：:]?([\d,，]+)",
+        r"普通股股东总数[：:]?([\d,，]+)",
     )
     for pattern in patterns:
         m = re.search(pattern, normalized)
@@ -72,12 +65,12 @@ async def _fetch_count(item: Dict) -> Optional[Dict]:
     url = str(item.get("url") or "")
     if not url:
         return None
-    body = await _download_pdf(url)
-    if not body:
+    pages = await _get_pdf_pages_text(url)
+    if not pages:
         return None
     try:
         text = await asyncio.wait_for(
-            asyncio.to_thread(_extract_relevant_text, body),
+            asyncio.to_thread(_extract_relevant_text, pages),
             timeout=_PARSE_TIMEOUT_S,
         )
     except Exception:
