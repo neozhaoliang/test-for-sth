@@ -4,6 +4,7 @@ from analysis.report_blocks import (
     _build_dividend_chart,
     _build_fundamentals_block,
     _build_management_capital_block,
+    _build_profitability_block,
     _build_shareholder_block,
     _build_research_quality_block,
     _build_time_contract_block,
@@ -258,3 +259,50 @@ def test_bank_fundamentals_block_uses_bank_metrics_not_manufacturing_cashflow_ru
     assert "核心一级资本充足率 13.5%" in text
     assert "不得按制造业阈值判断经营质量" in text
     assert "显著小于 1 说明账面利润没有同步变成现金" not in text
+
+
+def test_bank_profitability_block_renders_quality_trends_and_bank_rows():
+    text = _build_profitability_block(
+        {
+            "gross_margin_trend_note": "银行不适用制造业毛利率框架",
+            "net_margin_trend_note": "净利率从 39.27% 上升至 44.06%",
+            "roe_trend_note": "ROE从 18.69% 下降至 16.08%",
+            "debt_ratio_trend_note": "银行资产负债率不按普通企业杠杆阈值解释",
+            "bank_trend_notes": {
+                "net_interest_margin": "净息差/净利息收益率从 2.48% 下降至 2.02% (变化 -0.46pct，区间 2021-09-30~2024-03-31)",
+                "npl_ratio": "不良贷款率从 0.93% 基本持平至 0.92% (变化 -0.01pct，区间 2021-09-30~2024-03-31)",
+                "provision_coverage": "拨备覆盖率从 443.14% 下降至 436.82% (变化 -6.32pct，区间 2021-09-30~2024-03-31)",
+                "core_tier1_capital": "核心一级资本充足率从 12.31% 上升至 14.07% (变化 +1.76pct，区间 2021-09-30~2024-03-31)",
+                "capital_adequacy": "资本充足率从 16.36% 上升至 18.20% (变化 +1.84pct，区间 2021-09-30~2024-03-31)",
+            },
+            "periods": [
+                {
+                    "period": "2021-09-30",
+                    "roe_pct": 18.69,
+                    "net_interest_margin_pct": 2.48,
+                    "npl_ratio_pct": 0.93,
+                    "provision_coverage_pct": 443.14,
+                    "loan_provision_ratio_pct": 4.13,
+                    "core_tier1_capital_adequacy_pct": 12.31,
+                    "capital_adequacy_pct": 16.36,
+                },
+                {
+                    "period": "2024-03-31",
+                    "roe_pct": 16.08,
+                    "net_interest_margin_pct": 2.02,
+                    "npl_ratio_pct": 0.92,
+                    "provision_coverage_pct": 436.82,
+                    "loan_provision_ratio_pct": 4.01,
+                    "core_tier1_capital_adequacy_pct": 14.07,
+                    "capital_adequacy_pct": 18.20,
+                },
+            ],
+        }
+    )
+
+    assert "银行核心指标跨期趋势" in text
+    assert "净息差/净利息收益率从 2.48% 下降至 2.02%" in text
+    assert "不良贷款率从 0.93% 基本持平至 0.92%" in text
+    assert "核心一级资本充足率从 12.31% 上升至 14.07%" in text
+    assert "2024-03-31" in text
+    assert "毛利率/主营业务利润率" not in text
