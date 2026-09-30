@@ -2,6 +2,7 @@ from datetime import date
 
 from analysis.point_in_time_financials import (
     _latest_period_is_fresh_enough,
+    parse_financial_report_pages,
     parse_financial_report_text,
     to_historical_fundamentals,
     to_historical_profitability,
