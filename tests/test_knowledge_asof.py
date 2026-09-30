@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+from analysis import knowledge_base
 from analysis.knowledge_base import (
     KnowledgeEntry,
     _normalize_epoch_seconds,
@@ -66,3 +67,48 @@ def test_live_knowledge_keeps_unknown_time_entries():
         source_url="",
     )
     assert filter_entries_as_of([entry], None) == [entry]
+
+
+def test_cached_knowledge_loader_uses_only_matching_distill_cache(monkeypatch):
+    raw = {
+        "source": "test",
+        "entry_id": "1",
+        "title": "历史观点",
+        "content": "raw historical content",
+        "timestamp": _ts(2024, 6, 20),
+        "source_url": "https://example.test/1",
+    }
+    monkeypatch.setattr(knowledge_base, "_build_sources", lambda: [object()])
+    monkeypatch.setattr(
+        knowledge_base,
+        "_load_raw_entries",
+        lambda _source: [raw],
+    )
+    monkeypatch.setattr(
+        knowledge_base,
+        "_read_distill_cache",
+        lambda: {
+            "test:1": {
+                "cache_key": "test:1",
+                "content_hash": knowledge_base._content_hash(raw["content"]),
+                "distilled": "已缓存提炼",
+            }
+        },
+    )
+
+    rows = knowledge_base.load_cached_entries()
+    assert len(rows) == 1
+    assert rows[0].distilled == "已缓存提炼"
+
+    monkeypatch.setattr(
+        knowledge_base,
+        "_read_distill_cache",
+        lambda: {
+            "test:1": {
+                "cache_key": "test:1",
+                "content_hash": "stale-hash",
+                "distilled": "旧提炼",
+            }
+        },
+    )
+    assert knowledge_base.load_cached_entries() == []
