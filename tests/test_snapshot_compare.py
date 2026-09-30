@@ -57,3 +57,12 @@ def test_compare_replayed_reports_tracks_stance_confidence_and_scores():
 def test_compare_replayed_reports_rejects_different_snapshots():
     with pytest.raises(ValueError, match="different snapshots"):
         compare_replayed_reports(_report("snap-a"), _report("snap-b"))
+
+
+def test_compare_replayed_reports_rejects_missing_replay_provenance():
+    a = _report()
+    b = _report()
+    b["validation"] = {}
+
+    with pytest.raises(ValueError, match="replay snapshot provenance"):
+        compare_replayed_reports(a, b)
