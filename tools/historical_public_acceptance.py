@@ -27,6 +27,10 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from analysis.filing_calendar import get_financial_filing_calendar
+from analysis.historical_corpus import (
+    save_historical_source_bundle,
+    verify_historical_source_bundle,
+)
 from analysis.macro_rates import get_macro_rate_context
 from analysis.margin import get_margin_signal
 from analysis.market_context import get_market_context
@@ -117,7 +121,12 @@ async def _timed_source(name: str, awaitable, timeout_s: float):
         return {"value": None, "error": msg, "elapsed_s": elapsed}
 
 
-async def _one_case(code: str, as_of: date, label: str) -> Dict:
+async def _one_case(
+    code: str,
+    as_of: date,
+    label: str,
+    corpus_root: Path | None = None,
+) -> Dict:
     print(f"\n[probe] CASE {code}@{as_of.isoformat()} {label}", flush=True)
     names = [
         "quote",
@@ -265,7 +274,7 @@ async def _one_case(code: str, as_of: date, label: str) -> Dict:
                     f"{field} mismatch: {actual} != {target}"
                 )
 
-    return {
+    result = {
         "stock_code": code,
         "label": label,
         "as_of": as_of.isoformat(),
@@ -306,12 +315,54 @@ async def _one_case(code: str, as_of: date, label: str) -> Dict:
         "ok": not failures,
     }
 
+    if corpus_root is not None:
+        try:
+            bundle_path = save_historical_source_bundle(
+                stock_code=code,
+                as_of=as_of,
+                payloads=payloads,
+                root=corpus_root,
+                label=label,
+                diagnostics={
+                    "source_diagnostics": result["source_diagnostics"],
+                    "warnings": result["warnings"],
+                    "failures": result["failures"],
+                },
+            )
+            integrity = verify_historical_source_bundle(bundle_path)
+            result["source_bundle"] = {
+                "path": str(bundle_path),
+                "integrity": integrity,
+            }
+            if not integrity.get("ok"):
+                result["failures"].append(
+                    "historical source bundle integrity failed: "
+                    + "; ".join(integrity.get("errors") or [])
+                )
+                result["ok"] = False
+        except Exception as e:
+            result["failures"].append(
+                f"historical source bundle failed: {type(e).__name__}: {e}"
+            )
+            result["ok"] = False
 
-async def main_async(cases: List[Tuple[str, date, str]], output: Path | None) -> int:
+    return result
+
+
+async def main_async(
+    cases: List[Tuple[str, date, str]],
+    output: Path | None,
+    corpus_root: Path | None,
+) -> int:
     results: List[Dict] = []
     for code, as_of, label in cases:
         try:
-            result = await _one_case(code, as_of, label)
+            result = await _one_case(
+                code,
+                as_of,
+                label,
+                corpus_root=corpus_root,
+            )
         except Exception as e:
             result = {
                 "stock_code": code,
@@ -350,10 +401,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("cases", nargs="*", help="CODE@YYYY-MM-DD")
     parser.add_argument("--output", default="")
+    parser.add_argument(
+        "--corpus-root",
+        default="",
+        help=(
+            "Optional directory for immutable raw point-in-time source bundles. "
+            "These bundles contain no LLM stance/conclusion."
+        ),
+    )
     args = parser.parse_args()
     cases = [_parse_case(x) for x in args.cases] if args.cases else DEFAULT_CASES
     output = Path(args.output) if args.output else None
-    raise SystemExit(asyncio.run(main_async(cases, output)))
+    corpus_root = Path(args.corpus_root) if args.corpus_root else None
+    raise SystemExit(asyncio.run(main_async(cases, output, corpus_root)))
 
 
 if __name__ == "__main__":
