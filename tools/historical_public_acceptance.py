@@ -48,6 +48,23 @@ DEFAULT_CASES: List[Tuple[str, date, str]] = [
     ("600519", date(2022, 12, 30), "贵州茅台"),
 ]
 
+# Stable published values used to catch semantic parsing regressions, not to predict prices.
+_CASE_EXPECTATIONS = {
+    ("600036", "2024-06-30"): {
+        "latest_financial_period": "2024-03-31",
+        "latest_shareholder_count": 568_738,
+        "revenue": 86_417_000_000,
+        "net_profit": 38_077_000_000,
+        "roe_pct": 16.08,
+    },
+    ("601088", "2023-06-30"): {
+        "latest_financial_period": "2023-03-31",
+    },
+    ("600519", "2022-12-30"): {
+        "latest_financial_period": "2022-09-30",
+    },
+}
+
 
 def _parse_case(value: str) -> Tuple[str, date, str]:
     if "@" not in value:
@@ -198,6 +215,38 @@ async def _one_case(code: str, as_of: date, label: str) -> Dict:
         (pit_financials or {}).get("latest_published_at")
         if pit_financials else None
     )
+    latest_metrics = (pit_financials or {}).get("latest") or {}
+    latest_shareholder_count = (shareholder or {}).get("latest_count")
+
+    if pit_financials and (
+        latest_metrics.get("revenue") is None
+        or latest_metrics.get("net_profit") is None
+    ):
+        failures.append("financial core metrics incomplete: revenue/net_profit required")
+
+    expected = _CASE_EXPECTATIONS.get((code, as_of.isoformat())) or {}
+    if expected:
+        if expected.get("latest_financial_period") != latest_financial_period:
+            failures.append(
+                "latest financial period mismatch: "
+                f"{latest_financial_period} != {expected['latest_financial_period']}"
+            )
+        if "latest_shareholder_count" in expected and (
+            latest_shareholder_count != expected["latest_shareholder_count"]
+        ):
+            failures.append(
+                "latest A-shareholder count mismatch: "
+                f"{latest_shareholder_count} != {expected['latest_shareholder_count']}"
+            )
+        for field in ("revenue", "net_profit", "roe_pct"):
+            if field not in expected:
+                continue
+            actual = latest_metrics.get(field)
+            target = expected[field]
+            if actual is None or abs(float(actual) - float(target)) > max(1.0, abs(float(target)) * 1e-9):
+                failures.append(
+                    f"{field} mismatch: {actual} != {target}"
+                )
 
     return {
         "stock_code": code,
@@ -207,6 +256,15 @@ async def _one_case(code: str, as_of: date, label: str) -> Dict:
         "optional": optional,
         "latest_financial_period": latest_financial_period,
         "latest_financial_published_at": latest_financial_published,
+        "latest_financial_metrics": {
+            "revenue": latest_metrics.get("revenue"),
+            "net_profit": latest_metrics.get("net_profit"),
+            "operating_cash_flow": latest_metrics.get("operating_cash_flow"),
+            "roe_pct": latest_metrics.get("roe_pct"),
+            "monetary_unit": latest_metrics.get("monetary_unit"),
+            "monetary_multiplier": latest_metrics.get("monetary_multiplier"),
+        },
+        "latest_shareholder_count": latest_shareholder_count,
         "primary_evidence_count": len(primary or []),
         "filing_count": len(calendar or []),
         "ownership_holder_count": len((ownership or {}).get("top10_free_holders") or []),
