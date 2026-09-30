@@ -20,7 +20,6 @@ from typing import Dict
 
 from analysis.evidence import ResearchQuality
 from analysis.report_contract import _PROMPT_VERSION
-from analysis.report_synthesis import _generate_summary
 from analysis.report_validation import validate_report
 from analysis.research_profile import ResearchProfile
 from analysis.snapshot_store import (
@@ -36,6 +35,7 @@ async def replay_snapshot(
     path: str | Path,
     *,
     require_integrity: bool = True,
+    synthesis_fn=None,
 ) -> AnalysisReport:
     path = Path(path)
     integrity = verify_snapshot_integrity(path)
@@ -49,7 +49,14 @@ async def replay_snapshot(
     frozen = load_snapshot_research_inputs(path)
     inputs, candidates, evidence = frozen_research_inputs_to_analysis_inputs(frozen)
 
-    summary, review = await _generate_summary(inputs, candidates, evidence)
+    if synthesis_fn is None:
+        # Keep snapshot inspection/import model-independent. Anthropic/LLM dependencies
+        # are loaded only when the caller actually asks to synthesize a new conclusion.
+        from analysis.report_synthesis import _generate_summary
+
+        synthesis_fn = _generate_summary
+
+    summary, review = await synthesis_fn(inputs, candidates, evidence)
 
     quality = inputs.research_quality or ResearchQuality()
     profile = inputs.research_profile or ResearchProfile()
