@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from analysis import realtime_price
+from backtest.price_source import _akshare_symbol
 
 
 @pytest.mark.asyncio
@@ -30,3 +31,12 @@ async def test_historical_quote_drops_future_rows_and_uses_previous_trading_day(
     assert out["change_pct"] == 10.0
     assert out["volume"] is None
     assert out["quote_mode"] == "historical_daily_close"
+
+
+
+def test_historical_price_source_normalizes_bare_a_share_codes():
+    assert _akshare_symbol("SH600519") == "sh600519"
+    assert _akshare_symbol("600519") == "sh600519"
+    assert _akshare_symbol("SZ000001") == "sz000001"
+    assert _akshare_symbol("000001") == "sz000001"
+    assert _akshare_symbol("430047") == "bj430047"
