@@ -71,6 +71,18 @@ def test_save_and_verify_bundle(tmp_path):
     )
     assert latest["bundle_id"] == manifest["bundle_id"]
 
+    first_diagnostics = (path / "diagnostics.json").read_text(encoding="utf-8")
+    second_path = save_historical_source_bundle(
+        stock_code="600036",
+        as_of=date(2024, 6, 30),
+        payloads=_payloads(),
+        root=tmp_path,
+        label="招商银行",
+        diagnostics={"quote": {"elapsed_s": 9.99, "error": "changed"}},
+    )
+    assert second_path == path
+    assert (path / "diagnostics.json").read_text(encoding="utf-8") == first_diagnostics
+
 
 def test_verify_detects_tampering(tmp_path):
     path = save_historical_source_bundle(
