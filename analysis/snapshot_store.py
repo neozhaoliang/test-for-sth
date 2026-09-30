@@ -42,6 +42,7 @@ class SnapshotManifest(BaseModel):
     prompt_version: str = ""
     git_sha: str = ""
     llm_model: str = ""
+    snapshot_kind: str = "full_report"
     report_sha256: str
     evidence_sha256: str
     request_sha256: str = ""
@@ -186,6 +187,115 @@ def save_report_snapshot(
                 "snapshot_id": snapshot_id,
                 "path": str(target),
                 "report_sha256": report_hash,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return target
+
+
+def save_research_input_snapshot(
+    report: AnalysisReport,
+    request: ResearchRequest,
+    *,
+    root: Optional[str] = None,
+) -> Path:
+    """
+    Save only the frozen pre-synthesis research inputs.
+
+    This snapshot contains no LLM stance, dimension score or final report.  It is intended
+    for data-pipeline acceptance and can later be replayed through snapshot_replay.py once
+    an LLM credential/model is available.
+    """
+    base = Path(root or request.snapshot_root)
+    as_of = str(request.as_of)
+    evidence_payload = [x.model_dump(mode="json") for x in report.evidence]
+    request_payload = request.model_dump(mode="json")
+    research_inputs_payload = _research_inputs_payload(report)
+
+    evidence_hash = _sha256(evidence_payload)
+    request_hash = _sha256(request_payload)
+    research_inputs_hash = _sha256(research_inputs_payload)
+    snapshot_id = (
+        f"{report.stock_code}_{as_of}_inputs_{research_inputs_hash[:12]}"
+    )
+    target = base / report.stock_code / as_of / snapshot_id
+
+    latest_path = base / report.stock_code / as_of / "latest-inputs.json"
+    if target.exists():
+        integrity = verify_snapshot_integrity(target)
+        if not integrity.get("ok"):
+            raise RuntimeError(
+                "existing research-input snapshot failed integrity verification: "
+                + "; ".join(integrity.get("errors") or [])
+            )
+        latest_path.write_text(
+            json.dumps(
+                {
+                    "snapshot_id": snapshot_id,
+                    "path": str(target),
+                    "research_inputs_sha256": research_inputs_hash,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return target
+
+    target.mkdir(parents=True, exist_ok=False)
+    evidence_path = target / "evidence.json"
+    request_path = target / "request.json"
+    research_inputs_path = target / "research_inputs.json"
+    manifest_path = target / "manifest.json"
+
+    file_sha256 = {
+        "evidence": _write_json(evidence_path, evidence_payload),
+        "request": _write_json(request_path, request_payload),
+        "research_inputs": _write_json(research_inputs_path, research_inputs_payload),
+    }
+
+    manifest = SnapshotManifest(
+        snapshot_id=snapshot_id,
+        snapshot_kind="research_inputs_only",
+        stock_code=report.stock_code,
+        stock_name=report.stock_name,
+        mode=request.mode.value,
+        as_of=as_of,
+        captured_at=int(time.time()),
+        prompt_version="",
+        git_sha=os.getenv("GITHUB_SHA", ""),
+        llm_model="",
+        report_sha256="",
+        evidence_sha256=evidence_hash,
+        request_sha256=request_hash,
+        research_inputs_sha256=research_inputs_hash,
+        file_sha256=file_sha256,
+        source_vintages=_source_vintages(report),
+        stale_categories=[
+            str(x.get("category"))
+            for x in report.research_quality.stale_evidence
+            if x.get("category")
+        ],
+        files={
+            "evidence": evidence_path.name,
+            "request": request_path.name,
+            "research_inputs": research_inputs_path.name,
+            "manifest": manifest_path.name,
+        },
+    )
+    manifest_path.write_text(
+        json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    latest_path.write_text(
+        json.dumps(
+            {
+                "snapshot_id": snapshot_id,
+                "path": str(target),
+                "research_inputs_sha256": research_inputs_hash,
             },
             ensure_ascii=False,
             indent=2,
