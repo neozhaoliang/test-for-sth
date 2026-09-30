@@ -75,6 +75,7 @@ jobs:
             tools/live_public_acceptance.py \
             tools/live_report_acceptance.py \
             tools/live_historical_acceptance.py \
+            tools/historical_research_input_acceptance.py \
             tools/historical_corpus_cli.py \
             tools/snapshot_cli.py \
             web/app.py
@@ -203,6 +204,55 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: historical-e2e-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+
+  historical-research-inputs:
+    name: Historical research-input E2E (no LLM)
+    needs: core-tests
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/feature/investment-agent-evidence-v2') ||
+      (github.event_name == 'pull_request' && github.head_ref == 'feature/investment-agent-evidence-v2')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip uv
+          uv sync --locked
+
+      - name: Run no-LLM historical research-input E2E
+        id: probe
+        continue-on-error: true
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          uv run python -u tools/historical_research_input_acceptance.py \
+            600036@2024-06-30 \
+            --snapshot-root artifacts/research_input_snapshots \
+            --output artifacts/historical-research-inputs.json \
+            | tee artifacts/historical-research-inputs.log
+
+      - name: Record research-input acceptance status
+        if: always()
+        run: |
+          echo "outcome=${{ steps.probe.outcome }}" > artifacts/historical-research-inputs-status.txt
+
+      - name: Upload research-input snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-research-inputs-${{ github.sha }}
           path: artifacts/
           if-no-files-found: warn
           retention-days: 14
