@@ -56,7 +56,7 @@ class ResearchQuality(BaseModel):
 
 _DIMENSION_REQUIREMENTS: Dict[str, tuple[str, ...]] = {
     "management": ("management_capital", "governance", "shareholder_return"),
-    "fundamentals": ("fundamentals", "profitability"),
+    "fundamentals": ("bank_quality", "fundamentals", "profitability"),
     "rd": ("rd_team", "rd"),
     "chip_flow": ("shareholder_count", "margin"),
     "price_position": ("valuation_history", "valuation", "market_context"),
@@ -66,7 +66,7 @@ _DIMENSION_REQUIREMENTS: Dict[str, tuple[str, ...]] = {
     "shareholder_returns": ("management_capital", "shareholder_return", "governance"),
     "growth_elasticity": ("profitability", "valuation_history", "valuation"),
     "a_share_structure": ("a_share_structure", "market_context", "margin", "institutional", "knowledge"),
-    "risk_quality": ("fundamentals", "profitability", "governance"),
+    "risk_quality": ("bank_quality", "fundamentals", "profitability", "governance"),
 }
 
 # Maximum acceptable age for evidence whose usefulness is strongly time-sensitive.
@@ -277,6 +277,41 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         tags=("financials", "customers", "suppliers", "cashflow", "working_capital", "receivables", "inventory"),
         url=source_map.get("finance") or source_map.get("operate"),
     )
+    if facts.get("financial_subtype") == "bank":
+        bank_quality = {
+            k: facts.get(k)
+            for k in (
+                "finance_period",
+                "net_interest_margin_pct",
+                "npl_ratio_pct",
+                "provision_coverage_pct",
+                "loan_provision_ratio_pct",
+                "core_tier1_capital_adequacy_pct",
+                "tier1_capital_adequacy_pct",
+                "capital_adequacy_pct",
+                "roe_pct",
+            )
+            if facts.get(k) is not None
+        }
+        _add(
+            out,
+            category="bank_quality",
+            label="银行资产质量、息差与资本充足",
+            source=(
+                "analysis.point_in_time_financials"
+                if fundamentals.get("point_in_time")
+                else "analysis.fundamentals"
+            ),
+            tier="S" if fundamentals.get("point_in_time") else "B",
+            kind="fact",
+            value=bank_quality,
+            as_of=str(facts.get("finance_period") or "") or None,
+            period=str(facts.get("finance_period") or "") or None,
+            available_at=str(fundamentals.get("available_at") or "") or None,
+            tags=("bank", "asset_quality", "nim", "npl", "provision", "capital"),
+            url=source_map.get("finance"),
+        )
+
     rd_payload = {
         k: facts.get(k)
         for k in (
