@@ -13,6 +13,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from analysis.evidence import ResearchQuality
+from analysis.knowledge_context import build_knowledge_hypotheses, format_knowledge_hypotheses
 from analysis.research_profile import ResearchProfile, profile_prompt_block
 from analysis.report_contract import _PROMPT_TEMPLATE
 from model.m_analysis import CandidateOpinion, KnowledgeExcerpt
@@ -49,6 +50,23 @@ def _build_kb_fund_flow_block(knowledge_excerpts: List[KnowledgeExcerpt]) -> str
         lines.append(f"  · [{e.source} {e.title[:50]}] {e.distilled[:400]}")
     return "\n".join(lines)
 
+
+
+def _build_knowledge_hypotheses_block(inputs: Any) -> str:
+    profile = inputs.research_profile or ResearchProfile()
+    fundamentals = inputs.fundamentals or {}
+    facts = fundamentals.get("facts") or {}
+    industry = profile.industry or str(facts.get("sw_industry") or facts.get("industry_hint") or "")
+    hypotheses = build_knowledge_hypotheses(
+        inputs.knowledge_excerpts,
+        inputs.stock_code,
+        inputs.stock_name or inputs.stock_code,
+        industry,
+        archetype=profile.archetype,
+        fundamentals=fundamentals,
+        limit=24,
+    )
+    return format_knowledge_hypotheses(hypotheses)
 
 def _build_margin_block(
     margin_signal: Optional[Dict], valuation: Optional[Dict], quote: Optional[Dict]
@@ -1275,6 +1293,7 @@ def _build_prompt(inputs: Any, candidates: List[CandidateOpinion]) -> str:
         sentiment_block=_build_sentiment_block(inputs.sentiment),
         candidates_block=_build_candidates_block(candidates),
         knowledge_block=_build_knowledge_block(inputs.knowledge_excerpts),
+        knowledge_hypotheses_block=_build_knowledge_hypotheses_block(inputs),
         industry_block=_build_industry_block(inputs.industry_comparison),
         market_block=_build_market_block(inputs.market_context),
         shareholder_block=_build_shareholder_block(
