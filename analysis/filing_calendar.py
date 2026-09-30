@@ -38,6 +38,9 @@ _REPORT_CATEGORIES = {
 
 _REPORT_PAGE_SIZE = 30
 _CONCURRENCY = 4
+_CALENDAR_CACHE_MAX_ENTRIES = 32
+_calendar_cache: Dict[Tuple[str, str, int], List[Dict]] = {}
+_calendar_inflight: Dict[Tuple[str, str, int], asyncio.Task] = {}
 
 
 def _bare_code(stock_code: str) -> str:
@@ -149,7 +152,7 @@ async def _fetch_type(
     return rows
 
 
-async def get_financial_filing_calendar(
+async def _fetch_financial_filing_calendar_uncached(
     stock_code: str,
     *,
     as_of: Optional[date] = None,
@@ -196,6 +199,55 @@ async def get_financial_filing_calendar(
     rows = [item for group in groups for item in group]
     rows.sort(key=lambda x: (x["period"], x["published_at"]))
     return rows
+
+
+def _remember_calendar(
+    key: Tuple[str, str, int],
+    rows: List[Dict],
+) -> None:
+    _calendar_cache[key] = [dict(x) for x in rows]
+    while len(_calendar_cache) > _CALENDAR_CACHE_MAX_ENTRIES:
+        oldest = next(iter(_calendar_cache))
+        _calendar_cache.pop(oldest, None)
+
+
+async def get_financial_filing_calendar(
+    stock_code: str,
+    *,
+    as_of: Optional[date] = None,
+    lookback_years: int = 6,
+) -> List[Dict]:
+    """
+    Return the official filing calendar with per-process request de-duplication.
+
+    Historical report assembly asks for the same calendar from several independent parsers
+    (financials / top holders / shareholder count).  Reusing one in-flight task prevents
+    three identical CNINFO queries from racing each other.
+    """
+    end = as_of or datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    key = (_bare_code(stock_code), end.isoformat(), int(lookback_years))
+    if key in _calendar_cache:
+        return [dict(x) for x in _calendar_cache[key]]
+
+    task = _calendar_inflight.get(key)
+    if task is None:
+        task = asyncio.create_task(
+            _fetch_financial_filing_calendar_uncached(
+                stock_code,
+                as_of=as_of,
+                lookback_years=lookback_years,
+            )
+        )
+        _calendar_inflight[key] = task
+
+    try:
+        rows = await task
+    finally:
+        if _calendar_inflight.get(key) is task:
+            _calendar_inflight.pop(key, None)
+
+    _remember_calendar(key, rows)
+    return [dict(x) for x in rows]
 
 
 def latest_available_filing_by_period(
