@@ -26,3 +26,19 @@ def test_parse_holder_names_from_periodic_report_text():
     assert any("香港中央结算" in x for x in names)
     assert any("全国社保基金" in x for x in names)
     assert any("易方达" in x for x in names)
+
+
+
+def test_parse_holder_names_survives_pdf_whitespace_splitting():
+    text = """
+    前 10 名 无 限 售 条 件 股 东 持 股 情 况
+    中 央 汇 金 资 产 管 理 有 限 责 任 公 司
+    香 港 中 央 结 算 有 限 公 司
+    全 国 社 保 基 金 一 一 三 组 合
+    """
+    rows = parse_top_holder_names(text)
+    names = {x["name"] for x in rows}
+
+    assert any("中央汇金资产管理有限责任公司" in x for x in names)
+    assert any("香港中央结算有限公司" in x for x in names)
+    assert any("全国社保基金一一三组合" in x for x in names)
