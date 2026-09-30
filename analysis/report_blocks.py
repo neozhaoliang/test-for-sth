@@ -764,7 +764,10 @@ def _build_fundamentals_block(fundamentals: Optional[Dict]) -> str:
         return f"同花顺 F10 结构性事实: {_MISSING_TAIL}"
 
     facts = fundamentals.get("facts") or {}
-    is_bank = facts.get("financial_subtype") == "bank"
+    is_bank = (
+        facts.get("financial_subtype") == "bank"
+        or "银行" in str(facts.get("sw_industry") or "")
+    )
     source_label = "历史原始财报结构性事实" if fundamentals.get("point_in_time") else "同花顺 F10 结构性事实"
     lines = [f"{source_label} (来自公司定期报告原文，比率已由程序算好，直接引用即可):"]
     period_line = f"  财务数据期间 {facts.get('finance_period') or '未知'}"
