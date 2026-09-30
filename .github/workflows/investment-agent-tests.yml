@@ -177,7 +177,7 @@ jobs:
         run: |
           mkdir -p artifacts
           set -o pipefail
-          uv run python tools/live_historical_acceptance.py \
+          uv run python -u tools/live_historical_acceptance.py \
             600036@2024-06-30 \
             601088@2023-06-30 \
             600519@2022-12-30 \
@@ -229,7 +229,7 @@ jobs:
         run: |
           mkdir -p artifacts
           set -o pipefail
-          uv run python tools/historical_public_acceptance.py \
+          uv run python -u tools/historical_public_acceptance.py \
             600036@2024-06-30 \
             601088@2023-06-30 \
             600519@2022-12-30 \
