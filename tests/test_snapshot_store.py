@@ -52,6 +52,10 @@ def _report() -> AnalysisReport:
                 value={"category": "权益分派"},
             ),
         ],
+        major_events=[{"event": "重大事项", "date": "2026-09-01"}],
+        refinancing_history=[{"type": "定增", "amount": 123}],
+        executive_profile={"chairman": "测试董事长", "tenure_years": 5},
+        governance_alerts=[{"type": "问询", "date": "2026-08-01"}],
         research_quality=ResearchQuality(
             coverage=1.0,
             covered_dimensions=12,
@@ -122,6 +126,10 @@ def test_snapshot_research_inputs_exclude_old_conclusion(tmp_path):
     assert "review" not in inputs
     assert "validation" not in inputs
     assert inputs["stock_code"] == "600000"
+    assert inputs["major_events"] == report.major_events
+    assert inputs["refinancing_history"] == report.refinancing_history
+    assert inputs["executive_profile"] == report.executive_profile
+    assert inputs["governance_alerts"] == report.governance_alerts
     assert inputs["evidence"][0]["category"] == "valuation_history"
 
     loaded = load_snapshot_report(path)
@@ -171,6 +179,10 @@ def test_frozen_research_inputs_rebuild_analysis_inputs(tmp_path):
     assert inputs.stock_name == "测试股份"
     assert inputs.research_mode == "live"
     assert inputs.as_of == report.as_of
+    assert inputs.major_events == report.major_events
+    assert inputs.refinancing_history == report.refinancing_history
+    assert inputs.executive_profile == report.executive_profile
+    assert inputs.governance_alerts == report.governance_alerts
     assert candidates == []
     assert len(evidence) == 2
     assert evidence[0].category == "valuation_history"
