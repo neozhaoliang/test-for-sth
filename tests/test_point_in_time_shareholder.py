@@ -33,3 +33,12 @@ def test_parse_dual_listed_bank_a_shareholder_count():
 def test_parse_short_a_shareholder_count_label():
     text = "A股股东户数：321,654"
     assert parse_shareholder_count_text(text) == 321654
+
+
+
+def test_parse_cmb_sentence_prefers_a_share_count():
+    text = (
+        "截至报告期末，本公司普通股股东总数为597,008户，全部为无限售条件股东，"
+        "其中，A股股东总数568,738户，H股股东总数28,270户。"
+    )
+    assert parse_shareholder_count_text(text) == 568738
