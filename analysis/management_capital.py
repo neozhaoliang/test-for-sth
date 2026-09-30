@@ -72,6 +72,21 @@ def _primary_matches(primary: Iterable[Dict], pattern: re.Pattern) -> List[Dict]
     return rows
 
 
+def _is_realized_dividend(row: Dict) -> bool:
+    """
+    Decide whether a dividend record is evidence of an actually implemented distribution.
+
+    Point-in-time CNINFO records carry an explicit progress field. A proposal with a stated
+    amount is still only a proposal and must not be counted as paid. Legacy/live aggregate
+    rows may lack progress; for those, a positive per-10-share cash amount is treated as a
+    realized historical record.
+    """
+    progress = str(row.get("progress") or "").strip().lower()
+    if progress:
+        return progress in {"implemented", "completed", "paid"}
+    return (_num(row.get("dividend_per_10_shares")) or 0) > 0
+
+
 def _summarize_window(
     *,
     window: int,
@@ -86,15 +101,32 @@ def _summarize_window(
     div_rows = [
         d for d in dividend_history
         if _date_year(d.get("announce_date")) in years
-        and (_num(d.get("dividend_per_10_shares")) or 0) > 0
+        and _is_realized_dividend(d)
     ]
     dividend_years = sorted(
-        {_date_year(d.get("announce_date")) for d in div_rows if _date_year(d.get("announce_date"))},
+        {
+            _date_year(d.get("announce_date"))
+            for d in div_rows
+            if _date_year(d.get("announce_date"))
+        },
         reverse=True,
     )
-    div_total_per10 = round(
-        sum(_num(d.get("dividend_per_10_shares")) or 0.0 for d in div_rows),
-        4,
+    known_amount_rows = [
+        d for d in div_rows
+        if (_num(d.get("dividend_per_10_shares")) or 0) > 0
+    ]
+    # None means "realized dividends exist but the captured metadata did not disclose the
+    # per-10-share amount". Returning 0 here would incorrectly imply no cash distribution.
+    div_total_per10 = (
+        round(
+            sum(
+                _num(d.get("dividend_per_10_shares")) or 0.0
+                for d in known_amount_rows
+            ),
+            4,
+        )
+        if known_amount_rows
+        else (0.0 if not div_rows else None)
     )
 
     buy_rows = [
@@ -125,6 +157,8 @@ def _summarize_window(
         "dividend_years": dividend_years,
         "cash_dividend_per_10_total": div_total_per10,
         "dividend_records": len(div_rows),
+        "cash_dividend_amount_records": len(known_amount_rows),
+        "cash_dividend_amount_complete": len(known_amount_rows) == len(div_rows),
         "buyback_records": len(buy_rows),
         "buyback_actual_amount_yuan": round(buyback_actual, 2),
         "refinancing_records": len(refi_rows),
