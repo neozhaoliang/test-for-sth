@@ -1,4 +1,9 @@
+import asyncio
 from datetime import date
+
+import pytest
+
+from analysis import filing_calendar
 
 from analysis.filing_calendar import (
     _is_full_report,
@@ -52,3 +57,38 @@ def test_latest_available_filing_uses_latest_version_known_by_as_of():
     )
     assert after_revision["2024-12-31"]["url"] == "revised"
     assert after_revision["2025-03-31"]["url"] == "q1"
+
+
+
+@pytest.mark.asyncio
+async def test_calendar_concurrent_requests_share_one_inflight_fetch(monkeypatch):
+    filing_calendar._calendar_cache.clear()
+    filing_calendar._calendar_inflight.clear()
+    calls = 0
+
+    async def fake_fetch(stock_code, *, as_of=None, lookback_years=6):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.01)
+        return [
+            {
+                "period": "2024-12-31",
+                "published_at": "2025-03-20",
+                "url": "x",
+            }
+        ]
+
+    monkeypatch.setattr(
+        filing_calendar,
+        "_fetch_financial_filing_calendar_uncached",
+        fake_fetch,
+    )
+    cutoff = date(2025, 4, 1)
+    a, b = await asyncio.gather(
+        filing_calendar.get_financial_filing_calendar("600000", as_of=cutoff),
+        filing_calendar.get_financial_filing_calendar("600000", as_of=cutoff),
+    )
+
+    assert calls == 1
+    assert a == b
+    assert a is not b
