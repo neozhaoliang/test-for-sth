@@ -2,6 +2,7 @@ from analysis.evidence import ResearchQuality
 from analysis.report_blocks import (
     _build_a_share_structure_block,
     _build_fundamentals_block,
+    _build_management_capital_block,
     _build_research_quality_block,
     _build_time_contract_block,
     _build_valuation_history_block,
@@ -149,3 +150,31 @@ def test_historical_time_contract_forbids_model_memory_and_hindsight():
     assert "严禁使用模型记忆" in text
     assert "截止日之后" in text
     assert "后来证明" in text
+
+
+def test_management_capital_block_does_not_render_unknown_dividend_amount_as_zero():
+    text = _build_management_capital_block(
+        {
+            "alignment": {},
+            "execution": {},
+            "five_year": {
+                "window_years": 5,
+                "dividend_years_count": 4,
+                "dividend_records": 4,
+                "cash_dividend_per_10_total": None,
+                "cash_dividend_amount_records": 0,
+                "cash_dividend_amount_complete": False,
+                "buyback_records": 0,
+                "buyback_actual_amount_yuan": 0,
+                "refinancing_records": 0,
+                "primary_refinancing_announcements": 0,
+                "insider_reduction_announcements": 0,
+                "governance_negative_announcements": 0,
+            },
+            "notes": [],
+        }
+    )
+
+    assert "分红覆盖 4/5" in text
+    assert "累计金额暂缺" in text
+    assert "累计每10股现金分红 0" not in text
