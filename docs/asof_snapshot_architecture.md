@@ -257,6 +257,53 @@ snapshot / stock / as-of，再比较：
 
 这使 Prompt / Model A-B 的因果边界更清晰：**输入数据完全相同，只比较综合阶段本身。**
 
+## 外部模型 / Provider-agnostic replay
+
+冻结输入回放现在不要求模型 SDK 必须存在于本仓库。外部模型只需要输出一个标准 JSON：
+
+```json
+{
+  "provider": "openai-chatgpt",
+  "model": "GPT-5.6 Sol",
+  "prompt_version": "my-external-prompt-v1",
+  "summary": {
+    "lynch_category": "stalwart",
+    "stance": "neutral",
+    "company_quality_stance": "bullish",
+    "current_odds_stance": "neutral",
+    "confidence": 0.6,
+    "thesis_summary": "...",
+    "core_counter_evidence": "...",
+    "invalidation_condition": "...",
+    "risk_notes": "...",
+    "dimension_scores": [],
+    "dimension_analyses": {}
+  }
+}
+```
+
+然后对冻结 snapshot 执行：
+
+```bash
+PYTHONPATH=. python tools/snapshot_cli.py replay-external \
+  <snapshot_path> \
+  --synthesis external-synthesis.json \
+  --out artifacts/replay-external.json
+```
+
+边界刻意保持清晰：
+
+- 外部模型只负责 `StructuredSummary`，不接管数据采集；
+- `dimension_analyses` 会重新经过项目自己的 deterministic reviewer；
+- confidence 仍由 evidence coverage、research profile readiness 和 reviewer penalty 统一封顶；
+- snapshot SHA-256 完整性和 historical future-leak 校验仍由项目执行；
+- 最终 `validate_report()` 失败时 replay 直接失败；
+- provider / model / 外部 prompt version 会写入 `validation.replay.external_synthesis` 作为审计元数据。
+
+因此 Anthropic、OpenAI、Gemini、DeepSeek、本地模型或人工生成的兼容 JSON 都可以复用同一条 Historical / Snapshot / Reviewer / Validator 主链，而不需要修改底层研究数据架构。
+
+---
+
 ## Historical public source corpus
 
 完整 LLM Historical E2E 依赖模型密钥，但公网 point-in-time 数据本身可以先独立冻结：

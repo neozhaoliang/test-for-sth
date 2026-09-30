@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 from analysis.evidence import ResearchQuality
 from analysis.report_contract import _PROMPT_VERSION
@@ -36,6 +36,7 @@ async def replay_snapshot(
     *,
     require_integrity: bool = True,
     synthesis_fn=None,
+    replay_metadata: Optional[Dict[str, str]] = None,
 ) -> AnalysisReport:
     path = Path(path)
     integrity = verify_snapshot_integrity(path)
@@ -100,4 +101,10 @@ async def replay_snapshot(
         "replay_prompt_version": _PROMPT_VERSION,
         "integrity_verified": bool(integrity.get("ok")),
     }
+    if replay_metadata:
+        report.validation["replay"]["external_synthesis"] = {
+            str(k): str(v)
+            for k, v in replay_metadata.items()
+            if v not in (None, "")
+        }
     return report
