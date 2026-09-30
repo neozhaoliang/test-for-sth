@@ -27,6 +27,30 @@ def _date(item: Dict) -> str:
     return str(item.get("published_at") or "")[:10]
 
 
+def _is_common_share_dividend_event(title: str, category: str) -> bool:
+    """
+    Keep common/A-share dividend events only.
+
+    CNINFO's broad 权益分派 category can also contain preferred-share coupons and
+    independent-director opinions. Those must not be counted as ordinary-shareholder
+    dividend records.
+    """
+    text = title or ""
+    if "优先股" in text:
+        return False
+    if "独立董事" in text and "意见" in text:
+        return False
+    if "监事会" in text and "意见" in text:
+        return False
+    return (
+        category == "权益分派"
+        or "权益分派" in text
+        or "利润分配" in text
+        or "分红派息" in text
+        or "现金分红" in text
+    )
+
+
 def _dividend_amount_per_10(title: str):
     for pattern in _DIVIDEND_PATTERNS:
         m = pattern.search(title or "")
@@ -82,7 +106,7 @@ def build_point_in_time_capital_returns(
         url = item.get("url")
         category = str(item.get("category") or "")
 
-        if category == "权益分派" or "权益分派" in title or "利润分配" in title:
+        if _is_common_share_dividend_event(title, category):
             key = (published, title)
             if key not in seen_dividend:
                 seen_dividend.add(key)
