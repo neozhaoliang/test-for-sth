@@ -224,3 +224,48 @@ def test_bank_q1_parser_ignores_metric_footnotes_but_keeps_negative_cashflow():
     assert out["tier1_capital_adequacy_pct"] == 16.30
     assert out["capital_adequacy_pct"] == 18.20
     assert out["capital_adequacy_basis"] == "本集团高级法"
+
+
+def test_historical_bank_profitability_builds_core_quality_trends():
+    data = {
+        "as_of": "2024-06-30",
+        "latest_published_at": "2024-04-30",
+        "latest": {
+            "financial_subtype": "bank",
+            "period": "2024-03-31",
+        },
+        "periods": [
+            {
+                "period": "2021-09-30",
+                "roe_pct": 18.69,
+                "net_interest_margin_pct": 2.48,
+                "npl_ratio_pct": 0.93,
+                "provision_coverage_pct": 443.14,
+                "loan_provision_ratio_pct": 4.13,
+                "core_tier1_capital_adequacy_pct": 12.31,
+                "capital_adequacy_pct": 16.36,
+            },
+            {
+                "period": "2024-03-31",
+                "roe_pct": 16.08,
+                "net_interest_margin_pct": 2.02,
+                "npl_ratio_pct": 0.92,
+                "provision_coverage_pct": 436.82,
+                "loan_provision_ratio_pct": 4.01,
+                "core_tier1_capital_adequacy_pct": 14.07,
+                "capital_adequacy_pct": 18.20,
+            },
+        ],
+    }
+
+    out = to_historical_profitability(data)
+    notes = out["bank_trend_notes"]
+
+    assert out["gross_margin_trend_note"] == "银行不适用制造业毛利率框架"
+    assert out["debt_ratio_trend_note"] == "银行资产负债率不按普通企业杠杆阈值解释"
+    assert "2.48% 下降至 2.02%" in notes["net_interest_margin"]
+    assert "变化 -0.46pct" in notes["net_interest_margin"]
+    assert "0.93% 基本持平至 0.92%" in notes["npl_ratio"]
+    assert "443.14% 下降至 436.82%" in notes["provision_coverage"]
+    assert "12.31% 上升至 14.07%" in notes["core_tier1_capital"]
+    assert "16.36% 上升至 18.20%" in notes["capital_adequacy"]

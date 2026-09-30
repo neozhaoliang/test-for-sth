@@ -779,17 +779,27 @@ def to_historical_fundamentals(data: Optional[Dict]) -> Optional[Dict]:
     }
 
 
-def _trend_note(periods: List[Dict], key: str, label: str) -> str:
+def _trend_note(
+    periods: List[Dict],
+    key: str,
+    label: str,
+    *,
+    flat_threshold: float = 0.5,
+) -> str:
     usable = [x for x in periods if x.get(key) is not None]
     if len(usable) < 2:
         return f"{label}数据不足"
     first, last = usable[0], usable[-1]
     a, b = float(first[key]), float(last[key])
     diff = b - a
-    direction = "上升" if diff > 0.5 else ("下降" if diff < -0.5 else "基本持平")
+    direction = (
+        "上升"
+        if diff > flat_threshold
+        else ("下降" if diff < -flat_threshold else "基本持平")
+    )
     return (
         f"{label}从 {a:.2f}% {direction}至 {b:.2f}% "
-        f"(区间 {first['period']}~{last['period']})"
+        f"(变化 {diff:+.2f}pct，区间 {first['period']}~{last['period']})"
     )
 
 
@@ -800,12 +810,64 @@ def to_historical_profitability(data: Optional[Dict]) -> Optional[Dict]:
     periods = data.get("periods") or []
     if not periods:
         return None
+    latest = data.get("latest") or {}
+    is_bank = latest.get("financial_subtype") == "bank"
+    bank_trend_notes = {}
+    if is_bank:
+        bank_trend_notes = {
+            "net_interest_margin": _trend_note(
+                periods,
+                "net_interest_margin_pct",
+                "净息差/净利息收益率",
+                flat_threshold=0.05,
+            ),
+            "npl_ratio": _trend_note(
+                periods,
+                "npl_ratio_pct",
+                "不良贷款率",
+                flat_threshold=0.02,
+            ),
+            "provision_coverage": _trend_note(
+                periods,
+                "provision_coverage_pct",
+                "拨备覆盖率",
+                flat_threshold=5.0,
+            ),
+            "loan_provision_ratio": _trend_note(
+                periods,
+                "loan_provision_ratio_pct",
+                "贷款拨备率",
+                flat_threshold=0.05,
+            ),
+            "core_tier1_capital": _trend_note(
+                periods,
+                "core_tier1_capital_adequacy_pct",
+                "核心一级资本充足率",
+                flat_threshold=0.10,
+            ),
+            "capital_adequacy": _trend_note(
+                periods,
+                "capital_adequacy_pct",
+                "资本充足率",
+                flat_threshold=0.10,
+            ),
+        }
+
     return {
         "periods": periods,
-        "gross_margin_trend_note": "毛利率历史原始财报解析暂未覆盖",
+        "gross_margin_trend_note": (
+            "银行不适用制造业毛利率框架"
+            if is_bank
+            else "毛利率历史原始财报解析暂未覆盖"
+        ),
         "net_margin_trend_note": _trend_note(periods, "net_margin_pct", "净利率"),
         "roe_trend_note": _trend_note(periods, "roe_pct", "ROE"),
-        "debt_ratio_trend_note": _trend_note(periods, "debt_ratio_pct", "资产负债率"),
+        "debt_ratio_trend_note": (
+            "银行资产负债率不按普通企业杠杆阈值解释"
+            if is_bank
+            else _trend_note(periods, "debt_ratio_pct", "资产负债率")
+        ),
+        "bank_trend_notes": bank_trend_notes,
         "point_in_time": True,
         "as_of": data.get("as_of"),
         "source_tier": "S",

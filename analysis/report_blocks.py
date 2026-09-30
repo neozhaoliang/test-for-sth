@@ -695,15 +695,42 @@ def _build_profitability_block(profitability_trend: Optional[Dict]) -> str:
         profitability_trend.get("roe_trend_note", ""),
         profitability_trend.get("debt_ratio_trend_note", ""),
     ]
+    bank_trend_notes = profitability_trend.get("bank_trend_notes") or {}
+    if bank_trend_notes:
+        lines.append("银行核心指标跨期趋势:")
+        for key in (
+            "net_interest_margin",
+            "npl_ratio",
+            "provision_coverage",
+            "loan_provision_ratio",
+            "core_tier1_capital",
+            "capital_adequacy",
+        ):
+            note = bank_trend_notes.get(key)
+            if note:
+                lines.append(f"  · {note}")
+
     periods = profitability_trend.get("periods") or []
     if periods:
+        is_bank = bool(bank_trend_notes)
         lines.append("各报告期明细:")
         for p in periods:
-            lines.append(
-                f"  · {p.get('period')}: 毛利率/主营业务利润率 {p.get('gross_margin_pct')}%, "
-                f"净利率 {p.get('net_margin_pct')}%, ROE {p.get('roe_pct')}%, "
-                f"资产负债率 {p.get('debt_ratio_pct')}%, 净利润增长率 {p.get('net_profit_growth_pct')}%"
-            )
+            if is_bank:
+                lines.append(
+                    f"  · {p.get('period')}: ROE {p.get('roe_pct')}%, "
+                    f"净息差/净利息收益率 {p.get('net_interest_margin_pct')}%, "
+                    f"不良贷款率 {p.get('npl_ratio_pct')}%, "
+                    f"拨备覆盖率 {p.get('provision_coverage_pct')}%, "
+                    f"贷款拨备率 {p.get('loan_provision_ratio_pct')}%, "
+                    f"核心一级资本充足率 {p.get('core_tier1_capital_adequacy_pct')}%, "
+                    f"资本充足率 {p.get('capital_adequacy_pct')}%"
+                )
+            else:
+                lines.append(
+                    f"  · {p.get('period')}: 毛利率/主营业务利润率 {p.get('gross_margin_pct')}%, "
+                    f"净利率 {p.get('net_margin_pct')}%, ROE {p.get('roe_pct')}%, "
+                    f"资产负债率 {p.get('debt_ratio_pct')}%, 净利润增长率 {p.get('net_profit_growth_pct')}%"
+                )
     return "\n".join(l for l in lines if l)
 
 
