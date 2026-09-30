@@ -42,3 +42,19 @@ def test_parse_holder_names_survives_pdf_whitespace_splitting():
     assert any("中央汇金资产管理有限责任公司" in x for x in names)
     assert any("香港中央结算有限公司" in x for x in names)
     assert any("全国社保基金一一三组合" in x for x in names)
+
+
+
+def test_parse_bank_style_a_share_holder_heading():
+    text = """
+    前十名普通股股东
+    香港中央结算有限公司
+    中国远洋运输有限公司
+    全国社保基金一一三组合
+    """
+    rows = parse_top_holder_names(text)
+    names = {x["name"] for x in rows}
+
+    assert any("香港中央结算有限公司" in x for x in names)
+    assert any("中国远洋运输有限公司" in x for x in names)
+    assert any("全国社保基金一一三组合" in x for x in names)
