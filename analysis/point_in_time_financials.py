@@ -20,14 +20,11 @@ Missing fields stay None.  The parser never substitutes values from a later fili
 from __future__ import annotations
 
 import asyncio
-import io
 import re
 from datetime import date
 from typing import Dict, List, Optional
 
-from pypdf import PdfReader
-
-from analysis.filing_archive import _download_pdf
+from analysis.filing_archive import _get_pdf_pages_text
 from analysis.filing_calendar import (
     get_financial_filing_calendar,
     latest_available_filing_by_period,
@@ -88,18 +85,14 @@ def _first_percent_after(text: str, labels: List[str]) -> Optional[float]:
     return None
 
 
-def _extract_relevant_text(pdf_bytes: bytes) -> str:
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    pages: List[str] = []
-    for page in reader.pages:
-        try:
-            text = page.extract_text() or ""
-        except Exception:
-            text = ""
+def _extract_relevant_text(pages: List[str]) -> str:
+    selected: List[str] = []
+    for text in pages:
         if not text:
             continue
+        compact = re.sub(r"\s+", "", text)
         if any(
-            key in text
+            key in compact
             for key in (
                 "主要会计数据和财务指标",
                 "营业收入",
@@ -110,8 +103,8 @@ def _extract_relevant_text(pdf_bytes: bytes) -> str:
                 "负债合计",
             )
         ):
-            pages.append(text)
-    return _clean("\n".join(pages))
+            selected.append(text)
+    return _clean("\n".join(selected))
 
 
 def parse_financial_report_text(text: str) -> Dict:
@@ -171,12 +164,12 @@ async def _fetch_and_parse(item: Dict) -> Optional[Dict]:
     url = str(item.get("url") or "")
     if not url:
         return None
-    body = await _download_pdf(url)
-    if not body:
+    pages = await _get_pdf_pages_text(url)
+    if not pages:
         return None
     try:
         text = await asyncio.wait_for(
-            asyncio.to_thread(_extract_relevant_text, body),
+            asyncio.to_thread(_extract_relevant_text, pages),
             timeout=_PARSE_TIMEOUT_S,
         )
     except Exception:
