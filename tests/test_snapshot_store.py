@@ -1,6 +1,8 @@
+import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from analysis import snapshot_replay
 from analysis.evidence import EvidenceItem, ResearchQuality
 from analysis.research_context import ResearchRequest
 from analysis.research_profile import ResearchProfile
@@ -203,3 +205,63 @@ def test_research_input_snapshot_is_replayable_and_has_no_report(tmp_path):
     assert (
         tmp_path / "600000" / str(request.as_of) / "latest-inputs.json"
     ).exists()
+
+
+def test_replay_accepts_research_input_only_snapshot(tmp_path, monkeypatch):
+    request = ResearchRequest(
+        stock_code="600000",
+        save_snapshot=False,
+        snapshot_root=str(tmp_path),
+    )
+    report = _report()
+    report.as_of = str(request.as_of)
+    path = save_research_input_snapshot(report, request)
+
+    dimension_keys = [
+        "management",
+        "fundamentals",
+        "rd",
+        "chip_flow",
+        "price_position",
+        "cycle_position",
+        "policy_geopolitics",
+        "retail_sentiment",
+        "shareholder_returns",
+        "growth_elasticity",
+        "a_share_structure",
+        "risk_quality",
+    ]
+
+    async def fake_generate_summary(inputs, candidates, evidence):
+        return (
+            StructuredSummary(
+                lynch_category="unclear",
+                stance="neutral",
+                company_quality_stance="neutral",
+                current_odds_stance="neutral",
+                confidence=0.5,
+                thesis_summary="replay test",
+                core_counter_evidence="test counter evidence",
+                invalidation_condition="test invalidation",
+                risk_notes="",
+                dimension_analyses={key: "test" for key in dimension_keys},
+                dimension_scores=[
+                    {
+                        "dimension": key,
+                        "key": key,
+                        "score": 0,
+                        "note": "test",
+                    }
+                    for key in dimension_keys
+                ],
+            ),
+            ResearchReview(),
+        )
+
+    monkeypatch.setattr(snapshot_replay, "_generate_summary", fake_generate_summary)
+    replayed = asyncio.run(snapshot_replay.replay_snapshot(path))
+
+    assert replayed.stock_code == "600000"
+    assert replayed.summary.stance == "neutral"
+    assert replayed.validation["replay"]["snapshot_id"] == load_snapshot_manifest(path).snapshot_id
+    assert replayed.validation["replay"]["integrity_verified"] is True
