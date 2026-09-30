@@ -238,23 +238,19 @@ def _bank_percent_metric_from_pages(
 ) -> Optional[float]:
     """Extract the current-period value of a bank-specific percentage metric."""
     for page in pages:
-        compact = _compact(page)
+        source = _clean(page)
         for label in labels:
-            start = 0
-            while True:
-                idx = compact.find(label, start)
-                if idx < 0:
-                    break
+            pattern = _label_regex(label)
+            for match in pattern.finditer(source):
                 if reject_prefix:
-                    prefix = compact[max(0, idx - len(reject_prefix)):idx]
+                    prefix = _compact(source[max(0, match.start() - 12):match.start()])
                     if prefix.endswith(reject_prefix):
-                        start = idx + 1
                         continue
-                segment = compact[idx + len(label): idx + len(label) + 120]
-                # Strip a unit and an immediately-adjacent footnote marker such as
-                # "(%)(1)" before looking for the first actual table value.
+                # Keep the original whitespace between table cells.  Compacting here would
+                # turn values such as "2.02 2.29" into "2.022.29" and corrupt parsing.
+                segment = source[match.end(): match.end() + 180]
                 segment = re.sub(
-                    r"^(?:\(%\)|（%）|%)?(?:\(\d{1,2}\)|（\d{1,2}）)?[:：]?",
+                    r"^\s*(?:\(%\)|（%）|%)?\s*(?:\(\d{1,2}\)|（\d{1,2}）)?\s*[:：]?",
                     "",
                     segment,
                 )
@@ -264,9 +260,7 @@ def _bank_percent_metric_from_pages(
                 ]
                 if values:
                     return values[0]
-                start = idx + len(label)
     return None
-
 
 def _bank_metrics_from_pages(pages: List[str]) -> Dict[str, Optional[float] | str]:
     compact_all = "".join(_compact(x) for x in pages if x)
