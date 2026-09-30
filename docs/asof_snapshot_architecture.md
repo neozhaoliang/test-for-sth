@@ -40,10 +40,11 @@ ResearchRequest(
 ### historical
 
 - 必须显式传过去日期
-- 当前仍会被能力表阻断
-- 只有当全部关键数据源都变成 point-in-time safe 后才允许真正生成报告
+- 所有 required source 必须是 point-in-time safe
+- 没有可靠历史归档的 optional source 必须安全省略，不能回填今天数据
+- 当前 required source 已全部通过 readiness，严格 historical 报告已经开放
 
-这是故意的安全设计，避免“部分历史数据 + 部分今天数据”的伪回测。
+安全设计仍然不变：宁可缺失，也不允许“部分历史数据 + 部分今天数据”的伪回测。
 
 ---
 
@@ -68,17 +69,15 @@ analysis.research_context.SOURCE_TEMPORAL_CAPABILITIES
 | kol_knowledge | AS_OF_SAFE | 雪球/B站原始发布时间统一为 epoch 秒，历史模式排除未来和未知时间条目 |
 | candidate_credibility | AS_OF_SAFE | Wilson score 只使用 as-of 前发布且 as-of 前已经验证的预测 |
 
-当前仍阻断 historical：
+当前 historical 的安全省略项：
 
-| Source | 原因 |
-|---|---|
-| fundamentals | F10 当前会看到最新已发布财报 |
-| profitability | 财务指标尚未按发布日期截断 |
-| shareholder_count | 有历史记录，但尚未严格处理披露可用日期 |
-| dividend_buyback | 事件尚未统一按公告可用日过滤 |
-| a_share_structure | 机构季度持仓必须按披露日而不是季度末判断 |
-| industry_cycle | 商品/运价/行业数据尚未统一接受 as_of |
-| xueqiu_live | 当前浏览器抓的是今天讨论区 |
+| Source | 状态 | 说明 |
+|---|---|---|
+| industry_cycle | LIVE_ONLY / optional | 商品与运价本身可按 as-of 截断，但历史行业分类缺少可靠归档；无法确认时不路由 |
+| policy_news | LIVE_ONLY / optional | 当前财经新闻流不是历史归档，historical 模式直接省略 |
+| xueqiu_live | LIVE_ONLY / optional | 不读取今天的讨论区、情绪或多空流，缺失会降低覆盖率但不会回填 |
+
+以下 required source 已经是严格 `AS_OF_SAFE`：财报/盈利能力、股东户数、分红回购、A股公开持股结构、行情、估值、融资盘、宏观利率、巨潮公告、KOL 与候选用户历史验证。
 
 可通过 API 查看实时能力：
 
@@ -125,6 +124,8 @@ data/investment_snapshots/
       600036_2026-09-29_<hash>/
         report.json
         evidence.json
+        request.json
+        research_inputs.json
         manifest.json
       latest.json
 ```
@@ -191,7 +192,7 @@ python tools/live_report_acceptance.py \
 
 ## historical API 当前行为
 
-如果现在请求：
+现在请求：
 
 ```json
 {
@@ -201,32 +202,42 @@ python tools/live_report_acceptance.py \
 }
 ```
 
-API 会返回 HTTP 409，并列出：
+会进入严格 Historical 主链。系统先执行 readiness 检查：required source 必须全部 point-in-time safe；optional live-only source 则保持缺失。
 
-- 已安全的数据源
-- 阻断的数据源
-- 每个数据源为什么尚未 point-in-time safe
-
-不会自动退化成 live，也不会用今天的数据补空缺。
+任何 Evidence 的 `period / published_at / available_at` 晚于 `as_of` 都会触发最终 hard-fail。系统不会自动退化成 live，也不会用今天的数据补空缺。
 
 ---
 
-## 后续迁移顺序
+## 下一阶段
 
-建议按下面顺序逐步把能力表从 LIVE_ONLY 改成 AS_OF_SAFE：
+required source 的 point-in-time 改造已经完成，`historical_readiness().ready == True`。下一阶段重点不再是“解锁 Historical”，而是提高可复现性与覆盖率：
 
-1. 历史行情 / market context
-2. 财报 + profitability（按公告日）
-3. 分红 / 回购 / 再融资
-4. 股东户数
-5. 融资余额
-6. 机构持仓 / 公募 / ETF / 解禁
-7. 宏观利率 vintage
-8. 商品 / 运价 / 行业周期
-9. KOL 知识发布日期
-10. 雪球讨论与用户发言
-11. 历史 candidate credibility
+1. 扩大不同年份、行业和报告期的 Historical 公网验收矩阵
+2. 持续修复原始财报 PDF 的版式/语义解析差异
+3. 建立历史 source corpus，冻结公网原始 payload、source vintage 与哈希
+4. 在有 LLM 密钥后保存完整 `research_inputs.json` snapshot，并用 replay 比较不同 Prompt/模型
+5. 再考虑真正的历史新闻归档、历史雪球讨论快照、ETF 历史成份/份额等 optional source
 
-最后三项最难，也是最容易产生未来泄漏的部分。
+其中第 3 项已经由 `analysis/historical_corpus.py` 与
+`tools/historical_public_acceptance.py --corpus-root ...` 开始落地。
 
-在全部关键来源完成之前，`historical_readiness().ready` 必须保持 False。
+---
+
+## Historical public source corpus
+
+完整 LLM Historical E2E 依赖模型密钥，但公网 point-in-time 数据本身可以先独立冻结：
+
+```bash
+python tools/historical_public_acceptance.py \
+  600036@2024-06-30 \
+  --output artifacts/600036.json \
+  --corpus-root artifacts/historical_source_corpus
+```
+
+每个 bundle 包含：
+
+- `sources.json`：本次实际获取的 quote / valuation / market / macro / 巨潮财报 / 股东结构等原始归一化 payload
+- `diagnostics.json`：各 source 耗时、错误、验收 warning/failure
+- `manifest.json`：as-of、Git SHA、source vintages、语义 SHA-256、文件 SHA-256、future-date 检查
+
+它不包含 stance、评分或任何 LLM 结论，因此不能冒充完整报告 snapshot。它的用途是固定“这次公网验收到底看到了什么”，为 parser 回归和后续 snapshot corpus 提供可复现输入。
