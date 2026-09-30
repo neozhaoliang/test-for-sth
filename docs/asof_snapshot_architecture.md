@@ -241,3 +241,12 @@ python tools/historical_public_acceptance.py \
 - `manifest.json`：as-of、Git SHA、source vintages、语义 SHA-256、文件 SHA-256、future-date 检查
 
 它不包含 stance、评分或任何 LLM 结论，因此不能冒充完整报告 snapshot。它的用途是固定“这次公网验收到底看到了什么”，为 parser 回归和后续 snapshot corpus 提供可复现输入。
+
+下载 bundle 后可以直接检查：
+
+```bash
+python tools/historical_corpus_cli.py verify <bundle_path>
+python tools/historical_corpus_cli.py show <bundle_path>
+python tools/historical_corpus_cli.py sources <bundle_path>
+python tools/historical_corpus_cli.py diagnostics <bundle_path>
+```
