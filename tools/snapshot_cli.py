@@ -7,6 +7,7 @@ Examples:
     python tools/snapshot_cli.py show data/investment_snapshots/600036/2026-09-29/<snapshot_id>
     python tools/snapshot_cli.py inputs data/investment_snapshots/600036/2026-09-29/<snapshot_id>
     python tools/snapshot_cli.py replay <snapshot_id> --out artifacts/replay-a.json
+    python tools/snapshot_cli.py replay-external <snapshot_id> --synthesis external.json --out artifacts/replay-external.json
     python tools/snapshot_cli.py compare artifacts/replay-a.json artifacts/replay-b.json --out artifacts/replay-diff.json
 """
 
@@ -17,6 +18,7 @@ import asyncio
 import json
 from pathlib import Path
 
+from analysis.external_synthesis import load_external_synthesis, make_external_synthesis_fn
 from analysis.snapshot_compare import compare_replayed_reports, load_report_json
 from analysis.snapshot_replay import replay_snapshot
 from analysis.snapshot_store import (
@@ -47,11 +49,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "command",
-        choices=["verify", "show", "inputs", "replay", "compare"],
+        choices=["verify", "show", "inputs", "replay", "replay-external", "compare"],
     )
     parser.add_argument("path")
     parser.add_argument("path_b", nargs="?")
     parser.add_argument("--out", default="")
+    parser.add_argument("--synthesis", default="")
     args = parser.parse_args()
 
     path = Path(args.path)
@@ -71,6 +74,20 @@ def main() -> None:
 
     if args.command == "replay":
         report = asyncio.run(replay_snapshot(path))
+        _write_or_dump(report.model_dump(mode="json"), args.out)
+        return
+
+    if args.command == "replay-external":
+        if not args.synthesis:
+            parser.error("replay-external requires --synthesis <json>")
+        envelope = load_external_synthesis(args.synthesis)
+        report = asyncio.run(
+            replay_snapshot(
+                path,
+                synthesis_fn=make_external_synthesis_fn(envelope),
+                replay_metadata=envelope.replay_metadata(),
+            )
+        )
         _write_or_dump(report.model_dump(mode="json"), args.out)
         return
 
