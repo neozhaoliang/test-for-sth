@@ -102,6 +102,7 @@ def test_latest_period_freshness_rejects_obviously_stale_calendar():
 def test_parse_bank_specific_financial_labels():
     text = """
     本集团主要会计数据及财务指标
+    （人民币百万元，特别注明除外）
     营业收入 86,417
     归属于本行股东的净利润 38,077
     年化后归属于本行普通股股东的加权平均净资产收益率(%) 16.08
@@ -110,7 +111,17 @@ def test_parse_bank_specific_financial_labels():
     """
     out = parse_financial_report_text(text)
 
-    assert out["revenue"] == 86417
-    assert out["net_profit"] == 38077
-    assert out["operating_cash_flow"] == -1208
+    assert out["revenue"] == 86_417_000_000
+    assert out["net_profit"] == 38_077_000_000
+    assert out["operating_cash_flow"] == -1_208_000_000
+    assert out["total_assets"] == 11_520_226_000_000
     assert out["roe_pct"] == 16.08
+    assert out["monetary_multiplier"] == 1_000_000
+
+
+
+def test_monetary_unit_defaults_to_original_value_when_not_declared():
+    out = parse_financial_report_text("营业收入 123.45 归属于上市公司股东的净利润 12.34")
+    assert out["revenue"] == 123.45
+    assert out["net_profit"] == 12.34
+    assert out["monetary_multiplier"] == 1.0
