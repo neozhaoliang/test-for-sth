@@ -407,6 +407,7 @@ async def generate_report(
         primary_evidence=primary_evidence,
         evidence=evidence,
         research_quality=research_quality,
+        research_profile=research_profile,
         review=review,
         dividend_chart=_build_dividend_chart(
             dividend_history, buyback_history, valuation, quote
