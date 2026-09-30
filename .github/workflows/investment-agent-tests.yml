@@ -204,7 +204,7 @@ jobs:
 
 
   historical-public-data:
-    name: Historical public-data probe (\${{ matrix.code }}@\${{ matrix.as_of }})
+    name: Historical public-data probe (${{ matrix.code }}@${{ matrix.as_of }})
     needs: core-tests
     if: github.event_name == 'push' && github.ref == 'refs/heads/feature/investment-agent-evidence-v2'
     runs-on: ubuntu-latest
@@ -240,21 +240,21 @@ jobs:
           mkdir -p artifacts
           set -o pipefail
           uv run python -u tools/historical_public_acceptance.py \
-            "\${{ matrix.code }}@\${{ matrix.as_of }}" \
-            --output "artifacts/historical-public-data-\${{ matrix.code }}-\${{ matrix.as_of }}.json" \
-            | tee "artifacts/historical-public-data-\${{ matrix.code }}-\${{ matrix.as_of }}.log"
+            "${{ matrix.code }}@${{ matrix.as_of }}" \
+            --output "artifacts/historical-public-data-${{ matrix.code }}-${{ matrix.as_of }}.json" \
+            | tee "artifacts/historical-public-data-${{ matrix.code }}-${{ matrix.as_of }}.log"
 
       - name: Record probe status
         if: always()
         run: |
           mkdir -p artifacts
-          echo "outcome=\${{ steps.probe.outcome }}" > "artifacts/status-\${{ matrix.code }}-\${{ matrix.as_of }}.txt"
+          echo "outcome=${{ steps.probe.outcome }}" > "artifacts/status-${{ matrix.code }}-${{ matrix.as_of }}.txt"
 
       - name: Upload historical public-data artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: historical-public-data-\${{ matrix.code }}-\${{ matrix.as_of }}-\${{ github.sha }}
+          name: historical-public-data-${{ matrix.code }}-${{ matrix.as_of }}-${{ github.sha }}
           path: artifacts/
           if-no-files-found: warn
           retention-days: 14
