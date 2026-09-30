@@ -230,6 +230,86 @@ def _roe_from_primary_block(text: str, *, prefer_ytd: bool) -> Optional[float]:
     return None
 
 
+def _bank_percent_metric_from_pages(
+    pages: List[str],
+    labels: List[str],
+    *,
+    reject_prefix: Optional[str] = None,
+) -> Optional[float]:
+    """Extract the current-period value of a bank-specific percentage metric."""
+    for page in pages:
+        compact = _compact(page)
+        for label in labels:
+            start = 0
+            while True:
+                idx = compact.find(label, start)
+                if idx < 0:
+                    break
+                if reject_prefix:
+                    prefix = compact[max(0, idx - len(reject_prefix)):idx]
+                    if prefix.endswith(reject_prefix):
+                        start = idx + 1
+                        continue
+                segment = compact[idx + len(label): idx + len(label) + 120]
+                # Strip a unit and an immediately-adjacent footnote marker such as
+                # "(%)(1)" before looking for the first actual table value.
+                segment = re.sub(
+                    r"^(?:\(%\)|（%）|%)?(?:\(\d{1,2}\)|（\d{1,2}）)?[:：]?",
+                    "",
+                    segment,
+                )
+                values = [
+                    v for v in _numbers_in_segment(segment)
+                    if -100 <= v <= 100
+                ]
+                if values:
+                    return values[0]
+                start = idx + len(label)
+    return None
+
+
+def _bank_metrics_from_pages(pages: List[str]) -> Dict[str, Optional[float] | str]:
+    compact_all = "".join(_compact(x) for x in pages if x)
+    is_bank = any(
+        marker in compact_all
+        for marker in (
+            "归属于本行股东",
+            "不良贷款率",
+            "拨备覆盖率",
+            "核心一级资本充足率",
+            "净利息收益率",
+        )
+    )
+    if not is_bank:
+        return {}
+
+    return {
+        "financial_subtype": "bank",
+        "industry_hint": "银行",
+        "net_interest_margin_pct": _bank_percent_metric_from_pages(
+            pages, ["净利息收益率", "净息差"]
+        ),
+        "npl_ratio_pct": _bank_percent_metric_from_pages(
+            pages, ["不良贷款率"]
+        ),
+        "provision_coverage_pct": _bank_percent_metric_from_pages(
+            pages, ["拨备覆盖率"]
+        ),
+        "loan_provision_ratio_pct": _bank_percent_metric_from_pages(
+            pages, ["贷款拨备率"]
+        ),
+        "core_tier1_capital_adequacy_pct": _bank_percent_metric_from_pages(
+            pages, ["核心一级资本充足率"]
+        ),
+        "tier1_capital_adequacy_pct": _bank_percent_metric_from_pages(
+            pages, ["一级资本充足率"], reject_prefix="核心"
+        ),
+        "capital_adequacy_pct": _bank_percent_metric_from_pages(
+            pages, ["资本充足率"], reject_prefix="一级"
+        ),
+    }
+
+
 def parse_financial_report_pages(pages: List[str]) -> Dict:
     primary = _find_primary_metric_block(pages)
     if not primary:
@@ -308,6 +388,7 @@ def parse_financial_report_pages(pages: List[str]) -> Dict:
         if net_profit not in (None, 0) and ocf is not None
         else None
     )
+    bank_metrics = _bank_metrics_from_pages(pages)
 
     return {
         "revenue": revenue,
@@ -322,6 +403,7 @@ def parse_financial_report_pages(pages: List[str]) -> Dict:
         "monetary_unit": monetary_unit,
         "monetary_multiplier": monetary_multiplier,
         "basis": "ytd" if prefer_ytd else "period",
+        **bank_metrics,
     }
 
 
@@ -546,6 +628,13 @@ async def get_point_in_time_financials(
             "revenue": x.get("revenue"),
             "net_profit": x.get("net_profit"),
             "operating_cash_flow": x.get("operating_cash_flow"),
+            "net_interest_margin_pct": x.get("net_interest_margin_pct"),
+            "npl_ratio_pct": x.get("npl_ratio_pct"),
+            "provision_coverage_pct": x.get("provision_coverage_pct"),
+            "loan_provision_ratio_pct": x.get("loan_provision_ratio_pct"),
+            "core_tier1_capital_adequacy_pct": x.get("core_tier1_capital_adequacy_pct"),
+            "tier1_capital_adequacy_pct": x.get("tier1_capital_adequacy_pct"),
+            "capital_adequacy_pct": x.get("capital_adequacy_pct"),
         }
         for x in parsed
     ]
@@ -580,6 +669,15 @@ def to_historical_fundamentals(data: Optional[Dict]) -> Optional[Dict]:
         "accounts_receivable_yuan": None,
         "inventory_yuan": None,
         "sw_industry": None,
+        "financial_subtype": latest.get("financial_subtype"),
+        "industry_hint": latest.get("industry_hint"),
+        "net_interest_margin_pct": latest.get("net_interest_margin_pct"),
+        "npl_ratio_pct": latest.get("npl_ratio_pct"),
+        "provision_coverage_pct": latest.get("provision_coverage_pct"),
+        "loan_provision_ratio_pct": latest.get("loan_provision_ratio_pct"),
+        "core_tier1_capital_adequacy_pct": latest.get("core_tier1_capital_adequacy_pct"),
+        "tier1_capital_adequacy_pct": latest.get("tier1_capital_adequacy_pct"),
+        "capital_adequacy_pct": latest.get("capital_adequacy_pct"),
     }
     missing = []
     for field, label in (
@@ -589,13 +687,28 @@ def to_historical_fundamentals(data: Optional[Dict]) -> Optional[Dict]:
     ):
         if facts.get(field) is None:
             missing.append(label)
-    missing.extend(
-        [
-            "客户/供应商集中度(历史原始财报解析暂未覆盖)",
-            "专利/研发结构(历史原始财报解析暂未覆盖)",
-            "申万行业(历史原始财报解析暂未覆盖)",
-        ]
-    )
+    if facts.get("financial_subtype") == "bank":
+        bank_required = (
+            ("net_interest_margin_pct", "净息差"),
+            ("npl_ratio_pct", "不良贷款率"),
+            ("provision_coverage_pct", "拨备覆盖率"),
+            ("core_tier1_capital_adequacy_pct", "核心一级资本充足率"),
+            ("capital_adequacy_pct", "资本充足率"),
+        )
+        missing.extend(
+            f"{label}(历史原始财报未解析到)"
+            for field, label in bank_required
+            if facts.get(field) is None
+        )
+        missing.append("申万行业(历史模式以银行财报特征替代行业归档)")
+    else:
+        missing.extend(
+            [
+                "客户/供应商集中度(历史原始财报解析暂未覆盖)",
+                "专利/研发结构(历史原始财报解析暂未覆盖)",
+                "申万行业(历史原始财报解析暂未覆盖)",
+            ]
+        )
     url = latest.get("url")
     return {
         "facts": facts,
