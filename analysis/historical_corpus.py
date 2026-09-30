@@ -110,12 +110,38 @@ def save_historical_source_bundle(
     source_hash = _semantic_sha256(payloads)
     bundle_id = f"{stock_code}_{as_of.isoformat()}_{source_hash[:12]}"
     target = root / stock_code / as_of.isoformat() / bundle_id
-    target.mkdir(parents=True, exist_ok=True)
-
     sources_path = target / "sources.json"
     diagnostics_path = target / "diagnostics.json"
     manifest_path = target / "manifest.json"
 
+    # Content-addressed bundle directories are immutable. Re-running the same source
+    # payload must reuse the existing bundle rather than changing diagnostics/manifest
+    # under an already published bundle_id.
+    if target.exists():
+        if not manifest_path.exists():
+            raise RuntimeError(f"incomplete existing source bundle: {target}")
+        integrity = verify_historical_source_bundle(target)
+        if not integrity.get("ok"):
+            raise RuntimeError(
+                "existing source bundle failed integrity verification: "
+                + "; ".join(integrity.get("errors") or [])
+            )
+        latest_path = root / stock_code / as_of.isoformat() / "latest.json"
+        latest_path.write_text(
+            json.dumps(
+                {
+                    "bundle_id": bundle_id,
+                    "path": str(target),
+                    "sources_sha256": source_hash,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return target
+
+    target.mkdir(parents=True, exist_ok=False)
     diagnostics_payload = diagnostics or {}
     source_file_hash = _write_json(sources_path, payloads)
     diagnostics_file_hash = _write_json(diagnostics_path, diagnostics_payload)
