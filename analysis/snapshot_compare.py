@@ -53,7 +53,9 @@ def _assert_same_snapshot(a: Dict[str, Any], b: Dict[str, Any]) -> None:
     pb = _replay_provenance(b)
     ida = str(pa.get("snapshot_id") or "")
     idb = str(pb.get("snapshot_id") or "")
-    if ida and idb and ida != idb:
+    if not ida or not idb:
+        raise ValueError("both reports must contain replay snapshot provenance")
+    if ida != idb:
         raise ValueError(f"reports come from different snapshots: {ida} != {idb}")
 
     for field in ("stock_code", "as_of", "research_mode"):
