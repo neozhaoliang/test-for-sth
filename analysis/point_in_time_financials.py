@@ -122,6 +122,14 @@ def _find_balance_sheet_block(pages: List[str]) -> str:
     return ""
 
 
+def _label_regex(label: str) -> re.Pattern:
+    # PDF text extraction often inserts line breaks/spaces inside Chinese labels.
+    # Match the label while tolerating whitespace BETWEEN characters, but never remove
+    # whitespace from the surrounding numeric cells.
+    parts = [re.escape(ch) for ch in label if not ch.isspace()]
+    return re.compile(r"\s*".join(parts))
+
+
 def _segment_after_label(
     text: str,
     label: str,
@@ -129,18 +137,17 @@ def _segment_after_label(
     *,
     stop_labels: Optional[List[str]] = None,
 ) -> str:
-    compact = _compact(text)
-    needle = _compact(label)
-    idx = compact.find(needle)
-    if idx < 0:
+    source = text or ""
+    match = _label_regex(label).search(source)
+    if not match:
         return ""
-    segment = compact[idx : idx + max_chars]
-    start = len(needle)
+    segment = source[match.start() : match.start() + max_chars]
+    start = match.end() - match.start()
     cut = len(segment)
     for stop in stop_labels or []:
-        pos = segment.find(_compact(stop), start)
-        if pos >= 0:
-            cut = min(cut, pos)
+        stop_match = _label_regex(stop).search(segment, pos=start)
+        if stop_match:
+            cut = min(cut, stop_match.start())
     return segment[:cut]
 
 
