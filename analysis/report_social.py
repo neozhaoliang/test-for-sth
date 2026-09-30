@@ -22,6 +22,7 @@ from analysis.knowledge_base import (
     filter_entries_as_of,
     load_cached_entries,
 )
+from analysis.knowledge_context import prefilter_knowledge_by_context
 from backtest.score import load_records
 from model.m_analysis import CandidateOpinion, KnowledgeExcerpt
 
@@ -171,9 +172,11 @@ def _filter_historical_knowledge_deterministic(
 
 
 _RELEVANCE_FILTER_PROMPT = """以下是知识库中若干条投资观点摘要的编号、标题和摘要开头片段。
-请判断哪些条目与当前正在分析的股票"{stock_name}"({stock_code})可能相关——包括直接点名该股票、
-点名其所属行业({industry_name})、或讨论了适用于该股票的通用宏观/周期/估值方法论观点。
-不确定是否相关时倾向保留。只有明显完全不相关的条目才排除。
+请判断哪些条目与当前正在分析的股票"{stock_name}"({stock_code})可能相关。相关不等于必须点名股票：
+除了直接点名公司/行业({industry_name})，还要保留能够解释该公司的关键因果机制的观点，例如资金抱团与ETF被动流入、
+大客户依赖、技术路线控制权、下游资本开支的融资来源、内部人减持与公司回购的利益差异、估值泡沫/双杀、
+海外需求与地缘风险、利润和现金流背离。作者观点不是事实，保留它是为了让后续模型提出核验问题。
+不确定是否相关时倾向保留。只有明显与公司及其核心风险机制都无关的条目才排除。
 
 条目列表:
 {items_block}
@@ -191,16 +194,32 @@ async def filter_relevant_knowledge(
     industry_name: Optional[str],
     *,
     use_llm: bool = True,
+    archetype: str = "",
+    fundamentals: Optional[dict] = None,
 ) -> List[KnowledgeExcerpt]:
     if not knowledge_excerpts:
         return knowledge_excerpts
+
+    prefetched = prefilter_knowledge_by_context(
+        knowledge_excerpts,
+        stock_code,
+        stock_name,
+        industry_name,
+        archetype=archetype,
+        fundamentals=fundamentals,
+        limit=160 if use_llm else _MAX_HISTORICAL_KNOWLEDGE,
+    )
+    # If deterministic thematic retrieval found nothing, preserve the old fallback rather
+    # than silently erasing the whole knowledge layer.
+    if not prefetched:
+        prefetched = knowledge_excerpts[:160 if use_llm else _MAX_HISTORICAL_KNOWLEDGE]
 
     # Historical research inputs must be reproducible independently of whichever model is
     # configured today. Entries have already been strictly truncated by publication time.
     # Apply only deterministic company/industry pinning plus a fixed newest-first cap.
     if not use_llm:
         return _filter_historical_knowledge_deterministic(
-            knowledge_excerpts,
+            prefetched,
             stock_code,
             stock_name,
             industry_name,
@@ -208,7 +227,7 @@ async def filter_relevant_knowledge(
 
     items_block = "\n".join(
         f"[{i}] {e.title}: {e.distilled}"
-        for i, e in enumerate(knowledge_excerpts)
+        for i, e in enumerate(prefetched)
     )
     prompt = _RELEVANCE_FILTER_PROMPT.format(
         stock_name=stock_name or stock_code,
@@ -225,20 +244,20 @@ async def filter_relevant_knowledge(
     )
     if not isinstance(parsed, list):
         logger.warning(
-            f"[analysis.report_social] 知识库相关性筛选失败，回退为全量 ({stock_code})"
+            f"[analysis.report_social] 知识库相关性筛选失败，回退为因果主题预筛选 ({stock_code})"
         )
-        return knowledge_excerpts
+        return prefetched
 
     kept = {
         i for i in parsed
-        if isinstance(i, int) and 0 <= i < len(knowledge_excerpts)
+        if isinstance(i, int) and 0 <= i < len(prefetched)
     }
     if not kept:
         logger.warning(
-            f"[analysis.report_social] 知识库相关性筛选返回空结果，回退为全量 ({stock_code})"
+            f"[analysis.report_social] 知识库相关性筛选返回空结果，回退为因果主题预筛选 ({stock_code})"
         )
-        return knowledge_excerpts
-    return [e for i, e in enumerate(knowledge_excerpts) if i in kept]
+        return prefetched
+    return [e for i, e in enumerate(prefetched) if i in kept]
 
 
 async def collect_live_social_context(
