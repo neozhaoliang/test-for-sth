@@ -204,11 +204,21 @@ jobs:
 
 
   historical-public-data:
-    name: Historical public-data probe
+    name: Historical public-data probe (\${{ matrix.code }}@\${{ matrix.as_of }})
     needs: core-tests
     if: github.event_name == 'push' && github.ref == 'refs/heads/feature/investment-agent-evidence-v2'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - code: "600036"
+            as_of: "2024-06-30"
+          - code: "601088"
+            as_of: "2023-06-30"
+          - code: "600519"
+            as_of: "2022-12-30"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -230,23 +240,21 @@ jobs:
           mkdir -p artifacts
           set -o pipefail
           uv run python -u tools/historical_public_acceptance.py \
-            600036@2024-06-30 \
-            601088@2023-06-30 \
-            600519@2022-12-30 \
-            --output artifacts/historical-public-data.json \
-            | tee artifacts/historical-public-data.log
+            "\${{ matrix.code }}@\${{ matrix.as_of }}" \
+            --output "artifacts/historical-public-data-\${{ matrix.code }}-\${{ matrix.as_of }}.json" \
+            | tee "artifacts/historical-public-data-\${{ matrix.code }}-\${{ matrix.as_of }}.log"
 
       - name: Record probe status
         if: always()
         run: |
           mkdir -p artifacts
-          echo "outcome=${{ steps.probe.outcome }}" > artifacts/historical-public-data-status.txt
+          echo "outcome=\${{ steps.probe.outcome }}" > "artifacts/status-\${{ matrix.code }}-\${{ matrix.as_of }}.txt"
 
       - name: Upload historical public-data artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: historical-public-data-${{ github.sha }}
+          name: historical-public-data-\${{ matrix.code }}-\${{ matrix.as_of }}-\${{ github.sha }}
           path: artifacts/
           if-no-files-found: warn
           retention-days: 14
