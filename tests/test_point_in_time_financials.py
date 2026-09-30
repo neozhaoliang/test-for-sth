@@ -1,4 +1,7 @@
+from datetime import date
+
 from analysis.point_in_time_financials import (
+    _latest_period_is_fresh_enough,
     parse_financial_report_text,
     to_historical_fundamentals,
     to_historical_profitability,
@@ -83,3 +86,13 @@ def test_historical_contract_keeps_period_and_publication_date_distinct():
     assert profitability["as_of"] == "2026-04-01"
     assert profitability["available_at"] == "2026-03-28"
     assert profitability["point_in_time"] is True
+
+
+
+def test_latest_period_freshness_rejects_obviously_stale_calendar():
+    cutoff = date(2023, 6, 30)
+
+    assert _latest_period_is_fresh_enough("2023-03-31", cutoff)
+    assert _latest_period_is_fresh_enough("2022-12-31", cutoff)
+    assert not _latest_period_is_fresh_enough("2019-12-31", cutoff)
+    assert not _latest_period_is_fresh_enough("2024-03-31", cutoff)
