@@ -364,26 +364,42 @@ Model A vs Model B
 GET /api/research/time-capabilities
 ```
 
-会返回每一路数据的 temporal capability。
-
-目前已经具备 point-in-time 截断能力的路径包括：
+当前 required source 已全部具备严格 point-in-time 路径，`historical_readiness().ready == True`。其中包括：
 
 - 历史价格 / quote
 - PE/PB 历史估值
-- 巨潮公告
-- 巨潮周期报告 filing calendar
+- 巨潮公告与周期报告 filing calendar
+- 原始巨潮 PDF 财报与盈利趋势
+- 股东户数
+- 分红 / 回购事件账本
+- A股公开股东结构
 - 市场/指数价格环境
 - 融资余额
 - 中美利率
 - KOL 知识发布时间过滤
 - 历史高可信用户评分的“预测时间 + 验证时间”双截断
-- 股东户数：已经按**公告日期**做日期截断，但第三方历史表可能被后来更正，因此 capability 为 `snapshot_only`
-- 分红 / 回购：已经按公告日期过滤明显未来事件，但聚合表中的进度/金额可能后来更新，因此 capability 为 `snapshot_only`
 
-也就是说，这两类数据已经具备“减少明显穿越”的适配器，但**还不能仅凭今天重新查询第三方历史表就宣称严格 point-in-time**。严格历史回测要使用当时冻结的 Snapshot，或直接解析当时版本的原始公告。
+以下 source 仍是 **optional safe omission**，不会阻断 Historical，也绝不会回填今天的数据：
 
-仍然阻塞完整 historical mode 的数据源会继续显示在
-`blocking_sources` 中。
+- `industry_cycle`：历史行业分类缺少可靠归档时不路由
+- `policy_news`：当前新闻流不是历史归档
+- `xueqiu_live`：不读取今天讨论区/情绪/多空流
 
-在 blocking sources 没有清零之前，
-`mode=historical` 会返回明确错误，不会偷偷回退成 live 数据。
+### Historical public source corpus
+
+公网 point-in-time 验收现在可以同步冻结原始 source bundle：
+
+```bash
+python tools/historical_public_acceptance.py \
+  600036@2024-06-30 \
+  --output artifacts/600036.json \
+  --corpus-root artifacts/historical_source_corpus
+```
+
+bundle 包含 `sources.json`、`diagnostics.json` 和 `manifest.json`。manifest 记录 source vintages、Git SHA、语义 SHA-256、文件 SHA-256 和 future-date 检查；bundle 不含任何 LLM stance/评分，因此只是可复现的历史数据输入，不是完整研究报告。
+
+GitHub Actions 的 `historical-public-data` matrix 已会把这些 source corpus 与验收 JSON/日志一起上传为 artifact。
+
+### 仍未完成的唯一关键验收
+
+完整 LLM Historical E2E 仍取决于仓库 Actions 是否配置 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`。未配置时 job 会明确写入 skipped marker；不能把 workflow success 当成 LLM 报告已经跑通。
