@@ -137,7 +137,9 @@ jobs:
   historical-e2e:
     name: Historical E2E acceptance
     needs: core-tests
-    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/investment-agent-evidence-v2'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/feature/investment-agent-evidence-v2') ||
+      (github.event_name == 'pull_request' && github.head_ref == 'feature/investment-agent-evidence-v2')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -206,7 +208,9 @@ jobs:
   historical-public-data:
     name: Historical public-data probe (${{ matrix.code }}@${{ matrix.as_of }})
     needs: core-tests
-    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/investment-agent-evidence-v2'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/feature/investment-agent-evidence-v2') ||
+      (github.event_name == 'pull_request' && github.head_ref == 'feature/investment-agent-evidence-v2')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
