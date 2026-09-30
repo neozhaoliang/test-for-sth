@@ -115,15 +115,6 @@ def test_parse_bank_specific_financial_labels():
     assert out["revenue"] == 86_417_000_000
     assert out["net_profit"] == 38_077_000_000
     assert out["operating_cash_flow"] == -1_208_000_000
-    assert out["financial_subtype"] == "bank"
-    assert out["industry_hint"] == "银行"
-    assert out["net_interest_margin_pct"] == 2.02
-    assert out["npl_ratio_pct"] == 0.92
-    assert out["provision_coverage_pct"] == 436.82
-    assert out["loan_provision_ratio_pct"] == 4.02
-    assert out["core_tier1_capital_adequacy_pct"] == 13.50
-    assert out["tier1_capital_adequacy_pct"] == 16.16
-    assert out["capital_adequacy_pct"] == 18.24
     assert out["total_assets"] == 11_520_226_000_000
     assert out["roe_pct"] == 16.08
     assert out["monetary_multiplier"] == 1_000_000
@@ -221,3 +212,12 @@ def test_bank_q1_parser_ignores_metric_footnotes_but_keeps_negative_cashflow():
     assert out["net_profit"] == 38_077_000_000
     assert out["roe_pct"] == 16.08
     assert out["operating_cash_flow"] == -1_208_000_000
+    assert out["financial_subtype"] == "bank"
+    assert out["industry_hint"] == "银行"
+    assert out["net_interest_margin_pct"] == 2.02
+    assert out["npl_ratio_pct"] == 0.92
+    assert out["provision_coverage_pct"] == 436.82
+    assert out["loan_provision_ratio_pct"] == 4.02
+    assert out["core_tier1_capital_adequacy_pct"] == 13.50
+    assert out["tier1_capital_adequacy_pct"] == 16.16
+    assert out["capital_adequacy_pct"] == 18.24
