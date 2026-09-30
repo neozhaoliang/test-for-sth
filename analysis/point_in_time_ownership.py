@@ -14,14 +14,11 @@ filing's top-shareholder section.
 from __future__ import annotations
 
 import asyncio
-import io
 import re
 from datetime import date
 from typing import Dict, List, Optional
 
-from pypdf import PdfReader
-
-from analysis.filing_archive import _download_pdf
+from analysis.filing_archive import _get_pdf_pages_text
 from analysis.filing_calendar import (
     get_financial_filing_calendar,
     latest_available_filing_by_period,
@@ -69,17 +66,12 @@ def classify_holder_name(name: str) -> List[str]:
     ]
 
 
-def _extract_holder_section(pdf_bytes: bytes) -> str:
-    reader = PdfReader(io.BytesIO(pdf_bytes))
+def _extract_holder_section(pages: List[str]) -> str:
     selected: List[str] = []
-    for page in reader.pages:
-        try:
-            text = page.extract_text() or ""
-        except Exception:
-            text = ""
+    for text in pages:
         if not text:
             continue
-        compact = text.replace(" ", "")
+        compact = re.sub(r"\s+", "", text)
         if any(marker in compact for marker in _SECTION_MARKERS):
             selected.append(text)
     return "\n".join(selected)
@@ -88,8 +80,9 @@ def _extract_holder_section(pdf_bytes: bytes) -> str:
 def parse_top_holder_names(text: str) -> List[Dict]:
     if not text:
         return []
-    normalized = text.replace("\u3000", " ")
-    normalized = re.sub(r"[ \t]+", " ", normalized)
+    # PDF table extraction often inserts spaces/newlines between every Chinese token.
+    # Holder names are structural strings, so remove all whitespace before matching.
+    normalized = re.sub(r"\s+", "", text.replace("\u3000", " "))
 
     names: List[str] = []
     for pattern in _NAME_PATTERNS:
@@ -178,12 +171,12 @@ async def get_point_in_time_ownership(
         url = str(item.get("url") or "")
         if not url:
             continue
-        body = await _download_pdf(url)
-        if not body:
+        pages = await _get_pdf_pages_text(url)
+        if not pages:
             continue
         try:
             text = await asyncio.wait_for(
-                asyncio.to_thread(_extract_holder_section, body),
+                asyncio.to_thread(_extract_holder_section, pages),
                 timeout=_PARSE_TIMEOUT_S,
             )
         except Exception:
