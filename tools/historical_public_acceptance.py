@@ -16,9 +16,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Tuple
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from analysis.filing_calendar import get_financial_filing_calendar
 from analysis.macro_rates import get_macro_rate_context
