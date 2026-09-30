@@ -174,6 +174,17 @@ def _roe_from_primary_block(text: str, *, prefer_ytd: bool) -> Optional[float]:
         segment = _segment_after_label(text, label)
         if not segment:
             continue
+
+        # Report tables commonly append a footnote marker immediately after the metric
+        # unit, e.g. "加权平均净资产收益率(%)(1) 16.08 ...".  That "(1)" is not a
+        # negative value. Strip only unit-adjacent footnotes; later "(1,208)" data cells
+        # in other metrics remain valid negative numbers.
+        segment = re.sub(
+            r"((?:\(%\)|（%）|%))\s*(?:\(\d{1,2}\)|（\d{1,2}）)",
+            r"\1",
+            segment,
+            count=1,
+        )
         values = [v for v in _numbers_in_segment(segment) if -100 <= v <= 100]
         if not values:
             continue
