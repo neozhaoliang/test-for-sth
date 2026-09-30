@@ -170,7 +170,8 @@ async def generate_report(
         load_knowledge_excerpts(
             as_of=request.as_of
             if request.mode == ResearchMode.HISTORICAL
-            else None
+            else None,
+            allow_distill=not historical_mode,
         ),
         shareholder_task,
         dividend_task,
