@@ -283,40 +283,44 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         or "银行" in str(facts.get("sw_industry") or "")
     )
     if is_bank:
-        bank_quality = {
-            k: facts.get(k)
-            for k in (
-                "finance_period",
-                "net_interest_margin_pct",
-                "npl_ratio_pct",
-                "provision_coverage_pct",
-                "loan_provision_ratio_pct",
-                "core_tier1_capital_adequacy_pct",
-                "tier1_capital_adequacy_pct",
-                "capital_adequacy_pct",
-                "capital_adequacy_basis",
-                "roe_pct",
-            )
-            if facts.get(k) is not None
-        }
-        _add(
-            out,
-            category="bank_quality",
-            label="银行资产质量、息差与资本充足",
-            source=(
-                "analysis.point_in_time_financials"
-                if fundamentals.get("point_in_time")
-                else "analysis.fundamentals"
-            ),
-            tier="S" if fundamentals.get("point_in_time") else "B",
-            kind="fact",
-            value=bank_quality,
-            as_of=str(facts.get("finance_period") or "") or None,
-            period=str(facts.get("finance_period") or "") or None,
-            available_at=str(fundamentals.get("available_at") or "") or None,
-            tags=("bank", "asset_quality", "nim", "npl", "provision", "capital"),
-            url=source_map.get("finance"),
+        bank_metric_keys = (
+            "net_interest_margin_pct",
+            "npl_ratio_pct",
+            "provision_coverage_pct",
+            "loan_provision_ratio_pct",
+            "core_tier1_capital_adequacy_pct",
+            "tier1_capital_adequacy_pct",
+            "capital_adequacy_pct",
         )
+        if any(facts.get(k) is not None for k in bank_metric_keys):
+            bank_quality = {
+                k: facts.get(k)
+                for k in (
+                    "finance_period",
+                    *bank_metric_keys,
+                    "capital_adequacy_basis",
+                    "roe_pct",
+                )
+                if facts.get(k) is not None
+            }
+            _add(
+                out,
+                category="bank_quality",
+                label="银行资产质量、息差与资本充足",
+                source=(
+                    "analysis.point_in_time_financials"
+                    if fundamentals.get("point_in_time")
+                    else "analysis.fundamentals"
+                ),
+                tier="S" if fundamentals.get("point_in_time") else "B",
+                kind="fact",
+                value=bank_quality,
+                as_of=str(facts.get("finance_period") or "") or None,
+                period=str(facts.get("finance_period") or "") or None,
+                available_at=str(fundamentals.get("available_at") or "") or None,
+                tags=("bank", "asset_quality", "nim", "npl", "provision", "capital"),
+                url=source_map.get("finance"),
+            )
 
     rd_payload = {
         k: facts.get(k)
