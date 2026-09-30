@@ -209,9 +209,26 @@ def _build_management_capital_block(data: Optional[Dict]) -> str:
         row = data.get(key) or {}
         if not row:
             continue
+        amount_total = row.get("cash_dividend_per_10_total")
+        known_amounts = int(row.get("cash_dividend_amount_records") or 0)
+        dividend_records = int(row.get("dividend_records") or 0)
+        amount_complete = bool(row.get("cash_dividend_amount_complete"))
+        if dividend_records == 0:
+            dividend_amount_text = "未见已实施现金分红记录"
+        elif amount_total is None:
+            dividend_amount_text = (
+                f"已实施分红记录 {dividend_records} 条，但公告元数据未给出每10股金额，累计金额暂缺"
+            )
+        elif amount_complete:
+            dividend_amount_text = f"累计每10股现金分红 {amount_total} 元"
+        else:
+            dividend_amount_text = (
+                f"已解析金额的 {known_amounts}/{dividend_records} 条记录累计每10股 "
+                f"{amount_total} 元（非完整累计）"
+            )
         lines.append(
             f"{label}资本分配: 分红覆盖 {row.get('dividend_years_count')}/{row.get('window_years')} 个日历年，"
-            f"累计每10股现金分红 {row.get('cash_dividend_per_10_total')} 元；"
+            f"{dividend_amount_text}；"
             f"回购记录 {row.get('buyback_records')} 次，已回购金额合计 "
             f"{_yi(row.get('buyback_actual_amount_yuan'))}；"
             f"F10再融资记录 {row.get('refinancing_records')} 次，"
