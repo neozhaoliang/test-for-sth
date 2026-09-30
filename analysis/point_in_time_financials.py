@@ -122,12 +122,26 @@ def _find_balance_sheet_block(pages: List[str]) -> str:
     return ""
 
 
-def _segment_after_label(text: str, label: str, max_chars: int = 320) -> str:
+def _segment_after_label(
+    text: str,
+    label: str,
+    max_chars: int = 320,
+    *,
+    stop_labels: Optional[List[str]] = None,
+) -> str:
     compact = _compact(text)
-    idx = compact.find(_compact(label))
+    needle = _compact(label)
+    idx = compact.find(needle)
     if idx < 0:
         return ""
-    return compact[idx : idx + max_chars]
+    segment = compact[idx : idx + max_chars]
+    start = len(needle)
+    cut = len(segment)
+    for stop in stop_labels or []:
+        pos = segment.find(_compact(stop), start)
+        if pos >= 0:
+            cut = min(cut, pos)
+    return segment[:cut]
 
 
 def _numbers_in_segment(segment: str) -> List[float]:
@@ -144,9 +158,14 @@ def _money_metric_from_row(
     labels: List[str],
     *,
     prefer_ytd: bool,
+    stop_labels: Optional[List[str]] = None,
 ) -> Optional[float]:
     for label in labels:
-        segment = _segment_after_label(text, label)
+        segment = _segment_after_label(
+            text,
+            label,
+            stop_labels=stop_labels,
+        )
         if not segment:
             continue
         values = _numbers_in_segment(segment)
@@ -171,7 +190,15 @@ def _roe_from_primary_block(text: str, *, prefer_ytd: bool) -> Optional[float]:
         "加权平均净资产收益率",
         "净资产收益率",
     ):
-        segment = _segment_after_label(text, label)
+        segment = _segment_after_label(
+            text,
+            label,
+            stop_labels=[
+                "年化后扣除非经常性损益",
+                "经营活动产生的现金流量净额",
+                "本报告期末",
+            ],
+        )
         if not segment:
             continue
 
@@ -213,6 +240,11 @@ def parse_financial_report_pages(pages: List[str]) -> Dict:
         primary,
         ["营业收入"],
         prefer_ytd=prefer_ytd,
+        stop_labels=[
+            "归属于上市公司股东的净利润",
+            "归属于母公司所有者的净利润",
+            "归属于本行股东的净利润",
+        ],
     )
     net_profit = _money_metric_from_row(
         primary,
@@ -222,11 +254,22 @@ def parse_financial_report_pages(pages: List[str]) -> Dict:
             "归属于本行股东的净利润",
         ],
         prefer_ytd=prefer_ytd,
+        stop_labels=[
+            "归属于上市公司股东的扣除非经常性损益的净利润",
+            "扣除非经常性损益后归属于本行股东的净利润",
+            "基本每股收益",
+            "归属于本行普通股股东的基本每股收益",
+        ],
     )
     ocf = _money_metric_from_row(
         primary,
         ["经营活动产生的现金流量净额"],
         prefer_ytd=prefer_ytd,
+        stop_labels=[
+            "基本每股收益",
+            "归属于本行普通股股东的基本每股收益",
+            "加权平均净资产收益率",
+        ],
     )
     roe = _roe_from_primary_block(primary, prefer_ytd=prefer_ytd)
 
