@@ -268,7 +268,11 @@ async def generate_report(
         policy_task,
     )
     knowledge_excerpts = await filter_relevant_knowledge(
-        knowledge_excerpts, stock_code, stock_name, industry_name
+        knowledge_excerpts,
+        stock_code,
+        stock_name,
+        industry_name,
+        use_llm=not historical_mode,
     )
 
     # 估值与同花顺 F10 同页解析，拆成独立维度是因为报告前端与 prompt 都要单列。
