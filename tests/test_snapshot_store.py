@@ -11,6 +11,7 @@ from analysis.snapshot_store import (
     load_snapshot_report,
     load_snapshot_research_inputs,
     save_report_snapshot,
+    save_research_input_snapshot,
     verify_snapshot_integrity,
 )
 from model.m_analysis import AnalysisReport, StructuredSummary
@@ -171,3 +172,34 @@ def test_frozen_research_inputs_rebuild_analysis_inputs(tmp_path):
     assert candidates == []
     assert len(evidence) == 2
     assert evidence[0].category == "valuation_history"
+
+
+def test_research_input_snapshot_is_replayable_and_has_no_report(tmp_path):
+    request = ResearchRequest(
+        stock_code="600000",
+        save_snapshot=False,
+        snapshot_root=str(tmp_path),
+    )
+    report = _report()
+    report.as_of = str(request.as_of)
+
+    path = save_research_input_snapshot(report, request)
+    manifest = load_snapshot_manifest(path)
+
+    assert manifest.snapshot_kind == "research_inputs_only"
+    assert manifest.report_sha256 == ""
+    assert not (path / "report.json").exists()
+    assert (path / "research_inputs.json").exists()
+    assert (path / "evidence.json").exists()
+    assert verify_snapshot_integrity(path)["ok"] is True
+
+    frozen = load_snapshot_research_inputs(path)
+    inputs, candidates, evidence = frozen_research_inputs_to_analysis_inputs(frozen)
+    assert inputs.stock_code == "600000"
+    assert len(evidence) == 2
+
+    second = save_research_input_snapshot(report, request)
+    assert second == path
+    assert (
+        tmp_path / "600000" / str(request.as_of) / "latest-inputs.json"
+    ).exists()
