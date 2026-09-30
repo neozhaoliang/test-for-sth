@@ -5,6 +5,7 @@ on:
     branches: [main]
   push:
     branches:
+      - main
       - feature/investment-agent-evidence-v2
 
 jobs:
@@ -54,6 +55,7 @@ jobs:
             analysis/research_context.py \
             analysis/snapshot_store.py \
             analysis/snapshot_replay.py \
+            analysis/snapshot_compare.py \
             analysis/report_blocks.py \
             analysis/report_synthesis.py \
             analysis/report_social.py \
@@ -114,6 +116,7 @@ jobs:
             tests/test_report_validation.py \
             tests/test_research_context.py \
             tests/test_snapshot_store.py \
+            tests/test_snapshot_compare.py \
             tests/test_valuation_history_asof.py \
             tests/test_market_context_asof.py \
             tests/test_realtime_price_asof.py \
