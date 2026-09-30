@@ -262,6 +262,66 @@ def _bank_percent_metric_from_pages(
                     return values[0]
     return None
 
+def _bank_capital_metrics_from_pages(pages: List[str]) -> Dict[str, Optional[float] | str]:
+    """Prefer the bank's actual consolidated capital ratios over regulatory minima.
+
+    Bank reports often state regulatory floors immediately before the actual capital table.
+    A first-label-wins parser can therefore mistake e.g. "应不低于11.25%" for the bank's
+    own capital adequacy ratio.  Prefer explicit "本集团...核心一级...一级...资本充足率"
+    sentences, then fall back to the consolidated section of the capital table.
+    """
+    basis_patterns = (
+        ("本集团高级法", r"本集团高级法下"),
+        ("本集团权重法", r"本集团权重法下"),
+        ("本集团标准法", r"本集团标准法下"),
+    )
+    for page in pages:
+        compact = _compact(page)
+        for basis, prefix in basis_patterns:
+            m = re.search(
+                prefix
+                + r"核心一级资本充足率[:：]?([\d.]+)%"
+                + r".{0,80}?一级资本充足率[:：]?([\d.]+)%"
+                + r".{0,80}?资本充足率[:：]?([\d.]+)%",
+                compact,
+            )
+            if m:
+                return {
+                    "core_tier1_capital_adequacy_pct": float(m.group(1)),
+                    "tier1_capital_adequacy_pct": float(m.group(2)),
+                    "capital_adequacy_pct": float(m.group(3)),
+                    "capital_adequacy_basis": basis,
+                }
+
+    # Fallback for reports that expose only a table. Restrict parsing to the consolidated
+    # "本集团" section and stop before "本公司", so company-only ratios cannot leak in.
+    for page in pages:
+        compact = _compact(page)
+        if "资本充足率" not in compact or "本集团" not in compact:
+            continue
+        source = _clean(page)
+        start_match = _label_regex("本集团").search(source)
+        if not start_match:
+            continue
+        end_match = _label_regex("本公司").search(source, pos=start_match.end())
+        segment = source[start_match.start(): end_match.start() if end_match else len(source)]
+        core = _bank_percent_metric_from_pages([segment], ["核心一级资本充足率"])
+        tier1 = _bank_percent_metric_from_pages(
+            [segment], ["一级资本充足率"], reject_prefix="核心"
+        )
+        total = _bank_percent_metric_from_pages(
+            [segment], ["资本充足率"], reject_prefix="一级"
+        )
+        if any(v is not None for v in (core, tier1, total)):
+            return {
+                "core_tier1_capital_adequacy_pct": core,
+                "tier1_capital_adequacy_pct": tier1,
+                "capital_adequacy_pct": total,
+                "capital_adequacy_basis": "本集团披露口径",
+            }
+    return {}
+
+
 def _bank_metrics_from_pages(pages: List[str]) -> Dict[str, Optional[float] | str]:
     compact_all = "".join(_compact(x) for x in pages if x)
     is_bank = any(
@@ -277,6 +337,7 @@ def _bank_metrics_from_pages(pages: List[str]) -> Dict[str, Optional[float] | st
     if not is_bank:
         return {}
 
+    capital = _bank_capital_metrics_from_pages(pages)
     return {
         "financial_subtype": "bank",
         "industry_hint": "银行",
@@ -292,15 +353,7 @@ def _bank_metrics_from_pages(pages: List[str]) -> Dict[str, Optional[float] | st
         "loan_provision_ratio_pct": _bank_percent_metric_from_pages(
             pages, ["贷款拨备率"]
         ),
-        "core_tier1_capital_adequacy_pct": _bank_percent_metric_from_pages(
-            pages, ["核心一级资本充足率"]
-        ),
-        "tier1_capital_adequacy_pct": _bank_percent_metric_from_pages(
-            pages, ["一级资本充足率"], reject_prefix="核心"
-        ),
-        "capital_adequacy_pct": _bank_percent_metric_from_pages(
-            pages, ["资本充足率"], reject_prefix="一级"
-        ),
+        **capital,
     }
 
 
@@ -629,6 +682,7 @@ async def get_point_in_time_financials(
             "core_tier1_capital_adequacy_pct": x.get("core_tier1_capital_adequacy_pct"),
             "tier1_capital_adequacy_pct": x.get("tier1_capital_adequacy_pct"),
             "capital_adequacy_pct": x.get("capital_adequacy_pct"),
+            "capital_adequacy_basis": x.get("capital_adequacy_basis"),
         }
         for x in parsed
     ]
@@ -673,6 +727,7 @@ def to_historical_fundamentals(data: Optional[Dict]) -> Optional[Dict]:
         "core_tier1_capital_adequacy_pct": latest.get("core_tier1_capital_adequacy_pct"),
         "tier1_capital_adequacy_pct": latest.get("tier1_capital_adequacy_pct"),
         "capital_adequacy_pct": latest.get("capital_adequacy_pct"),
+        "capital_adequacy_basis": latest.get("capital_adequacy_basis"),
     }
     missing = []
     for field, label in (
