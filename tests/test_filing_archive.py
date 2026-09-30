@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 
 import pytest
@@ -102,3 +103,31 @@ async def test_filing_archive_preserves_changed_bytes_instead_of_overwriting(mon
     assert first == second
     pdfs = sorted(first.glob("*.pdf"))
     assert len(pdfs) == 2
+
+
+
+@pytest.mark.asyncio
+async def test_pdf_download_concurrent_requests_share_one_inflight_fetch(monkeypatch):
+    filing_archive._pdf_cache.clear()
+    filing_archive._pdf_inflight.clear()
+    calls = 0
+
+    async def fake_uncached(url):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.01)
+        return b"%PDF-1.4\nshared"
+
+    monkeypatch.setattr(
+        filing_archive,
+        "_download_pdf_uncached",
+        fake_uncached,
+    )
+    a, b, c = await asyncio.gather(
+        filing_archive._download_pdf("https://example.com/a.pdf"),
+        filing_archive._download_pdf("https://example.com/a.pdf"),
+        filing_archive._download_pdf("https://example.com/a.pdf"),
+    )
+
+    assert calls == 1
+    assert a == b == c == b"%PDF-1.4\nshared"
