@@ -110,3 +110,63 @@ def test_customer_concentration_activates_dependency_context_for_non_named_post(
     )
 
     assert [x.title for x in selected] == ["二供风险"]
+
+
+def test_technology_retrieval_drops_bank_and_commodity_noise():
+    entries = [
+        _entry(
+            "银行不良率",
+            "【原则】银行不良率可能低估债权投资风险。"
+            "【机制】企业债减值没有全部体现在贷款不良率中。",
+        ),
+        _entry(
+            "铜价关税",
+            "【原则】铜价上涨可能来自关税预期而非真实供需。"
+            "【机制】投机商囤积库存后遇到政策变化会集中抛售。",
+        ),
+        _entry(
+            "光模块公募抱团",
+            "【原则】电子通信和光模块被公募高度集中持有。"
+            "【机制】主动基金净流出时，新发科技ETF可能成为边际买家。",
+        ),
+    ]
+
+    selected = prefilter_knowledge_by_context(
+        entries,
+        "300308",
+        "中际旭创",
+        "通信设备",
+        archetype="technology",
+        fundamentals={
+            "facts": {
+                "overseas_revenue_pct": 94.8,
+                "top5_customer_pct": 75.9,
+            }
+        },
+    )
+
+    titles = [x.title for x in selected]
+    assert "光模块公募抱团" in titles
+    assert "银行不良率" not in titles
+    assert "铜价关税" not in titles
+
+
+def test_direct_stock_mention_survives_cross_industry_analogy():
+    entries = [
+        _entry(
+            "核心资产轮动",
+            "【原则】过去白酒抱团与现在中际旭创等科技核心资产都要警惕估值透支。"
+            "【机制】边际资金撤出后高估值核心资产可能经历估值压缩。",
+        )
+    ]
+
+    selected = prefilter_knowledge_by_context(
+        entries,
+        "300308",
+        "中际旭创",
+        "通信设备",
+        archetype="technology",
+        fundamentals={"facts": {}},
+    )
+
+    assert [x.title for x in selected] == ["核心资产轮动"]
