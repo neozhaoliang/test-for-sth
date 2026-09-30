@@ -270,8 +270,9 @@ def test_replay_accepts_research_input_only_snapshot(tmp_path, monkeypatch):
             ResearchReview(),
         )
 
-    monkeypatch.setattr(snapshot_replay, "_generate_summary", fake_generate_summary)
-    replayed = asyncio.run(snapshot_replay.replay_snapshot(path))
+    replayed = asyncio.run(
+        snapshot_replay.replay_snapshot(path, synthesis_fn=fake_generate_summary)
+    )
 
     assert replayed.stock_code == "600000"
     assert replayed.summary.stance == "neutral"
