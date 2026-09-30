@@ -43,8 +43,8 @@ def _build_kb_fund_flow_block(knowledge_excerpts: List[KnowledgeExcerpt]) -> str
     if not hits:
         return "(知识库中无相关的资金/风格/筹码记录)"
     lines = [
-        "知识库中该时期的资金与风格真实记录 (专栏/发帖摘要原文, 含来源与日期; "
-        "解释股价与户数联动、板块涨跌、风格切换时必须先引用这里的记录, 模板推断仅在其缺位时使用):"
+        "知识库中的资金与风格假设 (专栏/发帖摘要，含来源与日期；仅作为待核验机制，"
+        "必须与持股数量、主动/被动资金、股东户数、融资余额和指数风格交叉验证):"
     ]
     for e in hits[:10]:
         lines.append(f"  · [{e.source} {e.title[:50]}] {e.distilled[:400]}")
