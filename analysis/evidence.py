@@ -83,6 +83,7 @@ _FRESHNESS_DAYS: Dict[str, int] = {
     "policy_events": 7,
     "profitability": 220,
     "fundamentals": 220,
+    "bank_quality": 220,
     "rd_team": 550,
 }
 
