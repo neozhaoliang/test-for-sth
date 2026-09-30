@@ -129,12 +129,18 @@ def parse_financial_report_text(text: str) -> Dict:
         [
             "归属于上市公司股东的净利润",
             "归属于母公司所有者的净利润",
+            "归属于本行股东的净利润",
         ],
     )
     ocf = _first_number_after(text, ["经营活动产生的现金流量净额"])
     roe = _first_percent_after(
         text,
-        ["加权平均净资产收益率", "净资产收益率"],
+        [
+            "年化后归属于本行普通股股东的加权平均净资产收益率",
+            "归属于本行普通股股东的加权平均净资产收益率",
+            "加权平均净资产收益率",
+            "净资产收益率",
+        ],
     )
     total_assets = _first_number_after(
         text,
