@@ -11,6 +11,11 @@ from analysis.historical_corpus import (
 
 def _payloads():
     return {
+        "quote": {
+            "date": "2024-06-28",
+            "timestamp": "2024-06-28",
+            "latest_price": 34.19,
+        },
         "financials": {
             "latest_period": "2024-03-31",
             "latest_published_at": "2024-04-30",
@@ -30,15 +35,38 @@ def _payloads():
 def test_source_vintages_and_future_detection():
     payloads = _payloads()
     assert source_vintages(payloads) == {
+        "quote": "2024-06-28",
         "financials": "2024-04-30",
         "shareholder_count": "2024-04-30",
     }
     assert future_source_dates(payloads, date(2024, 6, 30)) == []
 
     payloads["financials"]["future"] = {"available_at": "2024-07-01"}
+    payloads["quote"]["date"] = "2024-07-02"
     assert future_source_dates(payloads, date(2024, 6, 30)) == [
-        "financials:2024-07-01"
+        "quote:2024-07-02",
+        "financials:2024-07-01",
     ]
+
+
+def test_future_unlock_date_is_not_future_knowledge_violation():
+    payloads = {
+        "ownership": {
+            "report_period": "2024-03-31",
+            "available_at": "2024-04-30",
+            "unlock_supply": {
+                "upcoming_12m": [
+                    {
+                        "date": "2025-01-15",
+                        "unlock_shares": 1_000_000,
+                    }
+                ]
+            },
+        }
+    }
+
+    assert future_source_dates(payloads, date(2024, 6, 30)) == []
+    assert source_vintages(payloads)["ownership"] == "2024-04-30"
 
 
 def test_save_and_verify_bundle(tmp_path):
@@ -58,6 +86,8 @@ def test_save_and_verify_bundle(tmp_path):
     assert result["checks"]["no_future_source_dates"]
 
     manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 2
+    assert "_v2_" in manifest["bundle_id"]
     assert manifest["bundle_type"] == "historical_public_sources"
     assert manifest["stock_code"] == "600036"
     assert manifest["as_of"] == "2024-06-30"
