@@ -75,6 +75,7 @@ jobs:
             tools/live_public_acceptance.py \
             tools/live_report_acceptance.py \
             tools/live_historical_acceptance.py \
+            tools/historical_corpus_cli.py \
             tools/snapshot_cli.py \
             web/app.py
 
