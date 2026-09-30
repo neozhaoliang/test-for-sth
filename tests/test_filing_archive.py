@@ -131,3 +131,32 @@ async def test_pdf_download_concurrent_requests_share_one_inflight_fetch(monkeyp
 
     assert calls == 1
     assert a == b == c == b"%PDF-1.4\nshared"
+
+
+
+@pytest.mark.asyncio
+async def test_pdf_page_text_concurrent_requests_share_one_parse(monkeypatch):
+    filing_archive._pdf_pages_cache.clear()
+    filing_archive._pdf_pages_inflight.clear()
+    calls = 0
+
+    async def fake_download(url):
+        return b"%PDF-1.4\nplaceholder"
+
+    def fake_extract(body):
+        nonlocal calls
+        calls += 1
+        return ["page one", "page two"]
+
+    monkeypatch.setattr(filing_archive, "_download_pdf", fake_download)
+    monkeypatch.setattr(filing_archive, "_extract_pdf_pages", fake_extract)
+
+    a, b, c = await asyncio.gather(
+        filing_archive._get_pdf_pages_text("https://example.com/report.pdf"),
+        filing_archive._get_pdf_pages_text("https://example.com/report.pdf"),
+        filing_archive._get_pdf_pages_text("https://example.com/report.pdf"),
+    )
+
+    assert calls == 1
+    assert a == b == c == ["page one", "page two"]
+    assert a is not b
