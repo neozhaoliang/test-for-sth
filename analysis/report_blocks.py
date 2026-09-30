@@ -809,6 +809,11 @@ def _build_fundamentals_block(fundamentals: Optional[Dict]) -> str:
             f"核心一级资本充足率 {_pct_str(facts.get('core_tier1_capital_adequacy_pct'))}；"
             f"一级资本充足率 {_pct_str(facts.get('tier1_capital_adequacy_pct'))}；"
             f"资本充足率 {_pct_str(facts.get('capital_adequacy_pct'))}"
+            + (
+                f"（{facts.get('capital_adequacy_basis')}）"
+                if facts.get("capital_adequacy_basis")
+                else ""
+            )
         )
     else:
         lines.append(
