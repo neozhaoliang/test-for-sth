@@ -95,6 +95,175 @@ def _scale_money(value: Optional[float], multiplier: float) -> Optional[float]:
     return value * multiplier if value is not None else None
 
 
+def _compact(text: str) -> str:
+    return re.sub(r"\s+", "", text or "")
+
+
+def _find_primary_metric_block(pages: List[str]) -> str:
+    for i, page in enumerate(pages):
+        compact = _compact(page)
+        if "主要会计数据和财务指标" in compact or "主要财务数据" in compact:
+            parts = [page]
+            if i + 1 < len(pages):
+                parts.append(pages[i + 1])
+            return _clean("\n".join(parts))
+    return ""
+
+
+def _find_balance_sheet_block(pages: List[str]) -> str:
+    for i, page in enumerate(pages):
+        if "合并资产负债表" in _compact(page):
+            parts = [page]
+            if i + 1 < len(pages):
+                parts.append(pages[i + 1])
+            if i + 2 < len(pages):
+                parts.append(pages[i + 2])
+            return _clean("\n".join(parts))
+    return ""
+
+
+def _segment_after_label(text: str, label: str, max_chars: int = 320) -> str:
+    compact = _compact(text)
+    idx = compact.find(_compact(label))
+    if idx < 0:
+        return ""
+    return compact[idx : idx + max_chars]
+
+
+def _numbers_in_segment(segment: str) -> List[float]:
+    out: List[float] = []
+    for raw in re.findall(r"[()\-—]?\d[\d,]*(?:\.\d+)?\)?", segment):
+        value = _num(raw)
+        if value is not None:
+            out.append(value)
+    return out
+
+
+def _money_metric_from_row(
+    text: str,
+    labels: List[str],
+    *,
+    prefer_ytd: bool,
+) -> Optional[float]:
+    for label in labels:
+        segment = _segment_after_label(text, label)
+        if not segment:
+            continue
+        values = _numbers_in_segment(segment)
+        if not values:
+            continue
+
+        # Filter out percentage-like cells. Listed-company revenue/profit/OCF values in a
+        # report's native monetary unit are normally orders of magnitude larger than the
+        # adjacent YoY percentage columns. Keep a fallback for very small values.
+        money_like = [v for v in values if abs(v) >= 1000]
+        candidates = money_like or values
+        if not candidates:
+            continue
+        return candidates[-1] if prefer_ytd and len(candidates) >= 2 else candidates[0]
+    return None
+
+
+def _roe_from_primary_block(text: str, *, prefer_ytd: bool) -> Optional[float]:
+    for label in (
+        "年化后归属于本行普通股股东的加权平均净资产收益率",
+        "归属于本行普通股股东的加权平均净资产收益率",
+        "加权平均净资产收益率",
+        "净资产收益率",
+    ):
+        segment = _segment_after_label(text, label)
+        if not segment:
+            continue
+        values = [v for v in _numbers_in_segment(segment) if -100 <= v <= 100]
+        if not values:
+            continue
+        if prefer_ytd and len(values) >= 3:
+            # Q3 tables are typically:
+            # current-quarter ROE, YoY change(pp), YTD ROE, YTD YoY change(pp)
+            return values[2]
+        return values[0]
+    return None
+
+
+def parse_financial_report_pages(pages: List[str]) -> Dict:
+    primary = _find_primary_metric_block(pages)
+    if not primary:
+        # Fallback preserves support for older/odd filings.
+        primary = _extract_relevant_text(pages)
+
+    compact_primary = _compact(primary)
+    prefer_ytd = (
+        "年初至报告期末" in compact_primary
+        and "本报告期" in compact_primary
+    )
+    monetary_multiplier, monetary_unit = _detect_monetary_unit(primary)
+
+    revenue = _money_metric_from_row(
+        primary,
+        ["营业收入"],
+        prefer_ytd=prefer_ytd,
+    )
+    net_profit = _money_metric_from_row(
+        primary,
+        [
+            "归属于上市公司股东的净利润",
+            "归属于母公司所有者的净利润",
+            "归属于本行股东的净利润",
+        ],
+        prefer_ytd=prefer_ytd,
+    )
+    ocf = _money_metric_from_row(
+        primary,
+        ["经营活动产生的现金流量净额"],
+        prefer_ytd=prefer_ytd,
+    )
+    roe = _roe_from_primary_block(primary, prefer_ytd=prefer_ytd)
+
+    balance = _find_balance_sheet_block(pages)
+    total_assets = _first_number_after(balance, ["资产总计", "总资产"]) if balance else None
+    total_liabilities = _first_number_after(balance, ["负债合计", "总负债"]) if balance else None
+
+    revenue = _scale_money(revenue, monetary_multiplier)
+    net_profit = _scale_money(net_profit, monetary_multiplier)
+    ocf = _scale_money(ocf, monetary_multiplier)
+
+    if balance:
+        balance_multiplier, _ = _detect_monetary_unit(balance)
+        total_assets = _scale_money(total_assets, balance_multiplier)
+        total_liabilities = _scale_money(total_liabilities, balance_multiplier)
+
+    net_margin = (
+        round(net_profit / revenue * 100, 3)
+        if revenue not in (None, 0) and net_profit is not None
+        else None
+    )
+    debt_ratio = (
+        round(total_liabilities / total_assets * 100, 3)
+        if total_assets not in (None, 0) and total_liabilities is not None
+        else None
+    )
+    cash_to_profit = (
+        round(ocf / net_profit, 3)
+        if net_profit not in (None, 0) and ocf is not None
+        else None
+    )
+
+    return {
+        "revenue": revenue,
+        "net_profit": net_profit,
+        "operating_cash_flow": ocf,
+        "roe_pct": roe,
+        "net_margin_pct": net_margin,
+        "total_assets": total_assets,
+        "total_liabilities": total_liabilities,
+        "debt_ratio_pct": debt_ratio,
+        "cash_to_profit_ratio": cash_to_profit,
+        "monetary_unit": monetary_unit,
+        "monetary_multiplier": monetary_multiplier,
+        "basis": "ytd" if prefer_ytd else "period",
+    }
+
+
 def _first_number_after(text: str, labels: List[str]) -> Optional[float]:
     for label in labels:
         # Keep the match local to one logical line / short PDF-text run so we do not jump
@@ -246,13 +415,12 @@ async def _fetch_and_parse(item: Dict) -> Optional[Dict]:
     if not pages:
         return None
     try:
-        text = await asyncio.wait_for(
-            asyncio.to_thread(_extract_relevant_text, pages),
+        metrics = await asyncio.wait_for(
+            asyncio.to_thread(parse_financial_report_pages, pages),
             timeout=_PARSE_TIMEOUT_S,
         )
     except Exception:
         return None
-    metrics = parse_financial_report_text(text)
     if not any(v is not None for v in metrics.values()):
         return None
     return {
