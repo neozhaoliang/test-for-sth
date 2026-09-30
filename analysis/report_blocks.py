@@ -47,7 +47,8 @@ def _build_kb_fund_flow_block(knowledge_excerpts: List[KnowledgeExcerpt]) -> str
         "必须与持股数量、主动/被动资金、股东户数、融资余额和指数风格交叉验证):"
     ]
     for e in hits[:10]:
-        lines.append(f"  · [{e.source} {e.title[:50]}] {e.distilled[:400]}")
+        who = e.author or e.source
+        lines.append(f"  · [{who} {e.title[:50]}] {e.distilled[:400]}")
     return "\n".join(lines)
 
 
@@ -1024,7 +1025,8 @@ def _build_knowledge_block(knowledge_excerpts: List[KnowledgeExcerpt]) -> str:
     lines = []
     for k in knowledge_excerpts:
         link = f" | {k.source_url}" if k.source_url else ""
-        lines.append(f"- 《{k.title}》 ({k.source}){link}")
+        who = k.author or k.source
+        lines.append(f"- 《{k.title}》 ({who}; {k.source}){link}")
         lines.append(f"    {k.distilled}")
     if not lines:
         lines.append("(暂无背景资料)")
