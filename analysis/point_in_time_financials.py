@@ -256,7 +256,7 @@ def _bank_percent_metric_from_pages(
                 )
                 values = [
                     v for v in _numbers_in_segment(segment)
-                    if -100 <= v <= 100
+                    if -1000 <= v <= 1000
                 ]
                 if values:
                     return values[0]
