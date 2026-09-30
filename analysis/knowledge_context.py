@@ -31,7 +31,7 @@ _ISSUE_RULES: Dict[str, Dict[str, object]] = {
     "moat_control": {
         "label": "技术护城河与路线控制权",
         "patterns": (
-            r"护城河|研发|专利|技术路线|标准|架构|代工|组装|工程化|良率|认证|供应商|客户指定|英伟达|NVIDIA|CPO|NPO|LPO|硅光|光模块",
+            r"护城河|核心IP|知识产权|发明专利|技术路线|标准制定|底层架构|代工|组装|工程化|良率|客户认证|客户指定|英伟达|NVIDIA|CPO|NPO|LPO|硅光|光模块",
         ),
         "questions": (
             "公司掌握的是底层IP/标准制定权，还是工程化、量产与客户认证能力？",
@@ -43,7 +43,7 @@ _ISSUE_RULES: Dict[str, Dict[str, object]] = {
     "customer_dependency": {
         "label": "大客户依赖与议价权",
         "patterns": (
-            r"大客户|客户集中|单一客户|供应商|议价权|订单|认证|二供|多供|供应链|饭碗|依赖",
+            r"大客户|核心客户|客户集中|单一客户|第一大客户|二供|第二供应商|多供|议价权|客户.{0,8}扶持|客户.{0,8}指定|供应商.{0,8}替代|为美国做配套|饭碗.{0,6}别人",
         ),
         "questions": (
             "前五大/第一大客户占比是多少，且过去数年是在上升还是下降？",
@@ -54,7 +54,9 @@ _ISSUE_RULES: Dict[str, Dict[str, object]] = {
     "demand_financing": {
         "label": "终端需求质量与融资来源",
         "patterns": (
-            r"资本开支|Capex|算力|AI|数据中心|基础设施|企业债|公司债|发债|债务融资|私募信贷|SPV|自由现金流|寒冬|泡沫",
+            r"资本开支|Capex|企业债|公司债|发债|债务融资|私募信贷|SPV|自由现金流|"
+            r"(AI|算力|大模型|数据中心).{0,16}(融资|烧钱|资本|投入|开支|债)|"
+            r"(融资|烧钱|资本|投入|开支|债).{0,16}(AI|算力|大模型|数据中心)|AI寒冬",
         ),
         "questions": (
             "下游资本开支由自由现金流还是新增债务/表外融资支撑？",
@@ -98,7 +100,9 @@ _ISSUE_RULES: Dict[str, Dict[str, object]] = {
     "policy_geopolitics": {
         "label": "政策、海外与地缘依赖",
         "patterns": (
-            r"美国|海外|出口|关税|制裁|地缘|政策|人民币|美元|汇率|国产替代|出口管制",
+            r"海外收入|外需|出口|关税|制裁|地缘|人民币|汇率|国产替代|出口管制|"
+            r"美国.{0,12}(政策|限制|客户|市场|资本开支|AI)|"
+            r"(政策|限制|客户|市场|资本开支|AI).{0,12}美国",
         ),
         "questions": (
             "海外收入和单一区域收入占比是多少？",
@@ -130,6 +134,57 @@ def _sections(text: str) -> Dict[str, str]:
                 label = "主张"
             out[label] = value
     return out
+
+
+_TECH_DOMAIN_RE = re.compile(
+    r"科技|电子|通信|半导体|光模块|光通信|算力|AI|人工智能|大模型|英伟达|NVIDIA|"
+    r"GPU|数据中心|服务器|交换机|CPO|NPO|LPO|硅光|科创|机器人|芯片",
+    re.I,
+)
+
+_TECH_MISMATCH_RE = re.compile(
+    r"银行|不良率|拨备|贷款类资产|白酒|餐饮|养殖|猪价|铜价|煤价|原油|油价|水泥|"
+    r"房地产|地产销售|航运运价",
+    re.I,
+)
+
+_DOMAIN_BOUND_TOPICS = {
+    "moat_control",
+    "customer_dependency",
+    "demand_financing",
+    "policy_geopolitics",
+}
+
+
+def _domain_anchor(text: str, archetype: str, industry_name: Optional[str]) -> bool:
+    industry = str(industry_name or "").strip()
+    if industry and industry in text:
+        return True
+    if archetype == "technology":
+        return bool(_TECH_DOMAIN_RE.search(text))
+    return False
+
+
+def _contextual_tags(
+    text: str,
+    *,
+    direct: bool,
+    archetype: str,
+    industry_name: Optional[str],
+    active: Set[str],
+) -> List[str]:
+    tags = [x for x in _tags(text) if x in active]
+    if archetype == "technology" and not direct and not _domain_anchor(text, archetype, industry_name):
+        tags = [x for x in tags if x not in _DOMAIN_BOUND_TOPICS]
+    return tags
+
+
+def _domain_mismatch(text: str, *, archetype: str, direct: bool) -> bool:
+    if direct:
+        return False
+    if archetype == "technology":
+        return bool(_TECH_MISMATCH_RE.search(text)) and not bool(_TECH_DOMAIN_RE.search(text))
+    return False
 
 
 def _tags(text: str) -> List[str]:
@@ -208,11 +263,22 @@ def prefilter_knowledge_by_context(
     for idx, entry in enumerate(excerpts):
         text = f"{entry.title}\n{entry.distilled}"
         direct = any(term in text for term in terms)
-        item_tags = set(_tags(text))
-        overlap = item_tags.intersection(active)
+        if _domain_mismatch(text, archetype=archetype, direct=direct):
+            continue
+        overlap = set(
+            _contextual_tags(
+                text,
+                direct=direct,
+                archetype=archetype,
+                industry_name=industry_name,
+                active=active,
+            )
+        )
         if not direct and not overlap:
             continue
-        score = (10 if direct else 0) + min(9, len(overlap) * 3)
+        score = (20 if direct else 0) + min(12, len(overlap) * 3)
+        if _domain_anchor(text, archetype, industry_name):
+            score += 5
         if "【机制】" in entry.distilled:
             score += 1
         if "【适用条件】" in entry.distilled:
@@ -249,7 +315,19 @@ def build_knowledge_hypotheses(
     for entry in selected:
         parsed = _sections(entry.distilled)
         text = f"{entry.title}\n{entry.distilled}"
-        tags = [x for x in _tags(text) if x in active]
+        direct_terms = [
+            str(x or "").strip()
+            for x in (stock_code, stock_name, industry_name or "")
+            if len(str(x or "").strip()) >= 2
+        ]
+        direct = any(term in text for term in direct_terms)
+        tags = _contextual_tags(
+            text,
+            direct=direct,
+            archetype=archetype,
+            industry_name=industry_name,
+            active=active,
+        )
         if not tags:
             continue
         fingerprint = (parsed.get("主张") or entry.distilled[:240]).strip()
