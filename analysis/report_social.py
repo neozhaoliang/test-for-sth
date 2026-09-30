@@ -126,6 +126,50 @@ async def load_knowledge_excerpts(
     return out
 
 
+_MAX_HISTORICAL_KNOWLEDGE = 80
+
+
+def _filter_historical_knowledge_deterministic(
+    knowledge_excerpts: List[KnowledgeExcerpt],
+    stock_code: str,
+    stock_name: str,
+    industry_name: Optional[str],
+) -> List[KnowledgeExcerpt]:
+    """
+    Reproducible, model-free relevance guard for Historical mode.
+
+    Entries are already sorted newest-first and as-of filtered. Keep exact company/industry
+    mentions first, then fill the remaining budget with the newest general methodology/
+    market-context entries. This avoids a pre-synthesis LLM call while preventing an
+    unbounded knowledge dump from dominating the final synthesis prompt.
+    """
+    terms: List[str] = []
+    for raw in (stock_code, stock_name, industry_name or ""):
+        term = str(raw or "").strip()
+        if len(term) >= 2 and term not in terms:
+            terms.append(term)
+
+    priority: List[KnowledgeExcerpt] = []
+    generic: List[KnowledgeExcerpt] = []
+    for entry in knowledge_excerpts:
+        haystack = f"{entry.title}\n{entry.distilled}"
+        if any(term in haystack for term in terms):
+            priority.append(entry)
+        else:
+            generic.append(entry)
+
+    selected = (priority + generic)[:_MAX_HISTORICAL_KNOWLEDGE]
+    if len(selected) < len(knowledge_excerpts):
+        logger.info(
+            "[analysis.report_social] historical knowledge deterministic cap: "
+            "%s -> %s (%s)",
+            len(knowledge_excerpts),
+            len(selected),
+            stock_code,
+        )
+    return selected
+
+
 _RELEVANCE_FILTER_PROMPT = """以下是知识库中若干条投资观点摘要的编号、标题和摘要开头片段。
 请判断哪些条目与当前正在分析的股票"{stock_name}"({stock_code})可能相关——包括直接点名该股票、
 点名其所属行业({industry_name})、或讨论了适用于该股票的通用宏观/周期/估值方法论观点。
@@ -152,12 +196,15 @@ async def filter_relevant_knowledge(
         return knowledge_excerpts
 
     # Historical research inputs must be reproducible independently of whichever model is
-    # configured today. The entries have already been strictly truncated by publication
-    # time in load_knowledge_excerpts(as_of=...). Keep that frozen set and let the final
-    # synthesis model decide which items are relevant. Live mode may still use the LLM
-    # relevance filter to reduce prompt size.
+    # configured today. Entries have already been strictly truncated by publication time.
+    # Apply only deterministic company/industry pinning plus a fixed newest-first cap.
     if not use_llm:
-        return knowledge_excerpts
+        return _filter_historical_knowledge_deterministic(
+            knowledge_excerpts,
+            stock_code,
+            stock_name,
+            industry_name,
+        )
 
     items_block = "\n".join(
         f"[{i}] {e.title}: {e.distilled}"
