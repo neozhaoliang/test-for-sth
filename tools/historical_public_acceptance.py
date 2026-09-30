@@ -222,6 +222,19 @@ async def _one_case(code: str, as_of: date, label: str) -> Dict:
     latest_metrics = (pit_financials or {}).get("latest") or {}
     latest_shareholder_count = (shareholder or {}).get("latest_count")
 
+    if latest_financial_published:
+        try:
+            published_date = date.fromisoformat(str(latest_financial_published)[:10])
+            if published_date > as_of:
+                failures.append(
+                    "latest filing published after cutoff: "
+                    f"{published_date.isoformat()} > {as_of.isoformat()}"
+                )
+        except ValueError:
+            failures.append(
+                f"latest filing published_at is invalid: {latest_financial_published}"
+            )
+
     if pit_financials and (
         latest_metrics.get("revenue") is None
         or latest_metrics.get("net_profit") is None
@@ -261,6 +274,7 @@ async def _one_case(code: str, as_of: date, label: str) -> Dict:
         "latest_financial_period": latest_financial_period,
         "latest_financial_published_at": latest_financial_published,
         "latest_financial_metrics": {
+            "basis": latest_metrics.get("basis"),
             "revenue": latest_metrics.get("revenue"),
             "net_profit": latest_metrics.get("net_profit"),
             "operating_cash_flow": latest_metrics.get("operating_cash_flow"),
