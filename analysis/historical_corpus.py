@@ -21,8 +21,55 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-_SCHEMA_VERSION = 1
-_TIME_FIELDS = {"available_at", "published_at"}
+_SCHEMA_VERSION = 2
+
+# Date keys are source-aware on purpose. Generic "date" cannot be scanned globally because
+# ownership payloads may legitimately contain future unlock dates already known at the
+# cutoff. Those are future events, not future knowledge.
+_DEFAULT_TIME_FIELDS = {
+    "available_at",
+    "published_at",
+    "latest_published_at",
+}
+_SOURCE_TIME_FIELDS = {
+    "quote": {"date", "timestamp"},
+    "valuation_history": {"as_of", "date"},
+    "market_context": {
+        "latest_date",
+        "w52_high_date",
+        "w52_low_date",
+        "hist_high_date",
+        "hist_low_date",
+        "hist_start",
+    },
+    "margin": {"as_of", "latest_date", "date"},
+    "macro_rates": {"as_of", "date"},
+    "primary_evidence": {"published_at"},
+    "filing_calendar": {"period", "published_at"},
+    "financials": {
+        "period",
+        "published_at",
+        "latest_period",
+        "latest_published_at",
+    },
+    "fundamentals": {"available_at", "finance_period"},
+    "profitability": {"as_of", "available_at", "period", "published_at"},
+    # Do not include generic "date": unlock_supply may contain known future unlock dates.
+    "ownership": {
+        "report_period",
+        "previous_report_period",
+        "available_at",
+        "published_at",
+    },
+    "shareholder_count": {
+        "as_of",
+        "period",
+        "published_at",
+        "available_at",
+    },
+    "dividends": {"announce_date", "available_at", "published_at"},
+    "buybacks": {"announce_date", "available_at", "published_at"},
+}
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -47,16 +94,20 @@ def _write_json(path: Path, value: Any) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _collect_dates(value: Any) -> List[date]:
+def _time_fields_for_source(name: str) -> set[str]:
+    return _DEFAULT_TIME_FIELDS | _SOURCE_TIME_FIELDS.get(name, set())
+
+
+def _collect_dates(value: Any, *, fields: set[str]) -> List[date]:
     dates: List[date] = []
 
     def walk(obj: Any) -> None:
         if isinstance(obj, dict):
             for key, child in obj.items():
-                if key in _TIME_FIELDS and child:
+                if key in fields and child:
                     try:
                         dates.append(date.fromisoformat(str(child)[:10]))
-                    except ValueError:
+                    except (TypeError, ValueError):
                         pass
                 walk(child)
         elif isinstance(obj, list):
@@ -68,20 +119,37 @@ def _collect_dates(value: Any) -> List[date]:
 
 
 def source_vintages(payloads: Dict[str, Any]) -> Dict[str, str]:
-    """Newest published/available date observable inside each source payload."""
+    """
+    Newest audited observation/publication date inside each source payload.
+
+    This is source-aware rather than a blind scan so scheduled future events (for example
+    a disclosed unlock date) do not masquerade as the data vintage.
+    """
     out: Dict[str, str] = {}
     for name, value in payloads.items():
-        dates = _collect_dates(value)
+        dates = _collect_dates(
+            value,
+            fields=_time_fields_for_source(name),
+        )
         if dates:
             out[name] = max(dates).isoformat()
     return out
 
 
 def future_source_dates(payloads: Dict[str, Any], as_of: date) -> List[str]:
-    """Return source-level future-date violations for acceptance assertions."""
+    """
+    Return source-level future-observation/future-knowledge violations.
+
+    Known future event dates intentionally are not audited unless that source defines the
+    date field as an observation/publication timestamp.
+    """
     violations: List[str] = []
     for name, value in payloads.items():
-        future = [d for d in _collect_dates(value) if d > as_of]
+        dates = _collect_dates(
+            value,
+            fields=_time_fields_for_source(name),
+        )
+        future = [d for d in dates if d > as_of]
         if future:
             violations.append(f"{name}:{max(future).isoformat()}")
     return violations
@@ -108,7 +176,9 @@ def save_historical_source_bundle(
     """
     root = Path(root)
     source_hash = _semantic_sha256(payloads)
-    bundle_id = f"{stock_code}_{as_of.isoformat()}_{source_hash[:12]}"
+    bundle_id = (
+        f"{stock_code}_{as_of.isoformat()}_v{_SCHEMA_VERSION}_{source_hash[:12]}"
+    )
     target = root / stock_code / as_of.isoformat() / bundle_id
     sources_path = target / "sources.json"
     diagnostics_path = target / "diagnostics.json"
