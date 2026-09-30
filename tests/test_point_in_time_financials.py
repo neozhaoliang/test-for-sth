@@ -96,3 +96,21 @@ def test_latest_period_freshness_rejects_obviously_stale_calendar():
     assert _latest_period_is_fresh_enough("2022-12-31", cutoff)
     assert not _latest_period_is_fresh_enough("2019-12-31", cutoff)
     assert not _latest_period_is_fresh_enough("2024-03-31", cutoff)
+
+
+
+def test_parse_bank_specific_financial_labels():
+    text = """
+    本集团主要会计数据及财务指标
+    营业收入 86,417
+    归属于本行股东的净利润 38,077
+    年化后归属于本行普通股股东的加权平均净资产收益率(%) 16.08
+    经营活动产生的现金流量净额 (1,208)
+    总资产 11,520,226
+    """
+    out = parse_financial_report_text(text)
+
+    assert out["revenue"] == 86417
+    assert out["net_profit"] == 38077
+    assert out["operating_cash_flow"] == -1208
+    assert out["roe_pct"] == 16.08
