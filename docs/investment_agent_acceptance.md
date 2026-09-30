@@ -403,3 +403,32 @@ GitHub Actions 的 `historical-public-data` matrix 已会把这些 source corpus
 ### 仍未完成的唯一关键验收
 
 完整 LLM Historical E2E 仍取决于仓库 Actions 是否配置 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`。未配置时 job 会明确写入 skipped marker；不能把 workflow success 当成 LLM 报告已经跑通。
+
+
+---
+
+## 8. 无 LLM 的 Historical research-input E2E
+
+为了把“公网数据层通过”和“完整 LLM 报告通过”之间的空档进一步缩小，现在增加：
+
+```bash
+python tools/historical_research_input_acceptance.py \
+  600036@2024-06-30 \
+  --snapshot-root artifacts/research_input_snapshots \
+  --output artifacts/historical-research-inputs.json
+```
+
+这条链路会运行与 `generate_report()` 相同的 Historical 数据采集、证据账本、research profile 和最终 report packaging，只把最后的 LLM synthesis 替换为确定性中性占位符用于通过结构校验。占位结论**不会写入 snapshot**。
+
+保存的是 `snapshot_kind=research_inputs_only`：
+
+- `request.json`
+- `research_inputs.json`
+- `evidence.json`
+- `manifest.json`
+
+没有 `report.json`，也没有 stance、维度评分或 LLM 结论。以后配置真实模型后，可以直接对这个 snapshot 运行 `snapshot_cli.py replay`，从同一份冻结历史输入生成结论。
+
+Historical 模式下知识库也已经改成模型无关：只读取内容哈希匹配的既有蒸馏缓存，再按发布时间 `<= as_of` 截断；不会为了生成历史输入而用今天的模型重新蒸馏旧原文，也不会用 LLM 做 pre-synthesis 相关性筛选。
+
+GitHub Actions 现在额外运行一个 `Historical research-input E2E (no LLM)` job（当前先用招商银行 600036 @ 2024-06-30 作为代表案例）并上传可重放 input snapshot。
