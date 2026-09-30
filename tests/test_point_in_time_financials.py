@@ -115,6 +115,15 @@ def test_parse_bank_specific_financial_labels():
     assert out["revenue"] == 86_417_000_000
     assert out["net_profit"] == 38_077_000_000
     assert out["operating_cash_flow"] == -1_208_000_000
+    assert out["financial_subtype"] == "bank"
+    assert out["industry_hint"] == "银行"
+    assert out["net_interest_margin_pct"] == 2.02
+    assert out["npl_ratio_pct"] == 0.92
+    assert out["provision_coverage_pct"] == 436.82
+    assert out["loan_provision_ratio_pct"] == 4.02
+    assert out["core_tier1_capital_adequacy_pct"] == 13.50
+    assert out["tier1_capital_adequacy_pct"] == 16.16
+    assert out["capital_adequacy_pct"] == 18.24
     assert out["total_assets"] == 11_520_226_000_000
     assert out["roe_pct"] == 16.08
     assert out["monetary_multiplier"] == 1_000_000
@@ -188,6 +197,13 @@ def test_bank_q1_parser_ignores_metric_footnotes_but_keeps_negative_cashflow():
         归属于本行股东的净利润 38,077 38,839 -1.96
         年化后归属于本行普通股股东的加权平均净资产收益率(%)(1)
         16.08 18.43 下降2.35个百分点
+        净利息收益率(%) 2.02 2.29 下降0.27个百分点
+        不良贷款率(%) 0.92 0.95 下降0.03个百分点
+        拨备覆盖率(%) 436.82 437.70 下降0.88个百分点
+        贷款拨备率(%) 4.02 4.16 下降0.14个百分点
+        核心一级资本充足率(%) 13.50 13.73
+        一级资本充足率(%) 16.16 16.27
+        资本充足率(%) 18.24 18.30
         经营活动产生的现金流量净额(2) (1,208) (12,618) 90.43
         """,
         """
