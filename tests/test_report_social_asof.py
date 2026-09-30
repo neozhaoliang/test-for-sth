@@ -1,7 +1,9 @@
+import asyncio
 from datetime import date
 from types import SimpleNamespace
 
 from analysis import report_social
+from model.m_analysis import KnowledgeExcerpt
 
 
 class StockScore:
@@ -73,3 +75,25 @@ def test_historical_candidate_context_never_populates_live_social(monkeypatch):
     assert len(rows) == 1
     assert rows[0].latest_posts == []
     assert rows[0].historical_thesis == ["历史观点"]
+
+
+def test_historical_knowledge_filter_is_model_independent():
+    rows = [
+        KnowledgeExcerpt(
+            source="test",
+            title="2024-05-01 历史观点",
+            distilled="关于估值与资金风格的历史记录",
+            source_url="https://example.test/1",
+            published_at="2024-05-01 10:00:00",
+        )
+    ]
+    out = asyncio.run(
+        report_social.filter_relevant_knowledge(
+            rows,
+            "600000",
+            "测试股份",
+            "银行",
+            use_llm=False,
+        )
+    )
+    assert out == rows
