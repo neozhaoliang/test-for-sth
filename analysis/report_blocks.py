@@ -210,9 +210,15 @@ def _build_management_capital_block(data: Optional[Dict]) -> str:
         if not row:
             continue
         amount_total = row.get("cash_dividend_per_10_total")
-        known_amounts = int(row.get("cash_dividend_amount_records") or 0)
         dividend_records = int(row.get("dividend_records") or 0)
-        amount_complete = bool(row.get("cash_dividend_amount_complete"))
+        if "cash_dividend_amount_complete" in row:
+            amount_complete = bool(row.get("cash_dividend_amount_complete"))
+            known_amounts = int(row.get("cash_dividend_amount_records") or 0)
+        else:
+            # Backward compatibility for snapshots created before amount-coverage metadata
+            # existed: an explicit aggregate amount was historically treated as complete.
+            amount_complete = amount_total is not None
+            known_amounts = dividend_records if amount_complete else 0
         if dividend_records == 0:
             dividend_amount_text = "未见已实施现金分红记录"
         elif amount_total is None:
@@ -339,22 +345,35 @@ def _build_dividend_chart(
         y = str(d.get("announce_date", ""))[:4]
         if not y.isdigit():
             continue
-        g = by_year.setdefault(y, {"year": y, "div_per_10": 0.0, "buyback_per_10": 0.0})
         try:
-            g["div_per_10"] += float(d.get("dividend_per_10_shares") or 0)
+            amount = float(d.get("dividend_per_10_shares"))
         except (TypeError, ValueError):
-            pass
+            # Unknown is not zero. Historical announcement metadata frequently proves a
+            # dividend happened without carrying the per-10-share amount in the title.
+            continue
+        if amount != amount:
+            continue
+        g = by_year.setdefault(
+            y,
+            {"year": y, "div_per_10": 0.0, "buyback_per_10": 0.0},
+        )
+        g["div_per_10"] += amount
     for b in buyback_history or []:
         y = str(b.get("announce_date", ""))[:4]
         if not y.isdigit():
             continue
         g = by_year.setdefault(y, {"year": y, "div_per_10": 0.0, "buyback_per_10": 0.0})
         try:
-            amount = float(b.get("actual_amount") or 0)
+            amount = float(b.get("actual_amount"))
         except (TypeError, ValueError):
             continue
-        if total_shares:
-            g["buyback_per_10"] += amount / total_shares * 10
+        if amount != amount or amount <= 0 or not total_shares:
+            continue
+        g = by_year.setdefault(
+            y,
+            {"year": y, "div_per_10": 0.0, "buyback_per_10": 0.0},
+        )
+        g["buyback_per_10"] += amount / total_shares * 10
     if not by_year:
         return None
     out = []
@@ -492,8 +511,14 @@ def _build_shareholder_block(
     if dividend_history:
         lines.append("历史分红记录:")
         for d in dividend_history[:12]:
+            amount = d.get("dividend_per_10_shares")
+            amount_text = (
+                f"每10股派息 {amount} 元"
+                if amount is not None
+                else "每10股派息金额暂缺"
+            )
             lines.append(
-                f"  · {d.get('announce_date')}: 每10股派息 {d.get('dividend_per_10_shares')} 元 ({d.get('progress')})"
+                f"  · {d.get('announce_date')}: {amount_text} ({d.get('progress')})"
             )
     else:
         lines.append("历史分红记录: 暂缺")
