@@ -223,11 +223,24 @@ async def filter_relevant_knowledge(
         prefetched = knowledge_excerpts[:160 if use_llm else _MAX_HISTORICAL_KNOWLEDGE]
 
     # Historical research inputs must be reproducible independently of whichever model is
-    # configured today. Entries have already been strictly truncated by publication time.
-    # Apply only deterministic company/industry pinning plus a fixed newest-first cap.
+    # configured today. Causal-theme hits go first, but we keep the old broad-background
+    # contract by filling the remaining budget with the newest as-of-safe entries.
     if not use_llm:
+        def _knowledge_key(entry: KnowledgeExcerpt):
+            return (
+                entry.source,
+                entry.title,
+                entry.published_at,
+                entry.distilled,
+            )
+
+        seen = {_knowledge_key(x) for x in prefetched}
+        ordered = prefetched + [
+            x for x in knowledge_excerpts
+            if _knowledge_key(x) not in seen
+        ]
         return _filter_historical_knowledge_deterministic(
-            prefetched,
+            ordered,
             stock_code,
             stock_name,
             industry_name,
