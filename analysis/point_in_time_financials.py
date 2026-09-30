@@ -662,6 +662,7 @@ def to_historical_fundamentals(data: Optional[Dict]) -> Optional[Dict]:
         "net_profit": latest.get("net_profit"),
         "operating_cash_flow": latest.get("operating_cash_flow"),
         "cash_to_profit_ratio": latest.get("cash_to_profit_ratio"),
+        "roe_pct": latest.get("roe_pct"),
         # Historical PDF parser intentionally does not pretend to know fields it did not
         # extract from the exact filing version.
         "rd_investment_yuan": None,
