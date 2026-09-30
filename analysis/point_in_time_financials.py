@@ -59,6 +59,42 @@ def _num(text: str) -> Optional[float]:
     return -value if neg else value
 
 
+def _detect_monetary_unit(text: str) -> tuple[float, str]:
+    """
+    Detect the primary monetary unit used by the main financial-indicator table.
+
+    Values returned by this module are normalized to yuan.  We inspect a local window around
+    the main-accounting-data heading / revenue row so later per-share "(人民币元)" labels do
+    not override a table-level "人民币百万元" declaration.
+    """
+    anchors = [
+        i for i in (
+            text.find("主要会计数据"),
+            text.find("主要财务数据"),
+            text.find("营业收入"),
+        )
+        if i >= 0
+    ]
+    anchor = min(anchors) if anchors else 0
+    window = text[max(0, anchor - 500): anchor + 1800]
+    compact = re.sub(r"\s+", "", window)
+
+    patterns = (
+        (r"人民币百万元|单位[:：]?百万元", 1_000_000.0, "元(原表:百万元)"),
+        (r"人民币万元|单位[:：]?万元", 10_000.0, "元(原表:万元)"),
+        (r"人民币千元|单位[:：]?千元", 1_000.0, "元(原表:千元)"),
+        (r"单位[:：]?元", 1.0, "元"),
+    )
+    for pattern, multiplier, label in patterns:
+        if re.search(pattern, compact):
+            return multiplier, label
+    return 1.0, "元(单位未明确，按原值)"
+
+
+def _scale_money(value: Optional[float], multiplier: float) -> Optional[float]:
+    return value * multiplier if value is not None else None
+
+
 def _first_number_after(text: str, labels: List[str]) -> Optional[float]:
     for label in labels:
         # Keep the match local to one logical line / short PDF-text run so we do not jump
@@ -136,6 +172,7 @@ def _latest_period_is_fresh_enough(period: str, as_of: date) -> bool:
 
 def parse_financial_report_text(text: str) -> Dict:
     text = _clean(text)
+    monetary_multiplier, monetary_unit = _detect_monetary_unit(text)
     revenue = _first_number_after(text, ["营业收入"])
     net_profit = _first_number_after(
         text,
@@ -164,6 +201,12 @@ def parse_financial_report_text(text: str) -> Dict:
         ["负债合计", "总负债"],
     )
 
+    revenue = _scale_money(revenue, monetary_multiplier)
+    net_profit = _scale_money(net_profit, monetary_multiplier)
+    ocf = _scale_money(ocf, monetary_multiplier)
+    total_assets = _scale_money(total_assets, monetary_multiplier)
+    total_liabilities = _scale_money(total_liabilities, monetary_multiplier)
+
     net_margin = (
         round(net_profit / revenue * 100, 3)
         if revenue not in (None, 0) and net_profit is not None
@@ -190,6 +233,8 @@ def parse_financial_report_text(text: str) -> Dict:
         "total_liabilities": total_liabilities,
         "debt_ratio_pct": debt_ratio,
         "cash_to_profit_ratio": cash_to_profit,
+        "monetary_unit": monetary_unit,
+        "monetary_multiplier": monetary_multiplier,
     }
 
 
