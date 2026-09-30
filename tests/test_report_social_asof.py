@@ -97,3 +97,38 @@ def test_historical_knowledge_filter_is_model_independent():
         )
     )
     assert out == rows
+
+
+def test_historical_knowledge_filter_is_bounded_and_pins_direct_mentions():
+    rows = [
+        KnowledgeExcerpt(
+            source="test",
+            title=f"通用观点{i}",
+            distilled="市场方法论",
+            source_url=f"https://example.test/{i}",
+            published_at="2024-06-01 10:00:00",
+        )
+        for i in range(100)
+    ]
+    direct = KnowledgeExcerpt(
+        source="test",
+        title="更早的招商银行专题",
+        distilled="招商银行的历史观点",
+        source_url="https://example.test/direct",
+        published_at="2020-01-01 10:00:00",
+    )
+    rows.append(direct)
+
+    out = asyncio.run(
+        report_social.filter_relevant_knowledge(
+            rows,
+            "600036",
+            "招商银行",
+            None,
+            use_llm=False,
+        )
+    )
+
+    assert len(out) == report_social._MAX_HISTORICAL_KNOWLEDGE
+    assert out[0] == direct
+    assert direct in out
