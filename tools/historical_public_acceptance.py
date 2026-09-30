@@ -62,6 +62,10 @@ _CASE_EXPECTATIONS = {
     },
     ("600519", "2022-12-30"): {
         "latest_financial_period": "2022-09-30",
+        "latest_shareholder_count": 145_225,
+        "revenue": 87_160_232_759.05,
+        "net_profit": 44_399_815_583.54,
+        "roe_pct": 21.91,
     },
 }
 
