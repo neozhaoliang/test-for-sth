@@ -116,6 +116,18 @@ class AnalysisReport(BaseModel):
     rd_team: Optional[dict] = Field(
         default=None, description="巨潮最新年报中的研发人员数量、占比与学历/年龄结构"
     )
+    major_events: List[dict] = Field(
+        default_factory=list, description="进入综合分析的重大事项输入；snapshot replay 必须原样保留"
+    )
+    refinancing_history: List[dict] = Field(
+        default_factory=list, description="进入综合分析的再融资历史输入；snapshot replay 必须原样保留"
+    )
+    executive_profile: Optional[dict] = Field(
+        default=None, description="进入综合分析的高管画像输入；snapshot replay 必须原样保留"
+    )
+    governance_alerts: List[dict] = Field(
+        default_factory=list, description="进入综合分析的治理负面记录输入；snapshot replay 必须原样保留"
+    )
     xueqiu_stock: Optional[dict] = Field(default=None, description="雪球个股维度 (机构持仓/讨论热度，仅聚合数字)")
     a_share_structure: Optional[dict] = Field(
         default=None, description="A股公开机构持股、前十大流通股东与特殊资金类型"
