@@ -36,6 +36,13 @@ _REPORT_CATEGORIES = {
     "q3": "category_sjdbg_szsh",
 }
 
+_AKSHARE_REPORT_CATEGORIES = {
+    "annual": "年报",
+    "semiannual": "半年报",
+    "q1": "一季报",
+    "q3": "三季报",
+}
+
 _REPORT_PAGE_SIZE = 30
 _CONCURRENCY = 4
 _CALENDAR_CACHE_MAX_ENTRIES = 32
@@ -92,7 +99,7 @@ async def _fetch_type(
     start: date,
     end: date,
     semaphore: asyncio.Semaphore,
-) -> List[Dict]:
+) -> Tuple[bool, List[Dict]]:
     category = _REPORT_CATEGORIES[report_type]
     payload = {
         "pageNum": "1",
@@ -124,7 +131,7 @@ async def _fetch_type(
                 f"[filing_calendar] {code6} {report_type} failed: "
                 f"{type(e).__name__}: {str(e)[:160]}"
             )
-            return []
+            return False, []
 
     rows: List[Dict] = []
     for item in announcements:
@@ -147,6 +154,68 @@ async def _fetch_type(
                 "title": title,
                 "url": _announcement_url(item),
                 "announcement_id": str(item.get("announcementId") or ""),
+            }
+        )
+    return True, rows
+
+
+async def _fetch_type_fallback(
+    code6: str,
+    report_type: str,
+    start: date,
+    end: date,
+    semaphore: asyncio.Semaphore,
+) -> List[Dict]:
+    """Fallback through AkShare only when the direct CNINFO category request failed."""
+    import akshare as ak
+
+    category = _AKSHARE_REPORT_CATEGORIES[report_type]
+    async with semaphore:
+        try:
+            df = await asyncio.wait_for(
+                asyncio.to_thread(
+                    ak.stock_zh_a_disclosure_report_cninfo,
+                    symbol=code6,
+                    market="沪深京",
+                    keyword="",
+                    category=category,
+                    start_date=start.strftime("%Y%m%d"),
+                    end_date=end.strftime("%Y%m%d"),
+                ),
+                timeout=25,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[filing_calendar] AkShare fallback {code6} {report_type} failed: "
+                f"{type(e).__name__}: {str(e)[:160]}"
+            )
+            return []
+
+    if df is None or df.empty:
+        return []
+
+    rows: List[Dict] = []
+    for _, row in df.iterrows():
+        title = re.sub(r"</?em>", "", str(row.get("公告标题") or "")).strip()
+        if not _is_full_report(title, report_type):
+            continue
+        published_raw = str(row.get("公告时间") or "")[:10]
+        try:
+            published = datetime.strptime(published_raw, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        period = _period_from_title(title, report_type)
+        if not period or published > end:
+            continue
+        rows.append(
+            {
+                "report_type": report_type,
+                "period": period,
+                "published_at": published.isoformat(),
+                "title": title,
+                "url": str(row.get("公告链接") or "") or None,
+                "announcement_id": "",
+                "acquisition": "akshare_fallback",
             }
         )
     return rows
@@ -179,7 +248,7 @@ async def _fetch_financial_filing_calendar_uncached(
         if not org_id:
             return []
         sem = asyncio.Semaphore(_CONCURRENCY)
-        groups = await asyncio.gather(
+        direct_results = await asyncio.gather(
             *(
                 _fetch_type(
                     client,
@@ -193,6 +262,32 @@ async def _fetch_financial_filing_calendar_uncached(
                 for report_type in _REPORT_CATEGORIES
             )
         )
+
+    groups: List[List[Dict]] = [[] for _ in _REPORT_CATEGORIES]
+    fallback_sem = asyncio.Semaphore(2)
+    fallback_jobs = []
+    fallback_indices = []
+    report_types = list(_REPORT_CATEGORIES)
+    for idx, (report_type, (success, rows)) in enumerate(
+        zip(report_types, direct_results)
+    ):
+        if success:
+            groups[idx] = rows
+        else:
+            fallback_indices.append(idx)
+            fallback_jobs.append(
+                _fetch_type_fallback(
+                    code6,
+                    report_type,
+                    start,
+                    end,
+                    fallback_sem,
+                )
+            )
+    if fallback_jobs:
+        fallback_results = await asyncio.gather(*fallback_jobs)
+        for idx, rows in zip(fallback_indices, fallback_results):
+            groups[idx] = rows
 
     # Same period may have original + revised versions. Keep every version so historical
     # reconstruction can choose the latest version that was actually available by as_of.
