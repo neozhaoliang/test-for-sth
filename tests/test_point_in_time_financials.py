@@ -174,3 +174,33 @@ def test_q3_parser_prefers_year_to_date_columns_and_local_unit():
     assert out["roe_pct"] == 21.91
     assert out["total_assets"] == 247_756_923_862.35
     assert out["total_liabilities"] == 34_310_347_852.50
+
+
+def test_bank_q1_parser_ignores_metric_footnotes_but_keeps_negative_cashflow():
+    pages = [
+        """
+        2 主要财务数据
+        2.1 本集团主要会计数据及财务指标
+        （人民币百万元，特别注明除外）
+        2024年1-3月 2023年1-3月 同比增减(%)
+        营业收入 86,417 90,636 -4.65
+        归属于本行股东的净利润 38,077 38,839 -1.96
+        年化后归属于本行普通股股东的加权平均净资产收益率(%)(1)
+        16.08 18.43 下降2.35个百分点
+        经营活动产生的现金流量净额(2) (1,208) (12,618) 90.43
+        """,
+        """
+        合并资产负债表
+        （人民币百万元）
+        总资产 11,520,226 11,028,483 4.46
+        负债合计 10,394,735 9,943,500 4.54
+        """,
+    ]
+
+    out = parse_financial_report_pages(pages)
+
+    assert out["monetary_multiplier"] == 1_000_000.0
+    assert out["revenue"] == 86_417_000_000
+    assert out["net_profit"] == 38_077_000_000
+    assert out["roe_pct"] == 16.08
+    assert out["operating_cash_flow"] == -1_208_000_000
