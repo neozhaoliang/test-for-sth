@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 from analysis.knowledge_base import (
     ensure_loaded as ensure_knowledge_base_loaded,
     filter_entries_as_of,
+    load_cached_entries,
 )
 from backtest.score import load_records
 from model.m_analysis import CandidateOpinion, KnowledgeExcerpt
@@ -92,9 +93,14 @@ async def latest_relevant_posts(
 async def load_knowledge_excerpts(
     *,
     as_of: Optional[date] = None,
+    allow_distill: bool = True,
 ) -> List[KnowledgeExcerpt]:
     entries = filter_entries_as_of(
-        await ensure_knowledge_base_loaded(),
+        (
+            await ensure_knowledge_base_loaded()
+            if allow_distill
+            else load_cached_entries()
+        ),
         as_of,
     )
 
