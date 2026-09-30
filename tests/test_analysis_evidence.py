@@ -183,3 +183,20 @@ def test_bank_quality_becomes_first_class_evidence():
     assert bank[0].source_tier == "S"
     assert bank[0].value["npl_ratio_pct"] == 0.92
     assert bank[0].value["provision_coverage_pct"] == 436.82
+
+
+def test_bank_label_alone_does_not_fake_bank_quality_readiness():
+    evidence = build_evidence_ledger(
+        _inputs(
+            fundamentals={
+                "facts": {
+                    "finance_period": "2024-03-31",
+                    "sw_industry": "股份制银行",
+                    "revenue": 1_000_000_000,
+                    "net_profit": 100_000_000,
+                }
+            }
+        )
+    )
+
+    assert not any(e.category == "bank_quality" for e in evidence)
