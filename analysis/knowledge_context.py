@@ -264,6 +264,7 @@ def build_knowledge_hypotheses(
         out.append(
             {
                 "source": entry.source,
+                "author": entry.author,
                 "title": entry.title,
                 "published_at": entry.published_at,
                 "source_url": entry.source_url,
@@ -291,7 +292,7 @@ def format_knowledge_hypotheses(items: Iterable[Dict]) -> str:
         "必须用本次硬数据/一手公告交叉验证。无法验证时写“假设成立与否暂缺”，而不是忽略。",
     ]
     for i, item in enumerate(rows, 1):
-        src = item.get("source") or "knowledge"
+        src = item.get("author") or item.get("source") or "knowledge"
         dt = item.get("published_at") or "日期未知"
         labels = "、".join(item.get("topic_labels") or [])
         lines.append(f"{i}. [{src} {dt}] 主题={labels}")
