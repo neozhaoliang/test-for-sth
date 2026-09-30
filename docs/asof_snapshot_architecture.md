@@ -304,6 +304,29 @@ PYTHONPATH=. python tools/snapshot_cli.py replay-external \
 
 ---
 
+## 银行专用 Historical 画像
+
+Historical 原始财报解析现在会通过财报本身的银行专用披露特征识别银行，而不是依赖今天的行业分类或股票代码白名单。识别后写入：
+
+- `financial_subtype=bank`
+- `industry_hint=银行`
+- `bank_quality` 一等证据类别
+
+银行专用指标优先从截止日之前已经发布的 CNINFO 原始定期报告 PDF 中抽取：
+
+- 净息差 / 净利息收益率
+- 不良贷款率
+- 拨备覆盖率
+- 贷款拨备率
+- 核心一级资本充足率
+- 一级资本充足率
+- 资本充足率
+- ROE
+
+银行画像不再使用制造业的“经营现金流/净利润 < 0.8”“应收/存货压力”“普通资产负债率阈值”作为核心质量判断。低 PB 必须与 ROE、净息差、资产质量和资本充足共同解释；关键指标缺失时直接降低重点证据准备度。
+
+---
+
 ## Historical public source corpus
 
 完整 LLM Historical E2E 依赖模型密钥，但公网 point-in-time 数据本身可以先独立冻结：

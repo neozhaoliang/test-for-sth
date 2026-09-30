@@ -764,7 +764,12 @@ def _build_fundamentals_block(fundamentals: Optional[Dict]) -> str:
         return f"同花顺 F10 结构性事实: {_MISSING_TAIL}"
 
     facts = fundamentals.get("facts") or {}
-    lines = ["同花顺 F10 结构性事实 (来自公司定期报告原文，比率已由程序算好，直接引用即可):"]
+    is_bank = (
+        facts.get("financial_subtype") == "bank"
+        or "银行" in str(facts.get("sw_industry") or "")
+    )
+    source_label = "历史原始财报结构性事实" if fundamentals.get("point_in_time") else "同花顺 F10 结构性事实"
+    lines = [f"{source_label} (来自公司定期报告原文，比率已由程序算好，直接引用即可):"]
     period_line = f"  财务数据期间 {facts.get('finance_period') or '未知'}"
     if fundamentals.get("concentration_period"):
         period_line += (
@@ -790,10 +795,31 @@ def _build_fundamentals_block(fundamentals: Optional[Dict]) -> str:
         f"  经营活动现金流净额 {_yi(facts.get('operating_cash_flow'))}"
         + (f" (同比 {ocf_yoy:+}%)" if ocf_yoy is not None else "")
     )
-    lines.append(
-        f"  经营现金流/净利润 {facts.get('cash_to_profit_ratio') if facts.get('cash_to_profit_ratio') is not None else '暂缺'}"
-        " (显著小于 1 说明账面利润没有同步变成现金)"
-    )
+    if is_bank:
+        lines.append(
+            f"  经营现金流/净利润 {facts.get('cash_to_profit_ratio') if facts.get('cash_to_profit_ratio') is not None else '暂缺'}"
+            " (银行存贷款及金融资产负债变动会显著影响经营现金流，本比率不得按制造业阈值判断经营质量)"
+        )
+        lines.append(
+            "  银行核心指标: "
+            f"净息差/净利息收益率 {_pct_str(facts.get('net_interest_margin_pct'))}；"
+            f"不良贷款率 {_pct_str(facts.get('npl_ratio_pct'))}；"
+            f"拨备覆盖率 {_pct_str(facts.get('provision_coverage_pct'))}；"
+            f"贷款拨备率 {_pct_str(facts.get('loan_provision_ratio_pct'))}；"
+            f"核心一级资本充足率 {_pct_str(facts.get('core_tier1_capital_adequacy_pct'))}；"
+            f"一级资本充足率 {_pct_str(facts.get('tier1_capital_adequacy_pct'))}；"
+            f"资本充足率 {_pct_str(facts.get('capital_adequacy_pct'))}"
+            + (
+                f"（{facts.get('capital_adequacy_basis')}）"
+                if facts.get("capital_adequacy_basis")
+                else ""
+            )
+        )
+    else:
+        lines.append(
+            f"  经营现金流/净利润 {facts.get('cash_to_profit_ratio') if facts.get('cash_to_profit_ratio') is not None else '暂缺'}"
+            " (显著小于 1 说明账面利润没有同步变成现金)"
+        )
     ar = facts.get("accounts_receivable_yuan")
     inv = facts.get("inventory_yuan")
     ar_yoy = facts.get("accounts_receivable_yoy_pct")

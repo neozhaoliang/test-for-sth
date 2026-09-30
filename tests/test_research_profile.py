@@ -56,14 +56,48 @@ def test_cyclical_profile_prioritizes_cycle_not_static_pe():
     assert any("低PE" in rule for rule in profile.analysis_rules)
 
 
-def test_financial_profile_prioritizes_risk_and_capital_return():
+def test_bank_profile_requires_bank_quality_evidence():
     profile = classify_research_profile(
         fundamentals=fundamentals("股份制银行"),
+        evidence=[
+            ev("bank_quality"),
+            ev("fundamentals"),
+            ev("profitability"),
+            ev("valuation_history"),
+            ev("macro_rates"),
+        ],
+    )
+    assert profile.archetype == "bank"
+    assert profile.label == "银行"
+    assert profile.readiness == 1.0
+    assert profile.priority_dimensions[0] == "财务质量与尾部风险"
+    assert any("净息差" in rule for rule in profile.analysis_rules)
+
+
+def test_historical_bank_profile_can_be_inferred_without_sw_industry():
+    profile = classify_research_profile(
+        fundamentals={
+            "facts": {
+                "sw_industry": None,
+                "financial_subtype": "bank",
+                "industry_hint": "银行",
+            }
+        },
+        evidence=[ev("fundamentals"), ev("profitability")],
+    )
+    assert profile.archetype == "bank"
+    assert profile.industry == "银行"
+    assert "bank_quality" in profile.missing_priority_evidence
+    assert any("历史原始财报" in x for x in profile.rationale)
+
+
+def test_nonbank_financial_profile_remains_separate():
+    profile = classify_research_profile(
+        fundamentals=fundamentals("证券"),
         evidence=[ev("fundamentals"), ev("profitability"), ev("macro_rates")],
     )
     assert profile.archetype == "financial"
-    assert profile.priority_dimensions[0] == "财务质量与尾部风险"
-    assert "management_capital" in profile.missing_priority_evidence
+    assert profile.label == "非银金融"
 
 
 def test_consumer_brand_profile_is_not_misclassified_as_generic():

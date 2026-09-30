@@ -230,6 +230,133 @@ def _roe_from_primary_block(text: str, *, prefer_ytd: bool) -> Optional[float]:
     return None
 
 
+def _bank_percent_metric_from_pages(
+    pages: List[str],
+    labels: List[str],
+    *,
+    reject_prefix: Optional[str] = None,
+) -> Optional[float]:
+    """Extract the current-period value of a bank-specific percentage metric."""
+    for page in pages:
+        source = _clean(page)
+        for label in labels:
+            pattern = _label_regex(label)
+            for match in pattern.finditer(source):
+                if reject_prefix:
+                    prefix = _compact(source[max(0, match.start() - 12):match.start()])
+                    if prefix.endswith(reject_prefix):
+                        continue
+                # Keep the original whitespace between table cells.  Compacting here would
+                # turn values such as "2.02 2.29" into "2.022.29" and corrupt parsing.
+                segment = source[match.end(): match.end() + 180]
+                segment = re.sub(
+                    r"^\s*(?:\(%\)|（%）|%)?\s*(?:\(\d{1,2}\)|（\d{1,2}）)?\s*[:：]?",
+                    "",
+                    segment,
+                )
+                values = [
+                    v for v in _numbers_in_segment(segment)
+                    if -1000 <= v <= 1000
+                ]
+                if values:
+                    return values[0]
+    return None
+
+def _bank_capital_metrics_from_pages(pages: List[str]) -> Dict[str, Optional[float] | str]:
+    """Prefer the bank's actual consolidated capital ratios over regulatory minima.
+
+    Bank reports often state regulatory floors immediately before the actual capital table.
+    A first-label-wins parser can therefore mistake e.g. "应不低于11.25%" for the bank's
+    own capital adequacy ratio.  Prefer explicit "本集团...核心一级...一级...资本充足率"
+    sentences, then fall back to the consolidated section of the capital table.
+    """
+    basis_patterns = (
+        ("本集团高级法", r"本集团高级法下"),
+        ("本集团权重法", r"本集团权重法下"),
+        ("本集团标准法", r"本集团标准法下"),
+    )
+    for page in pages:
+        compact = _compact(page)
+        for basis, prefix in basis_patterns:
+            m = re.search(
+                prefix
+                + r"核心一级资本充足率[:：]?([\d.]+)%"
+                + r".{0,80}?一级资本充足率[:：]?([\d.]+)%"
+                + r".{0,80}?资本充足率[:：]?([\d.]+)%",
+                compact,
+            )
+            if m:
+                return {
+                    "core_tier1_capital_adequacy_pct": float(m.group(1)),
+                    "tier1_capital_adequacy_pct": float(m.group(2)),
+                    "capital_adequacy_pct": float(m.group(3)),
+                    "capital_adequacy_basis": basis,
+                }
+
+    # Fallback for reports that expose only a table. Restrict parsing to the consolidated
+    # "本集团" section and stop before "本公司", so company-only ratios cannot leak in.
+    for page in pages:
+        compact = _compact(page)
+        if "资本充足率" not in compact or "本集团" not in compact:
+            continue
+        source = _clean(page)
+        start_match = _label_regex("本集团").search(source)
+        if not start_match:
+            continue
+        end_match = _label_regex("本公司").search(source, pos=start_match.end())
+        segment = source[start_match.start(): end_match.start() if end_match else len(source)]
+        core = _bank_percent_metric_from_pages([segment], ["核心一级资本充足率"])
+        tier1 = _bank_percent_metric_from_pages(
+            [segment], ["一级资本充足率"], reject_prefix="核心"
+        )
+        total = _bank_percent_metric_from_pages(
+            [segment], ["资本充足率"], reject_prefix="一级"
+        )
+        if any(v is not None for v in (core, tier1, total)):
+            return {
+                "core_tier1_capital_adequacy_pct": core,
+                "tier1_capital_adequacy_pct": tier1,
+                "capital_adequacy_pct": total,
+                "capital_adequacy_basis": "本集团披露口径",
+            }
+    return {}
+
+
+def _bank_metrics_from_pages(pages: List[str]) -> Dict[str, Optional[float] | str]:
+    compact_all = "".join(_compact(x) for x in pages if x)
+    is_bank = any(
+        marker in compact_all
+        for marker in (
+            "归属于本行股东",
+            "不良贷款率",
+            "拨备覆盖率",
+            "核心一级资本充足率",
+            "净利息收益率",
+        )
+    )
+    if not is_bank:
+        return {}
+
+    capital = _bank_capital_metrics_from_pages(pages)
+    return {
+        "financial_subtype": "bank",
+        "industry_hint": "银行",
+        "net_interest_margin_pct": _bank_percent_metric_from_pages(
+            pages, ["净利息收益率", "净息差"]
+        ),
+        "npl_ratio_pct": _bank_percent_metric_from_pages(
+            pages, ["不良贷款率"]
+        ),
+        "provision_coverage_pct": _bank_percent_metric_from_pages(
+            pages, ["拨备覆盖率"]
+        ),
+        "loan_provision_ratio_pct": _bank_percent_metric_from_pages(
+            pages, ["贷款拨备率"]
+        ),
+        **capital,
+    }
+
+
 def parse_financial_report_pages(pages: List[str]) -> Dict:
     primary = _find_primary_metric_block(pages)
     if not primary:
@@ -308,6 +435,7 @@ def parse_financial_report_pages(pages: List[str]) -> Dict:
         if net_profit not in (None, 0) and ocf is not None
         else None
     )
+    bank_metrics = _bank_metrics_from_pages(pages)
 
     return {
         "revenue": revenue,
@@ -322,6 +450,7 @@ def parse_financial_report_pages(pages: List[str]) -> Dict:
         "monetary_unit": monetary_unit,
         "monetary_multiplier": monetary_multiplier,
         "basis": "ytd" if prefer_ytd else "period",
+        **bank_metrics,
     }
 
 
@@ -546,6 +675,14 @@ async def get_point_in_time_financials(
             "revenue": x.get("revenue"),
             "net_profit": x.get("net_profit"),
             "operating_cash_flow": x.get("operating_cash_flow"),
+            "net_interest_margin_pct": x.get("net_interest_margin_pct"),
+            "npl_ratio_pct": x.get("npl_ratio_pct"),
+            "provision_coverage_pct": x.get("provision_coverage_pct"),
+            "loan_provision_ratio_pct": x.get("loan_provision_ratio_pct"),
+            "core_tier1_capital_adequacy_pct": x.get("core_tier1_capital_adequacy_pct"),
+            "tier1_capital_adequacy_pct": x.get("tier1_capital_adequacy_pct"),
+            "capital_adequacy_pct": x.get("capital_adequacy_pct"),
+            "capital_adequacy_basis": x.get("capital_adequacy_basis"),
         }
         for x in parsed
     ]
@@ -573,6 +710,7 @@ def to_historical_fundamentals(data: Optional[Dict]) -> Optional[Dict]:
         "net_profit": latest.get("net_profit"),
         "operating_cash_flow": latest.get("operating_cash_flow"),
         "cash_to_profit_ratio": latest.get("cash_to_profit_ratio"),
+        "roe_pct": latest.get("roe_pct"),
         # Historical PDF parser intentionally does not pretend to know fields it did not
         # extract from the exact filing version.
         "rd_investment_yuan": None,
@@ -580,6 +718,16 @@ def to_historical_fundamentals(data: Optional[Dict]) -> Optional[Dict]:
         "accounts_receivable_yuan": None,
         "inventory_yuan": None,
         "sw_industry": None,
+        "financial_subtype": latest.get("financial_subtype"),
+        "industry_hint": latest.get("industry_hint"),
+        "net_interest_margin_pct": latest.get("net_interest_margin_pct"),
+        "npl_ratio_pct": latest.get("npl_ratio_pct"),
+        "provision_coverage_pct": latest.get("provision_coverage_pct"),
+        "loan_provision_ratio_pct": latest.get("loan_provision_ratio_pct"),
+        "core_tier1_capital_adequacy_pct": latest.get("core_tier1_capital_adequacy_pct"),
+        "tier1_capital_adequacy_pct": latest.get("tier1_capital_adequacy_pct"),
+        "capital_adequacy_pct": latest.get("capital_adequacy_pct"),
+        "capital_adequacy_basis": latest.get("capital_adequacy_basis"),
     }
     missing = []
     for field, label in (
@@ -589,13 +737,28 @@ def to_historical_fundamentals(data: Optional[Dict]) -> Optional[Dict]:
     ):
         if facts.get(field) is None:
             missing.append(label)
-    missing.extend(
-        [
-            "客户/供应商集中度(历史原始财报解析暂未覆盖)",
-            "专利/研发结构(历史原始财报解析暂未覆盖)",
-            "申万行业(历史原始财报解析暂未覆盖)",
-        ]
-    )
+    if facts.get("financial_subtype") == "bank":
+        bank_required = (
+            ("net_interest_margin_pct", "净息差"),
+            ("npl_ratio_pct", "不良贷款率"),
+            ("provision_coverage_pct", "拨备覆盖率"),
+            ("core_tier1_capital_adequacy_pct", "核心一级资本充足率"),
+            ("capital_adequacy_pct", "资本充足率"),
+        )
+        missing.extend(
+            f"{label}(历史原始财报未解析到)"
+            for field, label in bank_required
+            if facts.get(field) is None
+        )
+        missing.append("申万行业(历史模式以银行财报特征替代行业归档)")
+    else:
+        missing.extend(
+            [
+                "客户/供应商集中度(历史原始财报解析暂未覆盖)",
+                "专利/研发结构(历史原始财报解析暂未覆盖)",
+                "申万行业(历史原始财报解析暂未覆盖)",
+            ]
+        )
     url = latest.get("url")
     return {
         "facts": facts,

@@ -23,7 +23,7 @@ from analysis.evidence import EvidenceItem
 class ResearchProfile(BaseModel):
     archetype: str = Field(
         default="general",
-        description="technology|cyclical|financial|consumer_brand|stable_yield|general",
+        description="technology|cyclical|bank|financial|consumer_brand|stable_yield|general",
     )
     label: str = "综合型企业"
     industry: str = ""
@@ -35,8 +35,11 @@ class ResearchProfile(BaseModel):
     analysis_rules: List[str] = Field(default_factory=list)
 
 
+_BANK_RE = re.compile(
+    r"银行|城商行|农商行|股份制银行|国有大型银行|商业银行"
+)
 _FINANCIAL_RE = re.compile(
-    r"银行|保险|证券|多元金融|金融服务|城商行|农商行|股份制银行|国有大型银行"
+    r"保险|证券|多元金融|金融服务|信托|期货"
 )
 _CYCLICAL_RE = re.compile(
     r"煤炭|石油|油气|炼化|有色|贵金属|黄金|铜|铝|钢铁|水泥|玻璃|"
@@ -101,8 +104,31 @@ _PROFILE_CONFIG: Dict[str, Dict[str, Any]] = {
             "现金成本、资产负债率和股东回报决定公司能否安全穿越下行周期。",
         ],
     },
+    "bank": {
+        "label": "银行",
+        "priority_dimensions": [
+            "财务质量与尾部风险",
+            "经营基本面与护城河",
+            "价格与估值位置",
+            "股东回报与资本抽取",
+            "政策、利率、汇率与地缘",
+        ],
+        "priority_evidence_categories": [
+            "bank_quality",
+            "fundamentals",
+            "profitability",
+            "valuation_history",
+            "macro_rates",
+        ],
+        "analysis_rules": [
+            "银行不能用制造业经营现金流、存货和应收账款逻辑机械评价；核心看净息差、不良率、拨备覆盖率、资本充足率、ROE与存贷款结构。",
+            "低PB必须与ROE、净息差和资产质量一起解释；如果不良率上升、拨备覆盖下降或核心一级资本承压，低PB可能是风险折价而不是便宜。",
+            "利率变化通过资产端收益率、负债端存款成本和净息差传导；只看到LPR变化时不得直接推断利润方向。",
+            "银行资产负债率本身缺乏跨行业解释力，不能拿普通企业阈值判断银行杠杆风险。",
+        ],
+    },
     "financial": {
-        "label": "金融",
+        "label": "非银金融",
         "priority_dimensions": [
             "财务质量与尾部风险",
             "管理层与治理",
@@ -210,14 +236,25 @@ def classify_research_profile(
     evidence: Optional[Iterable[EvidenceItem]] = None,
 ) -> ResearchProfile:
     facts = _facts(fundamentals)
-    industry = str(facts.get("sw_industry") or "").strip()
+    sw_industry = str(facts.get("sw_industry") or "").strip()
+    industry_hint = str(facts.get("industry_hint") or "").strip()
+    financial_subtype = str(facts.get("financial_subtype") or "").strip()
+    industry = sw_industry or industry_hint
     rd_intensity = _num(facts.get("rd_intensity_pct"))
     rationale: List[str] = []
 
     # More specific structural industries win before the generic technology pattern.
-    if _FINANCIAL_RE.search(industry):
+    if financial_subtype == "bank" or _BANK_RE.search(industry):
+        archetype = "bank"
+        if sw_industry:
+            rationale.append(f"申万行业“{sw_industry}”属于银行业。")
+        else:
+            rationale.append("历史原始财报出现银行专用披露特征，按银行框架研究。")
+    elif _FINANCIAL_RE.search(industry):
         archetype = "financial"
-        rationale.append(f"申万行业“{industry}”属于金融行业。")
+        rationale.append(
+            f"{'申万行业' if sw_industry else '行业线索'}“{industry}”属于非银金融。"
+        )
     elif _CYCLICAL_RE.search(industry):
         archetype = "cyclical"
         rationale.append(f"申万行业“{industry}”具有明显周期/资源属性。")
@@ -236,7 +273,7 @@ def classify_research_profile(
     else:
         archetype = "general"
         rationale.append(
-            f"申万行业“{industry or '暂缺'}”未命中特定研究模板，使用综合型框架。"
+            f"行业线索“{industry or '暂缺'}”未命中特定研究模板，使用综合型框架。"
         )
 
     # A utility-like industry with a demonstrated multi-year dividend habit is even more
@@ -273,7 +310,7 @@ def classify_research_profile(
 def profile_prompt_block(profile: ResearchProfile) -> str:
     lines = [
         f"公司研究画像: {profile.label} ({profile.archetype})",
-        f"申万行业: {profile.industry or '暂缺'}",
+        f"行业识别: {profile.industry or '暂缺'}",
         "优先维度: " + "、".join(profile.priority_dimensions),
         f"重点证据准备度: {profile.readiness * 100:.0f}%",
     ]
