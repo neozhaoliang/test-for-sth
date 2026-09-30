@@ -48,9 +48,13 @@ def parse_shareholder_count_text(text: str) -> Optional[int]:
     # Periodic-report table text may split the label across spaces/newlines.
     normalized = re.sub(r"\s+", "", text.replace("\u3000", " "))
     patterns = (
+        # Prefer A-share-specific counts in dual-listed/bank reports.
+        r"报告期末(?:境内上市人民币普通股)?(?:（?A股）?)?股东(?:总数|户数)(?:（户）|\(户\))?[：:]?([\d,，]+)",
+        r"(?:境内上市人民币普通股|A股)股东(?:总数|户数)(?:（户）|\(户\))?[：:]?([\d,，]+)",
         r"报告期末普通股股东总数(?:（户）|\(户\)|（如有）)?[：:]?([\d,，]+)",
         r"期末普通股股东总数(?:（户）|\(户\))?[：:]?([\d,，]+)",
         r"普通股股东总数[：:]?([\d,，]+)",
+        r"A股股东户数[：:]?([\d,，]+)",
     )
     for pattern in patterns:
         m = re.search(pattern, normalized)
