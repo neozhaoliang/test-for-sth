@@ -278,7 +278,11 @@ def build_evidence_ledger(inputs: Any, candidates: Optional[List[Any]] = None) -
         tags=("financials", "customers", "suppliers", "cashflow", "working_capital", "receivables", "inventory"),
         url=source_map.get("finance") or source_map.get("operate"),
     )
-    if facts.get("financial_subtype") == "bank":
+    is_bank = (
+        facts.get("financial_subtype") == "bank"
+        or "银行" in str(facts.get("sw_industry") or "")
+    )
+    if is_bank:
         bank_quality = {
             k: facts.get(k)
             for k in (
