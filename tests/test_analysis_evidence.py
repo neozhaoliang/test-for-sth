@@ -153,3 +153,33 @@ def test_newer_same_category_snapshot_prevents_false_stale_flag():
     q = evaluate_research_quality(evidence, today=date(2026, 9, 29))
 
     assert not any(x["category"] == "margin" for x in q.stale_evidence)
+
+
+def test_bank_quality_becomes_first_class_evidence():
+    evidence = build_evidence_ledger(
+        _inputs(
+            fundamentals={
+                "point_in_time": True,
+                "available_at": "2024-04-30",
+                "source_map": {"finance": "https://static.cninfo.com.cn/bank.pdf"},
+                "facts": {
+                    "finance_period": "2024-03-31",
+                    "financial_subtype": "bank",
+                    "industry_hint": "银行",
+                    "roe_pct": 16.08,
+                    "net_interest_margin_pct": 2.02,
+                    "npl_ratio_pct": 0.92,
+                    "provision_coverage_pct": 436.82,
+                    "core_tier1_capital_adequacy_pct": 13.50,
+                    "capital_adequacy_pct": 18.24,
+                },
+            },
+            profitability_trend={"periods": [{"period": "2024-03-31", "roe_pct": 16.08}]},
+        )
+    )
+
+    bank = [e for e in evidence if e.category == "bank_quality"]
+    assert len(bank) == 1
+    assert bank[0].source_tier == "S"
+    assert bank[0].value["npl_ratio_pct"] == 0.92
+    assert bank[0].value["provision_coverage_pct"] == 436.82
