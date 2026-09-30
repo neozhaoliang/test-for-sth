@@ -31,8 +31,11 @@ from analysis.filing_calendar import (
 )
 
 
+logger = logging.getLogger("MediaCrawler")
+
 _PARSE_TIMEOUT_S = 60
 _MAX_FILINGS = 8
+_MAX_LATEST_PERIOD_AGE_DAYS = 400
 
 
 def _clean(text: str) -> str:
@@ -105,6 +108,16 @@ def _extract_relevant_text(pages: List[str]) -> str:
         ):
             selected.append(text)
     return _clean("\n".join(selected))
+
+
+def _latest_period_is_fresh_enough(period: str, as_of: date) -> bool:
+    """Reject obviously stale filing calendars rather than treating old filings as current."""
+    try:
+        period_date = date.fromisoformat(str(period)[:10])
+    except ValueError:
+        return False
+    age_days = (as_of - period_date).days
+    return 0 <= age_days <= _MAX_LATEST_PERIOD_AGE_DAYS
 
 
 def parse_financial_report_text(text: str) -> Dict:
@@ -218,6 +231,16 @@ async def get_point_in_time_financials(
 
     parsed.sort(key=lambda x: x["period"])
     latest = parsed[-1]
+    if not _latest_period_is_fresh_enough(str(latest.get("period") or ""), as_of):
+        logger.warning(
+            "[point_in_time_financials] %s latest parsed filing period %s is too stale for as_of=%s; "
+            "treat historical financials as unavailable",
+            stock_code,
+            latest.get("period"),
+            as_of.isoformat(),
+        )
+        return None
+
     periods = [
         {
             "period": x["period"],
