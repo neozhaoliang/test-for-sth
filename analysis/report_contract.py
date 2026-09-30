@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Dict
 
-_PROMPT_VERSION = "v14-exposure-events-cycle-routing"
+_PROMPT_VERSION = "v15-bank-quality-profile"
 
 # 实测: 300308 的 v7 prompt 输出 6060 tokens，其中约 5000 花在 thinking 块上。
 # 报告类 prompt 的思考预算随输入维度数量增长，上限必须留足余量，否则截断到 len=0。
