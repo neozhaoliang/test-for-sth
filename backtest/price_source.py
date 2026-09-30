@@ -21,6 +21,7 @@ A股历史日线价格数据源，基于 akshare，本地 CSV 缓存避免重复
 """
 
 import asyncio
+import logging
 import pathlib
 from collections import defaultdict
 from datetime import date, datetime, timedelta
@@ -30,7 +31,8 @@ import akshare as ak
 import pandas as pd
 
 import config
-from tools.utils import utils
+
+logger = logging.getLogger("MediaCrawler")
 
 # 按股票代码分别加锁，不同股票的缓存读写/网络请求可以并发，
 # 同一股票的并发请求仍序列化以避免缓存文件读写竞态。
@@ -51,8 +53,31 @@ def _cache_path(code: str) -> pathlib.Path:
 
 
 def _akshare_symbol(code: str) -> str:
-    """雪球代码 (如 SH600519) -> akshare stock_zh_a_daily 的 symbol 参数 (如 sh600519)"""
-    return code.lower()
+    """
+    Normalize project/bare A-share codes for ak.stock_zh_a_daily.
+
+    Accepted examples:
+    - SH600519 -> sh600519
+    - 600519   -> sh600519
+    - SZ000001 -> sz000001
+    - 000001   -> sz000001
+    - BJ430047 / 430047 -> bj430047
+
+    The data layer must not rely on the Web/API resolver having added a market prefix.
+    """
+    raw = str(code or "").strip().lower()
+    if raw.startswith(("sh", "sz", "bj")) and len(raw) == 8:
+        return raw
+
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if len(digits) != 6:
+        return raw
+
+    if digits.startswith(("4", "8")) or digits.startswith("92"):
+        return "bj" + digits
+    if digits.startswith(("0", "1", "2", "3")):
+        return "sz" + digits
+    return "sh" + digits
 
 
 def _fetch_from_akshare(code: str, start_date: str, end_date: str) -> pd.DataFrame:
@@ -89,7 +114,7 @@ async def get_price_history(code: str, start: date, end: Optional[date] = None) 
                 cached = cached.dropna(subset=["date"])
                 cached = cached[cached["date"].str.match(r"^\d{4}-\d{2}-\d{2}$", na=False)]
             except Exception as e:
-                utils.logger.warning(f"[price_source] Failed to read cache for {code}: {e}")
+                logger.warning(f"[price_source] Failed to read cache for {code}: {e}")
                 cached = pd.DataFrame(columns=["date", "close"])
 
         need_fetch = True
@@ -110,7 +135,7 @@ async def get_price_history(code: str, start: date, end: Optional[date] = None) 
                     end.strftime("%Y%m%d"),
                 )
             except Exception as e:
-                utils.logger.error(f"[price_source] akshare fetch failed for {code}: {e}")
+                logger.error(f"[price_source] akshare fetch failed for {code}: {e}")
                 fresh = pd.DataFrame(columns=["date", "close"])
 
             if not fresh.empty:

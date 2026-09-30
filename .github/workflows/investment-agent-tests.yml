@@ -1,0 +1,318 @@
+name: Investment Agent core tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - feature/investment-agent-evidence-v2
+
+jobs:
+  core-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install focused test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            pytest pytest-asyncio uv \
+            "pydantic>=2,<3" "pypdf>=5,<7" \
+            akshare
+
+      - name: Verify uv lock is in sync
+        run: uv lock --locked
+
+      - name: Compile investment-agent modules
+        run: |
+          python -m compileall -q \
+            analysis/evidence.py \
+            analysis/reviewer.py \
+            analysis/research_profile.py \
+            analysis/management_capital.py \
+            analysis/macro_rates.py \
+            analysis/commodity.py \
+            analysis/a_share_structure.py \
+            analysis/valuation_history.py \
+            analysis/rd_team.py \
+            analysis/primary_sources.py \
+            analysis/policy_context.py \
+            analysis/candidates.py \
+            analysis/shareholder.py \
+            backtest/score.py \
+            analysis/report_contract.py \
+            analysis/report_inputs.py \
+            analysis/report_validation.py \
+            analysis/research_context.py \
+            analysis/snapshot_store.py \
+            analysis/snapshot_replay.py \
+            analysis/report_blocks.py \
+            analysis/report_synthesis.py \
+            analysis/report_social.py \
+            analysis/report.py \
+            analysis/knowledge_base.py \
+            analysis/fundamentals.py \
+            analysis/filing_calendar.py \
+            analysis/filing_archive.py \
+            analysis/historical_corpus.py \
+            analysis/point_in_time_financials.py \
+            analysis/point_in_time_ownership.py \
+            analysis/point_in_time_shareholder.py \
+            analysis/point_in_time_capital_returns.py \
+            model/m_analysis.py \
+            config/bilibili_config.py \
+            media_platform/bilibili/client.py \
+            media_platform/bilibili/core.py \
+            store/bilibili/__init__.py \
+            tools/live_public_acceptance.py \
+            tools/live_report_acceptance.py \
+            tools/live_historical_acceptance.py \
+            tools/historical_research_input_acceptance.py \
+            tools/historical_corpus_cli.py \
+            tools/snapshot_cli.py \
+            web/app.py
+
+      - name: Check embedded WebUI JavaScript syntax
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          source = Path("web/app.py").read_text(encoding="utf-8")
+          tree = ast.parse(source)
+          html = None
+          for node in tree.body:
+              if isinstance(node, ast.Assign):
+                  if any(isinstance(t, ast.Name) and t.id == "_INDEX_HTML" for t in node.targets):
+                      if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                          html = node.value.value
+                          break
+          if html is None:
+              raise SystemExit("_INDEX_HTML not found")
+          if "<script>" not in html or "</script>" not in html:
+              raise SystemExit("inline script not found")
+          script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+          Path("/tmp/investment-webui.js").write_text(script, encoding="utf-8")
+          PY
+          node --check /tmp/investment-webui.js
+
+      - name: Run investment-agent unit/regression tests
+        run: |
+          pytest -q \
+            tests/test_analysis_evidence.py \
+            tests/test_analysis_reviewer.py \
+            tests/test_research_profile.py \
+            tests/test_report_blocks.py \
+            tests/test_report_validation.py \
+            tests/test_research_context.py \
+            tests/test_snapshot_store.py \
+            tests/test_valuation_history_asof.py \
+            tests/test_market_context_asof.py \
+            tests/test_realtime_price_asof.py \
+            tests/test_margin_asof.py \
+            tests/test_knowledge_asof.py \
+            tests/test_score_asof.py \
+            tests/test_shareholder_asof.py \
+            tests/test_management_capital.py \
+            tests/test_macro_rates.py \
+            tests/test_commodity_cycle.py \
+            tests/test_a_share_structure.py \
+            tests/test_primary_sources.py \
+            tests/test_filing_calendar.py \
+            tests/test_filing_archive.py \
+            tests/test_historical_corpus.py \
+            tests/test_point_in_time_financials.py \
+            tests/test_point_in_time_ownership.py \
+            tests/test_point_in_time_shareholder.py \
+            tests/test_point_in_time_capital_returns.py \
+            tests/test_report_social_asof.py \
+            tests/test_policy_context.py \
+            tests/test_rd_team.py
+
+
+  historical-e2e:
+    name: Historical E2E acceptance
+    needs: core-tests
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/feature/investment-agent-evidence-v2') ||
+      (github.event_name == 'pull_request' && github.head_ref == 'feature/investment-agent-evidence-v2')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+      BACKTEST_LLM_MODEL: ${{ vars.BACKTEST_LLM_MODEL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Detect LLM credentials
+        id: llm
+        shell: bash
+        run: |
+          if [ -n "$ANTHROPIC_AUTH_TOKEN" ] || [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Historical E2E: LLM credential is configured."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Historical E2E skipped: configure ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY in repository Actions secrets."
+          fi
+
+      - name: Install project dependencies
+        if: steps.llm.outputs.configured == 'true'
+        run: |
+          python -m pip install --upgrade pip uv
+          uv sync --locked
+
+      - name: Run strict historical E2E
+        if: steps.llm.outputs.configured == 'true'
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          uv run python -u tools/live_historical_acceptance.py \
+            600036@2024-06-30 \
+            601088@2023-06-30 \
+            600519@2022-12-30 \
+            --snapshot-root artifacts/investment_snapshots \
+            | tee artifacts/historical-e2e.log
+
+      - name: Write skipped marker
+        if: steps.llm.outputs.configured != 'true'
+        run: |
+          mkdir -p artifacts
+          printf '%s\n' \
+            'Historical E2E was not executed because no Anthropic credential was available to GitHub Actions.' \
+            'Configure ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY in repository Actions secrets.' \
+            > artifacts/HISTORICAL_E2E_SKIPPED.txt
+
+      - name: Upload historical acceptance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-e2e-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+
+  historical-research-inputs:
+    name: Historical research-input E2E (no LLM)
+    needs: core-tests
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/feature/investment-agent-evidence-v2') ||
+      (github.event_name == 'pull_request' && github.head_ref == 'feature/investment-agent-evidence-v2')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip uv
+          uv sync --locked
+
+      - name: Run no-LLM historical research-input E2E
+        id: probe
+        continue-on-error: true
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          uv run python -u tools/historical_research_input_acceptance.py \
+            600036@2024-06-30 \
+            --snapshot-root artifacts/research_input_snapshots \
+            --output artifacts/historical-research-inputs.json \
+            | tee artifacts/historical-research-inputs.log
+
+      - name: Record research-input acceptance status
+        if: always()
+        run: |
+          echo "outcome=${{ steps.probe.outcome }}" > artifacts/historical-research-inputs-status.txt
+
+      - name: Upload research-input snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-research-inputs-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+
+  historical-public-data:
+    name: Historical public-data probe (${{ matrix.code }}@${{ matrix.as_of }})
+    needs: core-tests
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/feature/investment-agent-evidence-v2') ||
+      (github.event_name == 'pull_request' && github.head_ref == 'feature/investment-agent-evidence-v2')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - code: "600036"
+            as_of: "2024-06-30"
+          - code: "601088"
+            as_of: "2023-06-30"
+          - code: "600519"
+            as_of: "2022-12-30"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip uv
+          uv sync --locked
+
+      - name: Probe strict historical public data
+        id: probe
+        continue-on-error: true
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          uv run python -u tools/historical_public_acceptance.py \
+            "${{ matrix.code }}@${{ matrix.as_of }}" \
+            --output "artifacts/historical-public-data-${{ matrix.code }}-${{ matrix.as_of }}.json" \
+            --corpus-root "artifacts/historical_source_corpus" \
+            | tee "artifacts/historical-public-data-${{ matrix.code }}-${{ matrix.as_of }}.log"
+
+      - name: Record probe status
+        if: always()
+        run: |
+          mkdir -p artifacts
+          echo "outcome=${{ steps.probe.outcome }}" > "artifacts/status-${{ matrix.code }}-${{ matrix.as_of }}.txt"
+
+      - name: Upload historical public-data artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-public-data-${{ matrix.code }}-${{ matrix.as_of }}-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

@@ -25,6 +25,7 @@
 """
 
 import asyncio
+import logging
 import time
 from datetime import date
 from typing import Dict, List, Optional, Tuple
@@ -33,7 +34,6 @@ import akshare as ak
 import pandas as pd
 
 from backtest.price_source import get_price_history
-from tools.utils import utils
 
 # 风格覆盖: 大盘 (上证/沪深300)、科技成长 (科创50/创业板指)、红利 (上证红利)。
 _INDEX_UNIVERSE: List[Tuple[str, str]] = [
@@ -43,6 +43,8 @@ _INDEX_UNIVERSE: List[Tuple[str, str]] = [
     ("sh000688", "科创50"),
     ("sz399006", "创业板指"),
 ]
+
+logger = logging.getLogger("MediaCrawler")
 
 _TTL_SECONDS = 6 * 3600
 _index_cache: Optional[Tuple[float, Dict[str, pd.Series]]] = None
@@ -64,7 +66,7 @@ async def _get_index_series() -> Dict[str, pd.Series]:
         try:
             df = await asyncio.to_thread(ak.stock_zh_index_daily, symbol=symbol)
         except Exception as e:
-            utils.logger.error(f"[market_context] stock_zh_index_daily({symbol}) failed: {e}")
+            logger.error(f"[market_context] stock_zh_index_daily({symbol}) failed: {e}")
             continue
         if df is None or df.empty:
             continue
@@ -101,19 +103,32 @@ def _summary(series: pd.Series) -> Dict:
     }
 
 
-async def get_market_context(stock_code: str) -> Optional[Dict]:
+async def get_market_context(
+    stock_code: str,
+    *,
+    as_of: Optional[date] = None,
+) -> Optional[Dict]:
     """
     返回 {indices: [{name, latest, ytd_pct, h1_pct, h2_pct}], stock: {...}}。
     stock 额外带 52 周高低点与 2018 年以来高低点 (用于判断"相对历史区间的位置")。
     指数与个股都取不到时返回 None。
     """
     index_series = await _get_index_series()
+    cutoff = pd.Timestamp(as_of) if as_of is not None else None
+    if cutoff is not None:
+        index_series = {
+            name: s[s.index <= cutoff]
+            for name, s in index_series.items()
+            if not s[s.index <= cutoff].empty
+        }
 
     start = _STOCK_HISTORY_START
+    if as_of is not None and as_of < _STOCK_HISTORY_START:
+        start = date(max(1990, as_of.year - 5), 1, 1)
     try:
-        stock_df = await get_price_history(stock_code, start)
+        stock_df = await get_price_history(stock_code, start, end=as_of)
     except Exception as e:
-        utils.logger.error(f"[market_context] get_price_history({stock_code}) failed: {e}")
+        logger.error(f"[market_context] get_price_history({stock_code}) failed: {e}")
         stock_df = pd.DataFrame(columns=["date", "close"])
 
     stock: Optional[Dict] = None
@@ -121,15 +136,23 @@ async def get_market_context(stock_code: str) -> Optional[Dict]:
         s = stock_df.copy()
         s["date"] = pd.to_datetime(s["date"])
         s = s.set_index("date")["close"].astype(float)
-        stock = _summary(s)
+        if cutoff is not None:
+            s = s[s.index <= cutoff]
+        if s.empty:
+            s = pd.Series(dtype=float)
+        else:
+            stock = _summary(s)
 
-        week52 = s[s.index >= (s.index[-1] - pd.Timedelta(days=365))]
-        if not week52.empty:
+        week52 = (
+            s[s.index >= (s.index[-1] - pd.Timedelta(days=365))]
+            if not s.empty else s
+        )
+        if stock is not None and not week52.empty:
             stock["w52_high"] = round(float(week52.max()), 2)
             stock["w52_high_date"] = str(week52.idxmax().date())
             stock["w52_low"] = round(float(week52.min()), 2)
             stock["w52_low_date"] = str(week52.idxmin().date())
-        if not s.empty:
+        if stock is not None and not s.empty:
             stock["hist_high"] = round(float(s.max()), 2)
             stock["hist_high_date"] = str(s.idxmax().date())
             stock["hist_low"] = round(float(s.min()), 2)

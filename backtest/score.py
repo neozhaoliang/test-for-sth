@@ -28,14 +28,17 @@
 
 import glob
 import json
+import logging
 import math
 import os
+from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 import config
 from model.m_backtest import StockCredibilityScore, UserCredibilityScore
-from tools.utils import utils
+logger = logging.getLogger("MediaCrawler")
 
 _Z_95 = 1.96  # 95% 置信度对应的标准正态分位数
 
@@ -64,8 +67,57 @@ def _record_files(user_id: Optional[str] = None) -> List[str]:
     return sorted(glob.glob(pattern))
 
 
-def load_records(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """加载指定用户 (或全部用户，user_id=None) 的所有验证记录，跨多个日期文件合并。"""
+def _epoch_seconds(value) -> int:
+    try:
+        ts = int(float(value or 0))
+    except (TypeError, ValueError):
+        return 0
+    while ts > 10_000_000_000:
+        ts //= 1000
+    return max(0, ts)
+
+
+def _date_from_epoch(value) -> Optional[date]:
+    ts = _epoch_seconds(value)
+    if ts <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(
+            ts, tz=ZoneInfo("Asia/Shanghai")
+        ).date()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def filter_records_as_of(
+    records: List[Dict[str, Any]],
+    as_of: Optional[date],
+) -> List[Dict[str, Any]]:
+    if as_of is None:
+        return list(records)
+
+    out: List[Dict[str, Any]] = []
+    for record in records:
+        predicted = _date_from_epoch(record.get("predicted_at"))
+        if predicted is None or predicted > as_of:
+            continue
+
+        verdict = str(record.get("verdict") or "")
+        if verdict in ("correct", "incorrect"):
+            verified = _date_from_epoch(record.get("verified_at"))
+            # Historical credibility can only use outcomes already observable by as_of.
+            if verified is None or verified > as_of:
+                continue
+        out.append(record)
+    return out
+
+
+def load_records(
+    user_id: Optional[str] = None,
+    *,
+    as_of: Optional[date] = None,
+) -> List[Dict[str, Any]]:
+    """加载验证记录；as_of 非空时只保留当时已经发布且已经可验证的记录。"""
     records: List[Dict[str, Any]] = []
     for path in _record_files(user_id):
         with open(path, encoding="utf-8") as f:
@@ -74,7 +126,7 @@ def load_records(user_id: Optional[str] = None) -> List[Dict[str, Any]]:
                 if not line:
                     continue
                 records.append(json.loads(line))
-    return records
+    return filter_records_as_of(records, as_of)
 
 
 def compact_records(user_id: str) -> int:
@@ -121,7 +173,7 @@ def compact_records(user_id: str) -> int:
             with open(path, "w", encoding="utf-8") as f:
                 for rec in per_file_kept[i]:
                     f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        utils.logger.info(f"[score.compact] {user_id} 清理旧版本记录 {dropped} 行")
+        logger.info(f"[score.compact] {user_id} 清理旧版本记录 {dropped} 行")
     return dropped
 
 
@@ -186,9 +238,12 @@ def score_user(records: List[Dict[str, Any]]) -> Optional[UserCredibilityScore]:
     )
 
 
-def score_all_users() -> List[UserCredibilityScore]:
-    """加载所有用户的记录并计算评分，按整体 Wilson 下界降序排列。"""
-    all_records = load_records()
+def score_all_users(
+    *,
+    as_of: Optional[date] = None,
+) -> List[UserCredibilityScore]:
+    """加载所有用户记录并评分；历史模式只使用 as_of 当时已经验证的结果。"""
+    all_records = load_records(as_of=as_of)
     by_user: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for r in all_records:
         by_user[str(r.get("user_id") or "")].append(r)

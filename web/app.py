@@ -26,6 +26,7 @@
 
 import asyncio
 import glob
+from datetime import date
 import json
 import os
 import sys
@@ -37,9 +38,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from analysis.knowledge_base import ensure_loaded as ensure_knowledge_base_loaded
+from analysis.knowledge_base import (
+    ensure_loaded as ensure_knowledge_base_loaded,
+    invalidate_cache as invalidate_knowledge_base_cache,
+)
 from analysis.realtime_price import resolve_stock_code
 from analysis.report import generate_report
+from analysis.research_context import (
+    ResearchRequest,
+    assert_request_supported,
+    historical_readiness,
+    SOURCE_TEMPORAL_CAPABILITIES,
+)
 from media_platform.xueqiu.help import normalize_user_id
 from tools.utils import utils
 
@@ -63,16 +73,23 @@ async def _preload_knowledge_base() -> None:
 
 class AnalyzeRequest(BaseModel):
     stock_code: str
+    mode: str = "live"
+    as_of: Optional[date] = None
+    save_snapshot: bool = False
 
 
 class AnalyzeResponse(BaseModel):
     task_id: str
 
 
-async def _run_analysis(task_id: str, stock_code: str) -> None:
+async def _run_analysis(
+    task_id: str,
+    stock_code: str,
+    research_request: ResearchRequest,
+) -> None:
     _tasks[task_id]["status"] = "running"
     try:
-        report = await generate_report(stock_code)
+        report = await generate_report(stock_code, request=research_request)
         _tasks[task_id]["status"] = "done"
         _tasks[task_id]["result"] = report.model_dump()
     except Exception as e:
@@ -91,10 +108,53 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     if not stock_code:
         raise HTTPException(status_code=404, detail=f"未找到股票: {raw_input}")
 
+    try:
+        research_request = ResearchRequest(
+            stock_code=stock_code,
+            mode=req.mode,
+            as_of=req.as_of,
+            save_snapshot=req.save_snapshot,
+        )
+        assert_request_supported(research_request)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except NotImplementedError as e:
+        readiness = historical_readiness()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(e),
+                "historical_ready": readiness.ready,
+                "safe_sources": readiness.safe_sources,
+                "blocking_sources": readiness.blocking_sources,
+                "reasons": readiness.reasons,
+            },
+        ) from e
+
     task_id = str(uuid.uuid4())
-    _tasks[task_id] = {"status": "pending", "result": None, "error": None}
-    asyncio.create_task(_run_analysis(task_id, stock_code))
+    _tasks[task_id] = {
+        "status": "pending",
+        "result": None,
+        "error": None,
+        "request": research_request.model_dump(mode="json"),
+    }
+    asyncio.create_task(_run_analysis(task_id, stock_code, research_request))
     return AnalyzeResponse(task_id=task_id)
+
+
+@app.get("/api/research/time-capabilities")
+async def get_research_time_capabilities() -> Dict:
+    readiness = historical_readiness()
+    return {
+        "historical_ready": readiness.ready,
+        "safe_sources": readiness.safe_sources,
+        "blocking_sources": readiness.blocking_sources,
+        "reasons": readiness.reasons,
+        "sources": {
+            name: item.model_dump(mode="json")
+            for name, item in SOURCE_TEMPORAL_CAPABILITIES.items()
+        },
+    }
 
 
 @app.get("/api/tasks/{task_id}")
@@ -168,11 +228,19 @@ async def _run_crawler_subprocess(task_id: str, cmd: list) -> None:
     returncode = await _run_cmd(cmd, log_lines)
     chain = _crawl_tasks[task_id].get("chain")
     if returncode == 0 and chain:
-        # 抓取成功后自动接续: 回测该用户发言并重建摘要 (LLM 分类每条帖子, 耗时较长)
-        log_lines.append("=" * 50)
-        log_lines.append("[web.app] 抓取完成, 自动开始回测与摘要重建")
-        log_lines.append("=" * 50)
-        returncode = await _run_cmd(chain, log_lines)
+        # 兼容旧的一条后续命令，也支持多条命令串行执行 (如 B站专栏 -> 视频字幕)。
+        commands = chain if chain and isinstance(chain[0], (list, tuple)) else [chain]
+        for idx, next_cmd in enumerate(commands, start=1):
+            log_lines.append("=" * 50)
+            log_lines.append(f"[web.app] 自动执行后续任务 {idx}/{len(commands)}")
+            log_lines.append("=" * 50)
+            returncode = await _run_cmd(list(next_cmd), log_lines)
+            if returncode != 0:
+                break
+    if returncode == 0:
+        # 原始知识语料可能变化；清掉进程内列表缓存。逐条蒸馏仍按内容哈希复用，
+        # 所以下次分析只会为新增/变化内容调用 LLM。
+        invalidate_knowledge_base_cache()
     _crawl_tasks[task_id]["status"] = "done" if returncode == 0 else "failed"
 
 
@@ -223,6 +291,37 @@ async def crawl_bili_opus(req: CrawlBiliOpusRequest) -> CrawlTaskResponse:
         "--creator_id", creator_id,
     ]
     task_id = await _start_crawl_task(cmd)
+    return CrawlTaskResponse(task_id=task_id)
+
+
+@app.post("/api/crawl/bili_knowledge", response_model=CrawlTaskResponse)
+async def crawl_bili_knowledge(req: CrawlBiliOpusRequest) -> CrawlTaskResponse:
+    """
+    一次更新 B站 KOL 的两类知识源：
+    1) opus 专栏/图文全文；
+    2) creator 视频元数据 + 可用的人工/AI字幕。
+    两步串行，复用浏览器持久登录态；任何一步失败都保留日志并将任务标记失败。
+    """
+    creator_id = req.creator_id.strip()
+    if not creator_id:
+        raise HTTPException(status_code=400, detail="creator_id 不能为空")
+
+    opus_cmd = [
+        sys.executable, "main.py",
+        "--platform", "bili",
+        "--lt", "qrcode",
+        "--type", "opus",
+        "--creator_id", creator_id,
+    ]
+    video_cmd = [
+        sys.executable, "main.py",
+        "--platform", "bili",
+        "--lt", "qrcode",
+        "--type", "creator",
+        "--creator_id", creator_id,
+        "--get_comment", "false",
+    ]
+    task_id = await _start_crawl_task(opus_cmd, chain=[video_cmd])
     return CrawlTaskResponse(task_id=task_id)
 
 
@@ -337,7 +436,22 @@ _INDEX_HTML = """<!DOCTYPE html>
   header { margin-bottom: 24px; }
   header h1 { margin: 0 0 4px; font-size: 24px; }
   header p { margin: 0; color: #666; font-size: 14px; }
-  .search-bar { display: flex; gap: 8px; margin: 20px 0; }
+  .search-bar { display: flex; gap: 8px; margin: 20px 0 8px; }
+  .research-options { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin:0 0 14px; color:#666; font-size:12px; }
+  .research-options label { display:flex; align-items:center; gap:5px; }
+  .research-mode-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .research-mode-controls select, .research-mode-controls input[type="date"] {
+    padding:6px 8px; border:1px solid #ccc; border-radius:4px; background:#fff;
+  }
+  .historical-banner {
+    margin:10px 0; padding:10px 12px; border-left:4px solid #b26a00;
+    background:#fff6e5; border-radius:4px; font-size:13px;
+  }
+  .live-banner {
+    margin:10px 0; padding:8px 12px; border-left:4px solid #1a73e8;
+    background:#eef6ff; border-radius:4px; font-size:13px;
+  }
+  .temporal-status { padding:6px 9px; border-radius:4px; background:#f5f7fa; border:1px solid #e0e4e8; }
   input { padding: 8px; font-size: 14px; width: 200px; border: 1px solid #ccc; border-radius: 4px; }
   button { padding: 8px 20px; font-size: 14px; cursor: pointer; background: #1a73e8; color: #fff; border: none; border-radius: 4px; }
   button:hover { background: #1558b0; }
@@ -386,6 +500,24 @@ _INDEX_HTML = """<!DOCTYPE html>
   <input id="stockCode" placeholder="股票代码或名称，如 SH603408 / 洛阳钼业" />
   <button id="submitBtn">分析</button>
 </div>
+<div class="research-options">
+  <div class="research-mode-controls">
+    <label>研究模式
+      <select id="researchMode">
+        <option value="live">Live：按今天可用信息分析</option>
+        <option value="historical">Historical：站在过去某天分析</option>
+      </select>
+    </label>
+    <label id="asOfLabel" style="display:none;">截止日期
+      <input type="date" id="asOfDate" />
+    </label>
+    <label><input type="checkbox" id="saveSnapshot" /> 保存标准研究快照</label>
+  </div>
+  <div id="historicalHint" class="crawl-hint" style="display:none;">
+    历史模式只使用截止日当时已可获得的信息；缺失数据保持缺失，不会用今天的数据回填。
+  </div>
+  <span id="temporalStatus" class="temporal-status">检查 historical/as-of 能力...</span>
+</div>
 <div class="watchlist">
   <p>常用股票 (点击可快速填入分析):</p>
   <div id="stockChips"></div>
@@ -417,10 +549,10 @@ _INDEX_HTML = """<!DOCTYPE html>
     </div>
   </details>
 
-  <p class="crawl-hint">抓取/更新 B 站专栏作者的全部图文 (需要登录，首次抓取请留意弹出的浏览器窗口扫码)</p>
+  <p class="crawl-hint">抓取/更新 B 站 KOL 知识：专栏全文 + 创作者视频字幕（人工字幕优先，AI字幕会标记；无字幕不会拿简介替代正文）。需要登录。</p>
   <div class="crawl-row">
     <input id="biliCreatorId" placeholder="B站 UID 或空间 URL" />
-    <button id="crawlBiliBtn">抓取/更新</button>
+    <button id="crawlBiliBtn">更新专栏+视频字幕</button>
   </div>
 
   <div class="crawl-status" id="crawlStatus"></div>
@@ -462,6 +594,39 @@ function renderWatchlist() {
   });
 }
 
+function syncResearchModeControls() {
+  const mode = document.getElementById('researchMode').value;
+  const historical = mode === 'historical';
+  document.getElementById('asOfLabel').style.display = historical ? 'inline-flex' : 'none';
+  document.getElementById('historicalHint').style.display = historical ? 'block' : 'none';
+  if (historical) {
+    // Historical runs are expensive and should be reproducible by default.
+    document.getElementById('saveSnapshot').checked = true;
+  }
+}
+
+async function loadTemporalCapabilities() {
+  const el = document.getElementById('temporalStatus');
+  try {
+    const res = await fetch('/api/research/time-capabilities');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const safe = data.safe_sources || [];
+    const blocking = data.blocking_sources || [];
+    if (data.historical_ready) {
+      el.textContent = 'Historical/as-of 已就绪：' + safe.length + ' 路数据源通过 point-in-time 校验';
+      el.title = '历史模式已具备全部必要 point-in-time 数据源';
+    } else {
+      el.textContent = 'Historical/as-of 尚未开放：' + safe.length + ' 路已安全，' +
+        blocking.length + ' 路仍阻塞';
+      el.title = blocking.map(x => x + ': ' + ((data.reasons || {})[x] || '')).join('\\n');
+    }
+  } catch (e) {
+    el.textContent = 'Historical/as-of 能力状态读取失败';
+    el.title = String(e);
+  }
+}
+
 async function submitAnalysis() {
   const stockCode = document.getElementById('stockCode').value.trim();
   if (!stockCode) return;
@@ -472,6 +637,12 @@ async function submitAnalysis() {
     document.getElementById('status').textContent = '已有分析任务在跑，等它结束再提交 (一次分析要几分钟)';
     return;
   }
+  const mode = document.getElementById('researchMode').value;
+  const asOf = document.getElementById('asOfDate').value;
+  if (mode === 'historical' && !asOf) {
+    document.getElementById('status').textContent = '历史模式必须选择截止日期';
+    return;
+  }
   submitting = true;
   document.getElementById('result').innerHTML = '';
   document.getElementById('status').textContent = '提交中...';
@@ -480,7 +651,14 @@ async function submitAnalysis() {
   const res = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stock_code: stockCode }),
+    body: JSON.stringify({
+      stock_code: stockCode,
+      mode: document.getElementById('researchMode').value,
+      as_of: document.getElementById('researchMode').value === 'historical'
+        ? (document.getElementById('asOfDate').value || null)
+        : null,
+      save_snapshot: document.getElementById('saveSnapshot').checked,
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -518,6 +696,12 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
+function safeExternalLink(url, label) {
+  if (!url || !/^https?:\/\//i.test(url)) return escapeHtml(label || '');
+  return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' +
+    escapeHtml(label || url) + '</a>';
+}
+
 function stanceLabel(stance) {
   if (stance === 'bullish') return '看多';
   if (stance === 'bearish') return '看空';
@@ -547,6 +731,50 @@ function pctStr(v) {
   return (v === null || v === undefined) ? '暂缺' : v + '%';
 }
 
+function renderWorkingCapitalGrowthChart(facts) {
+  const candidates = [
+    ['营收', facts.revenue_yoy_pct],
+    ['应收', facts.accounts_receivable_yoy_pct],
+    ['存货', facts.inventory_yoy_pct],
+  ].filter(([, v]) => v !== null && v !== undefined && Number.isFinite(Number(v)));
+  if (candidates.length < 2) return '';
+
+  const values = candidates.map(([, v]) => Number(v));
+  const maxAbs = Math.max(5, ...values.map(Math.abs));
+  const W = 620, H = 205, padL = 48, padR = 20, padT = 24, padB = 42;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const zeroY = padT + plotH / 2;
+  const scale = (plotH / 2 - 10) / maxAbs;
+  const barW = Math.min(90, plotW / (candidates.length * 1.8));
+  const gap = plotW / candidates.length;
+
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H +
+    '" width="100%" role="img" aria-label="营收应收存货同比增速对比">';
+  svg += '<line x1="' + padL + '" y1="' + zeroY + '" x2="' + (W - padR) +
+    '" y2="' + zeroY + '" stroke="#aaa" stroke-width="1"/>';
+  svg += '<text x="' + (padL - 6) + '" y="' + (zeroY + 4) +
+    '" text-anchor="end" font-size="10" fill="#666">0%</text>';
+
+  candidates.forEach(([name, raw], i) => {
+    const value = Number(raw);
+    const h = Math.abs(value) * scale;
+    const x = padL + gap * (i + 0.5) - barW / 2;
+    const y = value >= 0 ? zeroY - h : zeroY;
+    svg += '<rect class="holder-mark" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) +
+      '" width="' + barW.toFixed(1) + '" height="' + Math.max(1, h).toFixed(1) +
+      '" rx="3" fill="currentColor" fill-opacity="0.55" data-tip="' +
+      escapeHtml(name + '同比 ' + (value >= 0 ? '+' : '') + value + '%') + '"/>';
+    svg += '<text x="' + (x + barW / 2).toFixed(1) + '" y="' +
+      (value >= 0 ? y - 5 : y + h + 13).toFixed(1) +
+      '" text-anchor="middle" font-size="11" fill="#444">' +
+      (value >= 0 ? '+' : '') + value + '%</text>';
+    svg += '<text x="' + (x + barW / 2).toFixed(1) + '" y="' + (H - 14) +
+      '" text-anchor="middle" font-size="12" fill="#333">' + escapeHtml(name) + '</text>';
+  });
+  svg += '</svg>';
+  return svg;
+}
+
 function renderFundamentalsBlock(f) {
   if (!f || !f.facts) {
     return '<div class="evidence-block missing"><b>结构性事实:</b> 暂缺 (本次未能取到同花顺 F10 数据)</div>';
@@ -559,6 +787,20 @@ function renderFundamentalsBlock(f) {
     ['净利润', yi(x.net_profit) + (x.net_profit_basis ? ' (口径: ' + x.net_profit_basis + ')' : '')],
     ['经营活动现金流净额', yi(x.operating_cash_flow)],
     ['经营现金流/净利润', x.cash_to_profit_ratio === null || x.cash_to_profit_ratio === undefined ? '暂缺' : x.cash_to_profit_ratio],
+    ['应收账款',
+      yi(x.accounts_receivable_yuan) +
+      (x.accounts_receivable_yoy_pct === null || x.accounts_receivable_yoy_pct === undefined
+        ? '' : '，同比 ' + (x.accounts_receivable_yoy_pct >= 0 ? '+' : '') + x.accounts_receivable_yoy_pct + '%') +
+      (x.receivable_growth_minus_revenue_pp === null || x.receivable_growth_minus_revenue_pp === undefined
+        ? '' : '，较营收增速 ' + (x.receivable_growth_minus_revenue_pp >= 0 ? '+' : '') + x.receivable_growth_minus_revenue_pp + 'pct')
+    ],
+    ['存货',
+      yi(x.inventory_yuan) +
+      (x.inventory_yoy_pct === null || x.inventory_yoy_pct === undefined
+        ? '' : '，同比 ' + (x.inventory_yoy_pct >= 0 ? '+' : '') + x.inventory_yoy_pct + '%') +
+      (x.inventory_growth_minus_revenue_pp === null || x.inventory_growth_minus_revenue_pp === undefined
+        ? '' : '，较营收增速 ' + (x.inventory_growth_minus_revenue_pp >= 0 ? '+' : '') + x.inventory_growth_minus_revenue_pp + 'pct')
+    ],
     ['研发投入', yi(x.rd_investment_yuan) + '，研发强度 ' + pctStr(x.rd_intensity_pct)],
     ['前五大客户占营收', pctStr(x.top5_customer_pct)],
     ['前五大供应商占采购额', pctStr(x.top5_supplier_pct)],
@@ -572,6 +814,13 @@ function renderFundamentalsBlock(f) {
   let html = '<div class="evidence-block"><b>结构性事实 (同花顺 F10，公司定期报告原文):</b><ul>' +
     rows.map(([k, v]) => '<li>' + k + ': ' + escapeHtml(String(v)) + '</li>').join('') + '</ul>';
 
+  const wcChart = renderWorkingCapitalGrowthChart(x);
+  if (wcChart) {
+    html += '<div style="margin-top:8px"><b>营运资金压力：营收 vs 应收/存货同比增速</b><br>' +
+      wcChart +
+      '<div class="credibility-note">应收或存货增速长期显著高于营收时，需要进一步解释回款质量、渠道压货或库存积压；单一期不能独立定性。</div></div>';
+  }
+
   const series = x.holder_count_series || [];
   if (series.length >= 2) {
     html += '<div style="margin-top:6px"><b>股东户数 vs 同期股价 (判断股价暴涨是否伴随筹码派发):</b><br>' +
@@ -582,6 +831,192 @@ function renderFundamentalsBlock(f) {
   html += '<div class="risk-block"><b>公司自述的风险 (原文):</b> ' +
     (risks ? escapeHtml(risks) : '暂缺 (该公司本期报告的董事会经营评述中没有独立的风险小节)') + '</div>';
   html += '</div>';
+  return html;
+}
+
+function renderRdTeamBlock(rd) {
+  if (!rd) {
+    return '<div class="evidence-block missing"><b>研发团队组成:</b> 暂缺 (本次未取得巨潮最新年报研发人员表)</div>';
+  }
+  if (rd.parse_status !== 'ok') {
+    return '<div class="evidence-block missing"><b>研发团队组成:</b> 已定位 ' +
+      escapeHtml(rd.title || '最新年报') + '，但解析状态为 ' +
+      escapeHtml(rd.parse_status || 'unknown') + '；不据此猜测人才结构</div>';
+  }
+
+  let html = '<div class="evidence-block"><b>研发团队组成（巨潮最新年报）:</b><ul>';
+  if (rd.rd_headcount !== null && rd.rd_headcount !== undefined) {
+    html += '<li>研发人员: ' + rd.rd_headcount + ' 人' +
+      (rd.rd_staff_ratio_pct !== null && rd.rd_staff_ratio_pct !== undefined
+        ? '，占员工总数 ' + rd.rd_staff_ratio_pct + '%' : '') + '</li>';
+  }
+  const edu = rd.education || {};
+  const eduLabels = {
+    doctor: '博士', master: '硕士', bachelor: '本科',
+    college: '专科', high_school_or_below: '高中及以下',
+  };
+  const eduParts = Object.keys(eduLabels)
+    .filter(k => edu[k] !== null && edu[k] !== undefined)
+    .map(k => eduLabels[k] + ' ' + edu[k] + ' 人');
+  if (eduParts.length) {
+    html += '<li>学历结构: ' + eduParts.join('，') + '</li>';
+  }
+  const age = rd.age || {};
+  const ageLabels = {
+    under_30: '30岁以下', '30_to_40': '30-40岁', '40_to_50': '40-50岁',
+    '50_to_60': '50-60岁', '60_or_above': '60岁及以上',
+  };
+  const ageParts = Object.keys(ageLabels)
+    .filter(k => age[k] !== null && age[k] !== undefined)
+    .map(k => ageLabels[k] + ' ' + age[k] + ' 人');
+  if (ageParts.length) {
+    html += '<li>年龄结构: ' + ageParts.join('，') + '</li>';
+  }
+  if (rd.hit_pages && rd.hit_pages.length) {
+    html += '<li>年报命中页: ' + rd.hit_pages.join('、') + '</li>';
+  }
+  html += '</ul>';
+  if (rd.pdf_url) {
+    html += '<div>' + safeExternalLink(rd.pdf_url, rd.title || '打开巨潮年报原文') + '</div>';
+  }
+  html += '<div class="credibility-note">学历/年龄结构只描述研发队伍构成，不能单独推出技术实力；需与研发强度、专利和产品兑现结合。</div>';
+  html += '</div>';
+  return html;
+}
+
+function renderManagementCapitalBlock(mc) {
+  if (!mc) {
+    return '<div class="evidence-block missing"><b>管理层与长期资本分配:</b> 暂缺</div>';
+  }
+  let html = '<div class="evidence-block"><b>管理层与长期资本分配:</b>';
+
+  const a = mc.alignment || {};
+  const alignment = [];
+  if (a.chairman) alignment.push('董事长 ' + escapeHtml(a.chairman));
+  if (a.joined_year) {
+    alignment.push(a.joined_year + '年加入' +
+      (a.tenure_years !== null && a.tenure_years !== undefined ? '，约 ' + a.tenure_years + ' 年' : ''));
+  }
+  if (a.chairman_salary_wan !== null && a.chairman_salary_wan !== undefined) {
+    alignment.push('年薪 ' + a.chairman_salary_wan + ' 万元');
+  }
+  if (a.chairman_shares) alignment.push('持股 ' + escapeHtml(a.chairman_shares));
+  html += '<div><b>利益绑定:</b> ' + (alignment.length ? alignment.join('；') : '暂缺') + '</div>';
+
+  const ex = mc.execution || {};
+  if (Object.keys(ex).length) {
+    const parts = [];
+    if (ex.period_start || ex.period_end) parts.push('观察期 ' + escapeHtml(ex.period_start || '') + '~' + escapeHtml(ex.period_end || ''));
+    if (ex.roe_latest_pct !== null && ex.roe_latest_pct !== undefined) {
+      parts.push('ROE ' + ex.roe_start_pct + '% → ' + ex.roe_latest_pct + '% (' +
+        (ex.roe_change_pp >= 0 ? '+' : '') + ex.roe_change_pp + 'pct；区间 ' +
+        ex.roe_min_pct + '%~' + ex.roe_max_pct + '%)');
+    }
+    if (ex.net_profit_growth_observations) {
+      parts.push('净利润增速为正 ' + ex.net_profit_growth_positive_periods + '/' + ex.net_profit_growth_observations + ' 个观察期');
+    }
+    if (ex.net_margin_change_pp !== null && ex.net_margin_change_pp !== undefined) {
+      parts.push('净利率较起点 ' + (ex.net_margin_change_pp >= 0 ? '+' : '') + ex.net_margin_change_pp + 'pct');
+    }
+    html += '<div><b>经营执行:</b> ' + parts.join('；') + '</div>';
+  }
+
+  const renderWindow = (row, label) => {
+    if (!row) return '';
+    const buybackYi = ((row.buyback_actual_amount_yuan || 0) / 1e8).toFixed(2);
+    return '<li><b>' + label + ':</b> 分红覆盖 ' + row.dividend_years_count + '/' + row.window_years +
+      ' 个日历年，累计每10股现金分红 ' + row.cash_dividend_per_10_total + ' 元；' +
+      '回购 ' + row.buyback_records + ' 次，已回购约 ' + buybackYi + ' 亿元；' +
+      'F10再融资 ' + row.refinancing_records + ' 次，巨潮再融资公告 ' +
+      row.primary_refinancing_announcements + ' 条；减持公告 ' + row.insider_reduction_announcements +
+      ' 条；处罚/警示/问询等公告 ' + row.governance_negative_announcements + ' 条</li>';
+  };
+  html += '<ul>' + renderWindow(mc.five_year, '近5年') + renderWindow(mc.ten_year, '近10年') + '</ul>';
+
+  const bad = mc.recent_governance_negative_events || [];
+  if (bad.length) {
+    html += '<details><summary style="cursor:pointer;">查看近期治理负面公告</summary><ul>' +
+      bad.slice(0, 5).map(x => '<li>' + escapeHtml(x.published_at || '') + ' ' +
+        safeExternalLink(x.url, x.title || '公告') + '</li>').join('') + '</ul></details>';
+  }
+  const reductions = mc.recent_insider_reduction_events || [];
+  if (reductions.length) {
+    html += '<details><summary style="cursor:pointer;">查看近期减持公告</summary><ul>' +
+      reductions.slice(0, 5).map(x => '<li>' + escapeHtml(x.published_at || '') + ' ' +
+        safeExternalLink(x.url, x.title || '公告') + '</li>').join('') + '</ul></details>';
+  }
+  html += '<div class="credibility-note">这里只展示长期行为记录，不把单个事实直接等同于“人品”；管理层判断需同时看利益绑定、经营兑现和资本分配。</div>';
+  html += '</div>';
+  return html;
+}
+
+function renderMacroRatesBlock(m) {
+  if (!m) {
+    return '<div class="evidence-block missing"><b>中美利率环境:</b> 暂缺；不据此讨论加息/降息影响</div>';
+  }
+  let html = '<div class="evidence-block"><b>中美利率环境:</b><ul>';
+  const us = m.us || {};
+  const ffFresh = !!((us.fed_target_freshness || {}).fresh);
+  if (ffFresh && us.fed_target_lower_pct !== null && us.fed_target_lower_pct !== undefined &&
+      us.fed_target_upper_pct !== null && us.fed_target_upper_pct !== undefined) {
+    html += '<li>Fed目标区间: ' + us.fed_target_lower_pct + '%~' + us.fed_target_upper_pct +
+      '%（' + escapeHtml(us.fed_target_upper_as_of || '') + '），上限较约180日前 ' +
+      (us.fed_target_upper_change_180d_pp >= 0 ? '+' : '') + us.fed_target_upper_change_180d_pp + 'pct</li>';
+  } else {
+    html += '<li>Fed目标区间: 数据缺失或过期</li>';
+  }
+  const u10Fresh = !!((us.us10y_freshness || {}).fresh);
+  if (u10Fresh && us.us10y_yield_pct !== null && us.us10y_yield_pct !== undefined) {
+    html += '<li>美国10Y国债: ' + us.us10y_yield_pct + '%（' + escapeHtml(us.us10y_as_of || '') +
+      '），30日变化 ' + (us.us10y_change_30d_pp >= 0 ? '+' : '') + us.us10y_change_30d_pp +
+      'pct，90日变化 ' + (us.us10y_change_90d_pp >= 0 ? '+' : '') + us.us10y_change_90d_pp + 'pct</li>';
+  } else {
+    html += '<li>美国10Y国债: 数据缺失或过期</li>';
+  }
+
+  const cn = m.china || {};
+  const cnFresh = !!((cn.freshness || {}).fresh);
+  if (cnFresh) {
+    html += '<li>中国LPR: 1年期 ' + cn.lpr_1y_pct + '%，5年期 ' + cn.lpr_5y_pct +
+      '%（' + escapeHtml(cn.as_of || '') + '）</li>';
+  } else {
+    html += '<li>中国LPR: 数据缺失或过期</li>';
+  }
+  html += '</ul>';
+  if (us.source_urls) {
+    const links = [];
+    if (us.source_urls.target_upper) links.push(safeExternalLink(us.source_urls.target_upper, 'Fed目标上限/FRED'));
+    if (us.source_urls.us10y) links.push(safeExternalLink(us.source_urls.us10y, '美国10Y/FRED'));
+    if (links.length) html += '<div>' + links.join(' · ') + '</div>';
+  }
+  if (cn.source_url) html += '<div>' + safeExternalLink(cn.source_url, '中国LPR来源') + '</div>';
+  (m.warnings || []).forEach(x => {
+    html += '<div class="credibility-note">⚠ ' + escapeHtml(x) + '</div>';
+  });
+  html += '<div class="credibility-note">LPR是贷款市场报价利率，不等同于央行政策利率；过期序列不会作为当前宏观证据。</div>';
+  html += '</div>';
+  return html;
+}
+
+function renderPolicyEventsBlock(p) {
+  if (!p || !(p.events || []).length) {
+    return '<div class="evidence-block missing"><b>近期政策/地缘事件线索:</b> 暂缺；不能反向推断没有相关风险</div>';
+  }
+  let html = '<div class="evidence-block"><b>近期政策/地缘事件线索:</b>' +
+    '<div class="credibility-note">以下来自财经媒体/快讯，只是待核对的事件线索；必须结合公司实际暴露与一手/市场数据，不能把标题直接当成利好或利空。</div>' +
+    '<ul>';
+  (p.events || []).slice(0, 12).forEach(x => {
+    const label = (x.published_at || '日期未知') + ' [' + (x.media || '媒体来源未知') + '] ' +
+      (x.title || '');
+    html += '<li>' +
+      (x.url ? safeExternalLink(x.url, label) : escapeHtml(label));
+    if (x.matched_terms && x.matched_terms.length) {
+      html += '<br><span class="credibility-note">匹配暴露/主题: ' +
+        x.matched_terms.map(escapeHtml).join('、') + '</span>';
+    }
+    html += '</li>';
+  });
+  html += '</ul></div>';
   return html;
 }
 
@@ -646,6 +1081,149 @@ function renderEvidenceSection(report) {
     html += '<div class="evidence-block missing"><b>融资盘与流通盘:</b> 暂缺</div>';
   }
 
+  const ash = report.a_share_structure;
+  if (ash) {
+    let ashHtml = '<div class="evidence-block"><b>A股公开资金结构 (' +
+      escapeHtml(ash.report_period || '报告期未知') + '):</b>';
+    const inst = ash.institution_summary || [];
+    if (inst.length) {
+      ashHtml += '<ul>' + inst.map(x => {
+        let s = escapeHtml(x.type || '') + ': ' + (x.institutions || 0) + ' 家';
+        if (x.latest_float_ratio_pct !== null && x.latest_float_ratio_pct !== undefined) {
+          s += '，合计占流通股 ' + x.latest_float_ratio_pct + '%';
+        }
+        if (x.float_ratio_change_pct !== null && x.float_ratio_change_pct !== undefined) {
+          s += '，较前期 ' + (x.float_ratio_change_pct >= 0 ? '+' : '') + x.float_ratio_change_pct + '%';
+        }
+        return '<li>' + s + '</li>';
+      }).join('') + '</ul>';
+    }
+    const qoq = ash.institution_qoq || [];
+    if (qoq.length) {
+      ashHtml += '<details open><summary style="cursor:pointer;"><b>机构季度变化 ' +
+        escapeHtml((ash.previous_report_period || '前期') + ' → ' + (ash.report_period || '本期')) +
+        '</b></summary><ul>' +
+        qoq.map(x => {
+          const parts = [];
+          if (x.float_ratio_change_pp !== null && x.float_ratio_change_pp !== undefined) {
+            parts.push('占流通股 ' + (x.float_ratio_change_pp >= 0 ? '+' : '') + x.float_ratio_change_pp + 'pct');
+          }
+          if (x.shares_change_pct !== null && x.shares_change_pct !== undefined) {
+            parts.push('持股数 ' + (x.shares_change_pct >= 0 ? '+' : '') + x.shares_change_pct + '%');
+          }
+          if (x.institution_count_change !== null && x.institution_count_change !== undefined) {
+            parts.push('机构数 ' + (x.institution_count_change >= 0 ? '+' : '') + x.institution_count_change);
+          }
+          return '<li>' + escapeHtml(x.type || '') + ': ' + escapeHtml(parts.join('，') || '可比数据不足') + '</li>';
+        }).join('') + '</ul>' +
+        renderInstitutionChangeChart(qoq) +
+        '</details>';
+    }
+
+    const fundQoq = ash.fund_qoq || {};
+    const fundInc = fundQoq.increased || [];
+    const fundDec = fundQoq.decreased || [];
+    const fundNew = fundQoq.newly_seen || [];
+    const fundExit = fundQoq.exited_top_list || [];
+    if (fundInc.length || fundDec.length || fundNew.length || fundExit.length) {
+      const renderFundMove = x => {
+        let move = '';
+        if (x.float_ratio_change_pp !== null && x.float_ratio_change_pp !== undefined) {
+          move = (x.float_ratio_change_pp >= 0 ? '+' : '') + x.float_ratio_change_pp + 'pct流通股';
+        } else if (x.shares_change_pct !== null && x.shares_change_pct !== undefined) {
+          move = '持股数 ' + (x.shares_change_pct >= 0 ? '+' : '') + x.shares_change_pct + '%';
+        }
+        return escapeHtml(x.name || '') + (move ? ' (' + escapeHtml(move) + ')' : '');
+      };
+      ashHtml += '<details><summary style="cursor:pointer;"><b>公募基金季度变化</b></summary>';
+      if (fundInc.length) {
+        ashHtml += '<div>增持较多：' + fundInc.slice(0, 6).map(renderFundMove).join('；') + '</div>';
+      }
+      if (fundDec.length) {
+        ashHtml += '<div>减持较多：' + fundDec.slice(0, 6).map(renderFundMove).join('；') + '</div>';
+      }
+      if (fundNew.length) {
+        ashHtml += '<div>本期新见：' + fundNew.slice(0, 6).map(x => escapeHtml(x.name || '')).join('；') + '</div>';
+      }
+      if (fundExit.length) {
+        ashHtml += '<div>本期明细未再见：' + fundExit.slice(0, 6).map(x => escapeHtml(x.name || '')).join('；') + '</div>';
+      }
+      ashHtml += '<div class="credibility-note">“新见/未再见”只表示本次机构明细中的披露变化，不等于首次买入或全部卖出。</div></details>';
+    }
+
+    const special = ash.special_holders || {};
+    const labels = {
+      national_team: '汇金/证金/国新/诚通等国家资本',
+      social_security: '社保基金',
+      insurance: '保险资金',
+      foreign: '香港中央结算/QFII等境外资金',
+      public_fund: '公募基金',
+    };
+    ashHtml += '<div><b>前十大流通股东中特殊资金:</b><ul>';
+    Object.keys(labels).forEach(k => {
+      const holders = special[k] || [];
+      ashHtml += '<li>' + labels[k] + ': ' +
+        (holders.length
+          ? holders.slice(0, 5).map(h => escapeHtml(h.name || '') +
+              (h.float_ratio_pct !== null && h.float_ratio_pct !== undefined
+                ? ' (' + h.float_ratio_pct + '%)' : '')).join('；')
+          : '本期前十大未见') +
+        '</li>';
+    });
+    ashHtml += '</ul></div>';
+
+    const funds = ash.fund_details || [];
+    if (funds.length) {
+      ashHtml += '<details><summary style="cursor:pointer;">主要公募基金持仓</summary><ul>' +
+        funds.slice(0, 8).map(f => {
+          let s = escapeHtml(f.name || '') +
+            (f.latest_float_ratio_pct !== null && f.latest_float_ratio_pct !== undefined
+              ? '：占流通股 ' + f.latest_float_ratio_pct + '%' : '');
+          if (f.float_ratio_change_pct !== null && f.float_ratio_change_pct !== undefined) {
+            s += '，较前期 ' + (f.float_ratio_change_pct >= 0 ? '+' : '') + f.float_ratio_change_pct + '%';
+          }
+          return '<li>' + s + '</li>';
+        }).join('') + '</ul></details>';
+    }
+
+    const etfs = ash.etf_details || [];
+    ashHtml += '<details><summary style="cursor:pointer;">可识别ETF持仓 (' + etfs.length + ')</summary>' +
+      (etfs.length
+        ? '<ul>' + etfs.slice(0, 8).map(f => {
+            let s = escapeHtml(f.name || '') +
+              (f.latest_float_ratio_pct !== null && f.latest_float_ratio_pct !== undefined
+                ? '：占流通股 ' + f.latest_float_ratio_pct + '%' : '');
+            if (f.float_ratio_change_pct !== null && f.float_ratio_change_pct !== undefined) {
+              s += '，较前期 ' + (f.float_ratio_change_pct >= 0 ? '+' : '') + f.float_ratio_change_pct + '%';
+            }
+            return '<li>' + s + '</li>';
+          }).join('') + '</ul>'
+        : '<div class="credibility-note">本期机构明细中未识别到ETF名称。</div>') +
+      '</details>';
+
+    const unlock = ash.unlock_supply || {};
+    const upcoming = unlock.upcoming_12m || [];
+    if (upcoming.length) {
+      ashHtml += '<details open><summary style="cursor:pointer;"><b>未来12个月限售解禁 (' + upcoming.length + '批)</b></summary><ul>' +
+        upcoming.slice(0, 8).map(x =>
+          '<li>' + escapeHtml(x.date || '') + '：解禁 ' +
+          (x.unlock_shares === null || x.unlock_shares === undefined ? '暂缺' : (x.unlock_shares / 1e8).toFixed(2) + ' 亿股') +
+          (x.float_market_ratio_pct === null || x.float_market_ratio_pct === undefined
+            ? '' : '，约占解禁前流通市值 ' + x.float_market_ratio_pct + '%') +
+          (x.type ? '，' + escapeHtml(x.type) : '') +
+          '</li>'
+        ).join('') + '</ul></details>';
+    }
+
+    (ash.notes || []).forEach(n => {
+      ashHtml += '<div class="credibility-note">· ' + escapeHtml(n) + '</div>';
+    });
+    ashHtml += '</div>';
+    html += ashHtml;
+  } else {
+    html += '<div class="evidence-block missing"><b>A股公开资金结构:</b> 暂缺；不能据此推断国家队、公募、险资或外资动向</div>';
+  }
+
   const pt = report.profitability_trend;
   if (pt) {
     html += '<div class="evidence-block"><b>盈利能力与成本弹性:</b><ul>' +
@@ -664,7 +1242,7 @@ function renderEvidenceSection(report) {
     const div = report.dividend_history || [];
     if (div.length) {
       html += '<div class="evidence-block"><b>历史分红:</b><ul>' +
-        div.map(d => '<li>' + escapeHtml(d.announce_date) + ': 每10股派息 ' + d.dividend_per_10_shares + ' 元 (' + escapeHtml(d.progress) + ')</li>').join('') +
+        div.slice(0, 12).map(d => '<li>' + escapeHtml(d.announce_date) + ': 每10股派息 ' + d.dividend_per_10_shares + ' 元 (' + escapeHtml(d.progress) + ')</li>').join('') +
         '</ul></div>';
     } else {
       html += '<div class="evidence-block missing"><b>历史分红:</b> 暂缺</div>';
@@ -674,7 +1252,7 @@ function renderEvidenceSection(report) {
   const bb = report.buyback_history || [];
   if (bb.length) {
     html += '<div class="evidence-block"><b>历史回购:</b><ul>' +
-      bb.map(b => '<li>' + escapeHtml(b.announce_date) + ': 计划金额区间 [' + b.planned_amount_range[0] + ', ' + b.planned_amount_range[1] +
+      bb.slice(0, 10).map(b => '<li>' + escapeHtml(b.announce_date) + ': 计划金额区间 [' + b.planned_amount_range[0] + ', ' + b.planned_amount_range[1] +
         ']，已回购 ' + b.actual_amount + ' (' + escapeHtml(b.progress) + ')</li>').join('') +
       '</ul></div>';
   } else {
@@ -683,12 +1261,36 @@ function renderEvidenceSection(report) {
 
   const cs = report.commodity_signal;
   if (cs) {
-    html += '<div class="evidence-block"><b>大宗商品价差/汇率 (周期性矿业股):</b> 沪铜 ' + cs.sh_copper_price + ' ' + escapeHtml(cs.sh_copper_unit) +
-      '，COMEX铜 ' + cs.comex_copper_price + ' ' + escapeHtml(cs.comex_copper_unit) +
-      '，人民币汇率趋势: ' + escapeHtml(cs.rmb_trend || '暂缺') +
-      (cs.note ? '<br>' + escapeHtml(cs.note) : '') + '</div>';
+    html += '<div class="evidence-block"><b>周期商品锚 (' + escapeHtml(cs.route || '未分类') +
+      (cs.as_of ? '，截至 ' + escapeHtml(cs.as_of) : '') + '):</b><ul>';
+    (cs.anchors || []).forEach(a => {
+      let s = escapeHtml(a.name || a.symbol || '') + ': ' +
+        (a.latest === null || a.latest === undefined ? '暂缺' : a.latest + ' ' + escapeHtml(a.unit || ''));
+      if (a.change_20d_pct !== null && a.change_20d_pct !== undefined) {
+        s += '，20日 ' + (a.change_20d_pct >= 0 ? '+' : '') + a.change_20d_pct + '%';
+      }
+      if (a.change_60d_pct !== null && a.change_60d_pct !== undefined) {
+        s += '，60日 ' + (a.change_60d_pct >= 0 ? '+' : '') + a.change_60d_pct + '%';
+      }
+      if (a.position_1y_pct !== null && a.position_1y_pct !== undefined) {
+        s += '，1年位置 ' + a.position_1y_pct + '%';
+      }
+      html += '<li>' + s + '</li>';
+    });
+    const copper = cs.copper_cross_market || {};
+    if (Object.keys(copper).length) {
+      html += '<li>铜产业内外盘背景：沪铜 ' +
+        (copper.sh_copper_price === null || copper.sh_copper_price === undefined ? '暂缺' : copper.sh_copper_price + ' ' + escapeHtml(copper.sh_copper_unit || '')) +
+        '；COMEX铜 ' +
+        (copper.comex_copper_price === null || copper.comex_copper_price === undefined ? '暂缺' : copper.comex_copper_price + ' ' + escapeHtml(copper.comex_copper_unit || '')) +
+        '</li>';
+    }
+    html += '</ul>' +
+      '<div class="credibility-note">' +
+      escapeHtml(cs.note || '期货连续合约仅作周期方向代理，不等同公司实际结算价。') +
+      '</div></div>';
   } else {
-    html += '<div class="evidence-block missing"><b>大宗商品价差/汇率:</b> 暂缺 (非周期性矿业股，或行业归属数据未能取到)</div>';
+    html += '<div class="evidence-block missing"><b>周期商品锚:</b> 暂缺；未匹配到可靠产品代理时不拿其他商品价格替代</div>';
   }
 
   const mc = report.market_context;
@@ -750,7 +1352,33 @@ function renderEvidenceSection(report) {
     html += '<div class="evidence-block missing"><b>估值:</b> 暂缺 (本次未能取到估值数据)</div>';
   }
 
+  const vh = report.valuation_history;
+  if (vh) {
+    const peText = (vh.pe_percentiles || []).map(x =>
+      x.years + '年 ' + x.percentile + '%分位').join('，');
+    const pbText = (vh.pb_percentiles || []).map(x =>
+      x.years + '年 ' + x.percentile + '%分位').join('，');
+    html += '<div class="evidence-block"><b>历史估值位置:</b> 当前 PE(TTM) ' +
+      (vh.current_pe_ttm === null || vh.current_pe_ttm === undefined ? '暂缺' : vh.current_pe_ttm) +
+      '，PB ' + (vh.current_pb === null || vh.current_pb === undefined ? '暂缺' : vh.current_pb) +
+      (peText ? '<br>PE: ' + escapeHtml(peText) : '') +
+      (pbText ? '<br>PB: ' + escapeHtml(pbText) : '');
+    if (vh.history_monthly && vh.history_monthly.length >= 6) {
+      html += '<br>' + renderValuationHistoryChart(vh.history_monthly);
+    }
+    (vh.notes || []).forEach(n => {
+      html += '<div class="credibility-note">· ' + escapeHtml(n) + '</div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div class="evidence-block missing"><b>历史估值位置:</b> 暂缺</div>';
+  }
+
   html += renderFundamentalsBlock(report.fundamentals);
+  html += renderRdTeamBlock(report.rd_team);
+  html += renderManagementCapitalBlock(report.management_capital);
+  html += renderMacroRatesBlock(report.macro_rates);
+  html += renderPolicyEventsBlock(report.policy_events);
   html += renderXueqiuBlock(report.xueqiu_stock);
 
   const db = report.debate;
@@ -948,7 +1576,7 @@ function renderHolderChart(series) {
     dots + xLabels + legend + '</svg>' + table;
 }
 
-// 九维度雷达图 (内联 SVG): 顶点=维度, 值=-10(利空)~+10(利多)。
+// 十二维度雷达图 (内联 SVG): 顶点=维度, 值=-10(利空)~+10(利多)。
 // 极性除颜色外还有位置(相对0环)与数字双重编码; 正红负绿沿用本界面方向色。
 function renderDimensionRadar(scores) {
   const n = scores.length;
@@ -987,10 +1615,131 @@ function renderDimensionRadar(scores) {
   });
 
   return '<svg viewBox="0 0 440 395" width="440" height="395" role="img" ' +
-    'aria-label="九维度评分雷达图">' +
+    'aria-label="十二维度评分雷达图">' +
     grid + axes +
     '<polygon points="' + poly + '" fill="#1a73e8" fill-opacity="0.20" stroke="#1a73e8" stroke-width="2"/>' +
     dots + labels + '</svg>';
+}
+
+function renderInstitutionChangeChart(rows) {
+  const data = (rows || []).filter(x =>
+    x.float_ratio_change_pp !== null && x.float_ratio_change_pp !== undefined
+  );
+  const fallback = !data.length
+    ? (rows || []).filter(x => x.shares_change_pct !== null && x.shares_change_pct !== undefined)
+    : [];
+  const source = data.length ? data : fallback;
+  if (!source.length) return '';
+
+  const useRatio = data.length > 0;
+  const values = source.map(x => Number(
+    useRatio ? x.float_ratio_change_pp : x.shares_change_pct
+  )).filter(Number.isFinite);
+  if (!values.length) return '';
+
+  const maxAbs = Math.max(0.1, ...values.map(Math.abs));
+  const W = 680, rowH = 34, top = 28, bottom = 24;
+  const H = top + bottom + source.length * rowH;
+  const labelW = 130, axisX = 390, halfW = 230;
+
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H +
+    '" width="100%" role="img" aria-label="机构季度持仓变化">';
+  svg += '<text x="' + axisX + '" y="14" text-anchor="middle" font-size="11" fill="#666">' +
+    (useRatio ? '占流通股比例变化（百分点）' : '持股数变化（%）') + '</text>';
+  svg += '<line x1="' + axisX + '" y1="' + (top - 6) + '" x2="' + axisX +
+    '" y2="' + (H - bottom + 2) + '" stroke="#aaa" stroke-width="1"/>';
+
+  source.forEach((x, i) => {
+    const value = Number(useRatio ? x.float_ratio_change_pp : x.shares_change_pct);
+    if (!Number.isFinite(value)) return;
+    const y = top + i * rowH + 7;
+    const width = Math.abs(value) / maxAbs * halfW;
+    const left = value >= 0 ? axisX : axisX - width;
+    svg += '<text x="' + (labelW - 8) + '" y="' + (y + 12) +
+      '" text-anchor="end" font-size="12" fill="#333">' +
+      escapeHtml(x.type || '') + '</text>';
+    svg += '<rect class="holder-mark" x="' + left.toFixed(1) + '" y="' + y +
+      '" width="' + Math.max(1, width).toFixed(1) + '" height="16" rx="2" ' +
+      'fill="currentColor" fill-opacity="0.55" data-tip="' +
+      escapeHtml((x.type || '') + ' ' + (value >= 0 ? '+' : '') + value +
+        (useRatio ? ' pct' : '%')) + '"/>';
+    svg += '<text x="' + (value >= 0 ? axisX + width + 6 : axisX - width - 6).toFixed(1) +
+      '" y="' + (y + 12) + '" text-anchor="' + (value >= 0 ? 'start' : 'end') +
+      '" font-size="11" fill="#444">' + (value >= 0 ? '+' : '') + value + '</text>';
+  });
+  svg += '</svg>';
+  return '<div style="margin-top:8px;">' + svg + '</div>';
+}
+
+function renderDimensionBars(scores) {
+  const rows = scores || [];
+  const W = 720, rowH = 34, top = 22, bottom = 24;
+  const H = top + bottom + rows.length * rowH;
+  const labelW = 150, axisX = 430, halfW = 245;
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="十二维度倾向条形图">';
+  svg += '<line x1="' + axisX + '" y1="' + (top - 8) + '" x2="' + axisX + '" y2="' + (H - bottom + 2) +
+    '" stroke="#aaa" stroke-width="1"/>';
+  svg += '<text x="' + (axisX - halfW) + '" y="13" font-size="11" fill="#666">-10 利空</text>' +
+    '<text x="' + (axisX + halfW - 36) + '" y="13" font-size="11" fill="#666">+10 利多</text>';
+  rows.forEach((s, i) => {
+    const y = top + i * rowH + 8;
+    const score = Math.max(-10, Math.min(10, Number(s.score) || 0));
+    const width = Math.abs(score) / 10 * halfW;
+    const x = score >= 0 ? axisX : axisX - width;
+    const fill = score >= 0 ? '#d93025' : '#188038';
+    svg += '<text x="' + (labelW - 8) + '" y="' + (y + 12) + '" text-anchor="end" font-size="12" fill="#333">' +
+      escapeHtml(s.dimension || '') + '</text>';
+    svg += '<rect class="holder-mark" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) +
+      '" width="' + Math.max(1, width).toFixed(1) + '" height="16" rx="2" fill="' + fill +
+      '" fill-opacity="0.78" data-tip="' + escapeHtml(s.note || '') + '"/>';
+    svg += '<text x="' + (score >= 0 ? axisX + width + 6 : axisX - width - 6).toFixed(1) +
+      '" y="' + (y + 12) + '" text-anchor="' + (score >= 0 ? 'start' : 'end') +
+      '" font-size="11" font-weight="bold" fill="' + fill + '">' +
+      (score > 0 ? '+' : '') + score + '</text>';
+  });
+  svg += '</svg>';
+  return svg;
+}
+
+function renderValuationHistoryChart(data) {
+  const rows = (data || []).filter(x => x.pe_ttm !== null && x.pe_ttm !== undefined && x.pe_ttm > 0);
+  if (rows.length < 3) return '';
+  const vals = rows.map(x => Number(x.pe_ttm)).filter(Number.isFinite).sort((a, b) => a - b);
+  if (vals.length < 3) return '';
+  const q = p => vals[Math.min(vals.length - 1, Math.max(0, Math.floor((vals.length - 1) * p)))];
+  let lo = q(0.05), hi = q(0.95);
+  if (!(hi > lo)) { lo = vals[0]; hi = vals[vals.length - 1] || lo + 1; }
+  if (!(hi > lo)) hi = lo + 1;
+  const W = 680, H = 220, padL = 52, padR = 18, padT = 18, padB = 34;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const xOf = i => padL + (rows.length === 1 ? 0 : i / (rows.length - 1)) * plotW;
+  const yOf = v => {
+    const clipped = Math.max(lo, Math.min(hi, v));
+    return padT + plotH - (clipped - lo) / (hi - lo) * plotH;
+  };
+  const points = rows.map((r, i) => xOf(i).toFixed(1) + ',' + yOf(Number(r.pe_ttm)).toFixed(1)).join(' ');
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="PE历史走势">';
+  for (let i = 0; i <= 4; i++) {
+    const v = lo + (hi - lo) * i / 4;
+    const y = yOf(v);
+    svg += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) +
+      '" y2="' + y.toFixed(1) + '" stroke="#eee"/>' +
+      '<text x="' + (padL - 6) + '" y="' + (y + 4).toFixed(1) +
+      '" text-anchor="end" font-size="10" fill="#666">' + v.toFixed(1) + '</text>';
+  }
+  svg += '<polyline points="' + points + '" fill="none" stroke="#1a73e8" stroke-width="2"/>';
+  const last = rows[rows.length - 1];
+  svg += '<circle class="holder-mark" cx="' + xOf(rows.length - 1).toFixed(1) +
+    '" cy="' + yOf(Number(last.pe_ttm)).toFixed(1) + '" r="4" fill="#1a73e8" data-tip="' +
+    escapeHtml(last.date + ' PE(TTM) ' + last.pe_ttm) + '"/>';
+  svg += '<text x="' + padL + '" y="' + (H - 10) + '" font-size="10" fill="#666">' +
+    escapeHtml(rows[0].date) + '</text>' +
+    '<text x="' + (W - padR) + '" y="' + (H - 10) + '" text-anchor="end" font-size="10" fill="#666">' +
+    escapeHtml(last.date) + '</text>' +
+    '<text x="' + (W / 2) + '" y="12" text-anchor="middle" font-size="11" fill="#666">' +
+    'PE(TTM) 月度历史（纵轴按5%~95%分位裁剪显示）</text>';
+  svg += '</svg>';
+  return svg;
 }
 
 function attachRadarTooltips() {
@@ -1012,16 +1761,34 @@ function attachRadarTooltips() {
 function renderResult(report) {
   const el = document.getElementById('result');
   let html = '<h2>' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
+  const isHistorical = report.research_mode === 'historical';
+  if (isHistorical) {
+    html += '<div class="historical-banner"><b>历史研究</b> ｜ 截止日 ' +
+      escapeHtml(report.as_of || '未知') +
+      ' ｜ 结论只允许使用该日及之前已公开的信息；当前知识不会用于补全历史缺口。</div>';
+  } else {
+    html += '<div class="live-banner"><b>Live 研究</b> ｜ 基准日 ' +
+      escapeHtml(report.as_of || '今天') + '</div>';
+  }
 
   if (report.realtime_quote) {
     const q = report.realtime_quote;
-    html += '<p class="quote">最新价 ' + q.latest_price + ' 涨跌幅 ' + q.change_pct + '% 成交量 ' + q.volume + '</p>';
+    html += '<p class="quote">' + (isHistorical ? '截止日收盘/最近交易价 ' : '最新价 ') +
+      q.latest_price + ' 涨跌幅 ' + q.change_pct + '% 成交量 ' + q.volume + '</p>';
   }
 
   const summary = report.summary || {};
   const stanceClass = 'stance-' + (summary.stance || 'neutral');
   html += '<h3>综合分析</h3>';
   html += '<p><span class="stance-badge ' + stanceClass + '">' + stanceLabel(summary.stance) + '</span>';
+  if (summary.company_quality_stance || summary.current_odds_stance) {
+    html += '<span style="margin-left:12px;">企业长期质量: <b>' +
+      stanceLabel(summary.company_quality_stance) + '</b> ｜ 当前股票赔率: <b>' +
+      stanceLabel(summary.current_odds_stance) + '</b></span>';
+  }
+  if (summary.confidence !== undefined && summary.confidence !== null) {
+    html += '<span style="margin-left:12px;">置信度 ' + Math.round(summary.confidence * 100) + '%</span>';
+  }
   if (summary.lynch_category && lynchCategoryLabel(summary.lynch_category)) {
     html += '<span class="lynch-category">' + escapeHtml(lynchCategoryLabel(summary.lynch_category)) + '</span>';
   }
@@ -1029,6 +1796,92 @@ function renderResult(report) {
     html += ' <span class="prompt-version">(prompt ' + escapeHtml(report.prompt_version) + ')</span>';
   }
   html += '</p>';
+  const profile = report.research_profile || {};
+  if (profile.archetype) {
+    html += '<div class="evidence-block"><b>公司研究画像:</b> ' +
+      escapeHtml(profile.label || profile.archetype) +
+      (profile.industry ? ' ｜ 申万行业 ' + escapeHtml(profile.industry) : '') +
+      ' ｜ 重点证据准备度 ' + Math.round((profile.readiness || 0) * 100) + '%';
+    if (profile.priority_dimensions && profile.priority_dimensions.length) {
+      html += '<br><b>优先研究:</b> ' + profile.priority_dimensions.map(escapeHtml).join('、');
+    }
+    if (profile.missing_priority_evidence && profile.missing_priority_evidence.length) {
+      html += '<br><b>重点证据缺口:</b> ' +
+        profile.missing_priority_evidence.map(escapeHtml).join('、');
+    }
+    if (profile.rationale && profile.rationale.length) {
+      html += '<br><span class="credibility-note">' +
+        profile.rationale.map(escapeHtml).join('；') + '</span>';
+    }
+    html += '</div>';
+  }
+
+  const rq = report.research_quality || {};
+  if (rq.total_dimensions) {
+    html += '<div class="evidence-block"><b>证据质量:</b> 覆盖 ' +
+      Math.round((rq.coverage || 0) * 100) + '% (' +
+      (rq.covered_dimensions || 0) + '/' + rq.total_dimensions + ' 个研究方向)，' +
+      '非社交事实/推导来源占比 ' + Math.round((rq.high_grade_ratio || 0) * 100) + '%';
+    if (rq.missing_dimensions && rq.missing_dimensions.length) {
+      html += '<br><b>尚缺:</b> ' + rq.missing_dimensions.map(escapeHtml).join('、');
+    }
+    if (rq.stale_evidence && rq.stale_evidence.length) {
+      html += '<br><b>已过新鲜度阈值:</b><ul>' +
+        rq.stale_evidence.map(x =>
+          '<li>' + escapeHtml(x.label || x.category || '') +
+          '：截止 ' + escapeHtml(x.as_of || '') +
+          '，距今 ' + escapeHtml(String(x.age_days)) +
+          ' 天（阈值 ' + escapeHtml(String(x.max_age_days)) + ' 天）</li>'
+        ).join('') + '</ul>';
+    }
+    if (rq.warnings && rq.warnings.length) {
+      html += '<br><b>质量提示:</b><br>' + rq.warnings.map(x => '· ' + escapeHtml(x)).join('<br>');
+    }
+    html += '</div>';
+  }
+
+  const validation = report.validation || {};
+  if (validation.ok === true) {
+    const vWarnings = validation.warnings || [];
+    html += '<details class="evidence-block"><summary style="cursor:pointer;"><b>报告合同校验通过</b>' +
+      (vWarnings.length ? '，' + vWarnings.length + ' 条非致命提示' : '') +
+      '</summary>';
+    if (vWarnings.length) {
+      html += '<ul>' + vWarnings.map(x =>
+        '<li>' + escapeHtml(x.message || '') + '</li>'
+      ).join('') + '</ul>';
+    } else {
+      html += '<div class="credibility-note">12维完整、三层立场合法、反方证据/失效条件齐全、置信度未越过证据上限。</div>';
+    }
+    html += '</details>';
+  }
+
+  const review = report.review || {};
+  const dup = review.duplicate_factors || [];
+  const conflicts = review.possible_conflicts || [];
+  const weak = review.weak_links || [];
+  if (dup.length || conflicts.length || weak.length) {
+    html += '<details class="evidence-block"><summary style="cursor:pointer;"><b>研究审查</b>：' +
+      '重复因子 ' + dup.length + '，潜在冲突 ' + conflicts.length +
+      '，弱证据 ' + weak.length +
+      (review.confidence_penalty ? '，置信度扣减 ' + Math.round(review.confidence_penalty * 100) + ' 个百分点' : '') +
+      '</summary>';
+    const groups = [
+      ['重复计分提示', dup],
+      ['潜在冲突', conflicts],
+      ['弱证据链', weak],
+    ];
+    groups.forEach(([title, rows]) => {
+      if (!rows.length) return;
+      html += '<div style="margin-top:8px;"><b>' + title + '</b><ul>' +
+        rows.map(x => '<li>' + escapeHtml(x.message || '') +
+          (x.dimensions && x.dimensions.length ? ' <span class="credibility-note">[' +
+            x.dimensions.map(escapeHtml).join(' / ') + ']</span>' : '') +
+          '</li>').join('') + '</ul></div>';
+    });
+    html += '</details>';
+  }
+
   if (summary.thesis_summary) {
     html += '<div class="thesis-block"><b>关键论据:</b> ' + escapeHtml(summary.thesis_summary) + '</div>';
   }
@@ -1048,8 +1901,9 @@ function renderResult(report) {
       management: '管理层', fundamentals: '基本面', rd: '研发能力', chip_flow: '筹码',
       price_position: '股价位置', cycle_position: '周期', policy_geopolitics: '政策形势',
       retail_sentiment: '散户情绪', shareholder_returns: '股东回报', growth_elasticity: '成长弹性',
+      a_share_structure: 'A股资金结构', risk_quality: '财务质量与尾部风险',
     };
-    html += '<details class="evidence-block"><summary style="cursor:pointer;">九维度详细分析 (展开)</summary>';
+    html += '<details class="evidence-block"><summary style="cursor:pointer;">十二维度详细分析 (展开)</summary>';
     Object.keys(summary.dimension_analyses).forEach(k => {
       html += '<div style="margin:8px 0;white-space:pre-wrap;"><b>' +
         escapeHtml(dimLabels[k] || k) + ':</b> ' +
@@ -1059,11 +1913,28 @@ function renderResult(report) {
   }
 
   if (summary.dimension_scores && summary.dimension_scores.length >= 6) {
-    html += '<div class="evidence-block"><b>九维度评分 (-10 利空 ~ +10 利多, 悬停顶点看理由):</b><br>' +
-      renderDimensionRadar(summary.dimension_scores) + '</div>';
+    html += '<div class="evidence-block"><b>十二维度倾向 (-10 利空 ~ +10 利多):</b><br>' +
+      renderDimensionBars(summary.dimension_scores) +
+      '<details style="margin-top:8px;"><summary style="cursor:pointer;">查看雷达图</summary>' +
+      renderDimensionRadar(summary.dimension_scores) + '</details></div>';
   }
 
   html += renderEvidenceSection(report);
+
+  if (report.evidence && report.evidence.length) {
+    html += '<details class="evidence-block"><summary style="cursor:pointer;">证据账本 (' +
+      report.evidence.length + ' 条，展开)</summary><table style="width:100%;margin-top:8px;border-collapse:collapse;">' +
+      '<tr><th style="text-align:left">证据</th><th>等级</th><th>类型</th><th>数据时点</th><th style="text-align:left">来源</th></tr>';
+    report.evidence.forEach(e => {
+      html += '<tr><td>' + escapeHtml(e.label || e.category) + '</td><td style="text-align:center">' +
+        escapeHtml(e.source_tier || '') + '</td><td style="text-align:center">' +
+        escapeHtml(e.kind || '') + '</td><td style="text-align:center">' +
+        escapeHtml(e.as_of || '未标注') + '</td><td>' +
+        (e.url ? safeExternalLink(e.url, e.source || '来源') : escapeHtml(e.source || '')) +
+        '</td></tr>';
+    });
+    html += '</table></details>';
+  }
 
   html += '<h3>候选用户 (' + report.candidates.length + ')</h3>';
   for (const c of report.candidates) {
@@ -1092,6 +1963,9 @@ document.getElementById('digestBtn').addEventListener('click', () => submitCrawl
 document.getElementById('digestUserBtn').addEventListener('click', () => submitCrawl('digest_user'));
 document.getElementById('crawlOnlyBtn').addEventListener('click', () => submitCrawl('crawl_only'));
 renderWatchlist();
+document.getElementById('researchMode').addEventListener('change', syncResearchModeControls);
+syncResearchModeControls();
+loadTemporalCapabilities();
 loadCrawledUsers();
 
 // 聚焦时全选: 输入框里残留上次的选择文本时, datalist 会按它过滤导致
@@ -1165,7 +2039,7 @@ async function submitCrawl(platform) {
   } else {
     const creatorId = document.getElementById('biliCreatorId').value.trim();
     if (!creatorId) return;
-    url = '/api/crawl/bili_opus';
+    url = '/api/crawl/bili_knowledge';
     body = { creator_id: creatorId };
   }
 

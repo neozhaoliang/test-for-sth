@@ -20,6 +20,10 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from analysis.evidence import EvidenceItem, ResearchQuality
+from analysis.research_profile import ResearchProfile
+from analysis.reviewer import ResearchReview
+
 
 class CandidateOpinion(BaseModel):
     """单个候选用户对目标股票的历史可信度 + 最新发言"""
@@ -39,6 +43,8 @@ class KnowledgeExcerpt(BaseModel):
     source: str = Field(default="", description="知识库来源标识，如 bili_laomujiang")
     title: str = Field(default="", description="资料标题")
     distilled: str = Field(default="", description="LLM 提炼后的投资观点摘要 (已去除闲聊)")
+    source_url: str = Field(default="", description="原帖/专栏/视频来源链接")
+    published_at: str = Field(default="", description="原始内容发布时间，历史模式用于防未来泄漏")
 
 
 class StructuredSummary(BaseModel):
@@ -48,6 +54,13 @@ class StructuredSummary(BaseModel):
         description="彼得林奇式分类: fast_grower|stalwart|cyclical|turnaround|asset_play|slow_grower|unclear",
     )
     stance: str = Field(default="", description="综合倾向: bullish|bearish|neutral")
+    company_quality_stance: str = Field(
+        default="", description="企业长期质量倾向: bullish|bearish|neutral"
+    )
+    current_odds_stance: str = Field(
+        default="", description="当前股票赔率倾向: bullish|bearish|neutral"
+    )
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="综合置信度")
     thesis_summary: str = Field(default="", description="关键论据摘要")
     core_counter_evidence: str = Field(
         default="",
@@ -57,11 +70,11 @@ class StructuredSummary(BaseModel):
     risk_notes: str = Field(default="", description="风险提示/需要注意的不确定性")
     dimension_scores: Optional[List[dict]] = Field(
         default=None,
-        description="九维度评分 (雷达图用): [{dimension: 中文名, score: -10..+10, note: 一句理由}]",
+        description="十二维度评分: [{dimension: 中文名, score: -10..+10, note: 一句理由}]",
     )
     dimension_analyses: Optional[Dict[str, str]] = Field(
         default=None,
-        description="九维度详细分析原文 (工具名 -> 该维度完整分析, 供 UI 展开查看)",
+        description="十二维度详细分析原文 (工具名 -> 该维度完整分析, 供 UI 展开查看)",
     )
 
 
@@ -69,6 +82,8 @@ class AnalysisReport(BaseModel):
     """单只股票的综合分析报告"""
     stock_code: str = Field(default="", description="股票代码")
     stock_name: str = Field(default="", description="股票名称")
+    research_mode: str = Field(default="live", description="live|historical")
+    as_of: str = Field(default="", description="本报告允许使用信息的截止日期 YYYY-MM-DD")
     realtime_quote: Optional[dict] = Field(default=None, description="实时行情快照 (最新价/涨跌幅/成交量等)")
     candidates: List[CandidateOpinion] = Field(default_factory=list, description="候选高可信度用户列表")
     knowledge_excerpts: List[KnowledgeExcerpt] = Field(default_factory=list, description="知识库背景资料 (全量，未按股票筛选)")
@@ -80,17 +95,67 @@ class AnalysisReport(BaseModel):
         default=None,
         description="分红+回购柱状图数据 (按年度, 回购折算元/10股并入, 含按现价股息率)",
     )
-    commodity_signal: Optional[dict] = Field(default=None, description="沪铜/COMEX铜价差 + 人民币汇率趋势 (仅周期性矿业股)")
+    commodity_signal: Optional[dict] = Field(default=None, description="与公司产品匹配的周期商品期货代理 (20/60日方向、1年位置；铜产业可含内外盘背景)")
     freight_signal: Optional[dict] = Field(default=None, description="集运运价景气度 (仅航运/港口类公司)")
     margin_signal: Optional[dict] = Field(default=None, description="融资盘与流通盘 (融资余额序列/占流通市值比例/近期增减)")
     market_context: Optional[dict] = Field(default=None, description="大盘与风格: 主要指数与个股的年内/上半年/下半年涨跌幅 + 个股历史区间位置")
     rmb_signal: Optional[dict] = Field(default=None, description="人民币汇率趋势 (全部股票，用于判断汇率对海外收入的影响方向)")
+    macro_rates: Optional[dict] = Field(
+        default=None, description="中美利率环境：Fed目标区间/美债10Y/中国LPR及新鲜度"
+    )
+    policy_events: Optional[dict] = Field(
+        default=None,
+        description="按公司暴露路径筛选的近期政策/地缘财经媒体事件线索；不是一手事实",
+    )
     profitability_trend: Optional[dict] = Field(default=None, description="近几个报告期毛利率/净利率/ROE/资产负债率趋势 (盈利能力与成本弹性)")
     fundamentals: Optional[dict] = Field(default=None, description="同花顺 F10 结构性事实 (集中度/海外占比/现金流质量/研发强度/股东人数/公司自述风险)")
     valuation: Optional[dict] = Field(default=None, description="估值快照 (PE/PB/每股指标/股权质押)")
+    valuation_history: Optional[dict] = Field(
+        default=None, description="历史PE/PB分位与月度估值序列"
+    )
+    rd_team: Optional[dict] = Field(
+        default=None, description="巨潮最新年报中的研发人员数量、占比与学历/年龄结构"
+    )
+    major_events: List[dict] = Field(
+        default_factory=list, description="进入综合分析的重大事项输入；snapshot replay 必须原样保留"
+    )
+    refinancing_history: List[dict] = Field(
+        default_factory=list, description="进入综合分析的再融资历史输入；snapshot replay 必须原样保留"
+    )
+    executive_profile: Optional[dict] = Field(
+        default=None, description="进入综合分析的高管画像输入；snapshot replay 必须原样保留"
+    )
+    governance_alerts: List[dict] = Field(
+        default_factory=list, description="进入综合分析的治理负面记录输入；snapshot replay 必须原样保留"
+    )
     xueqiu_stock: Optional[dict] = Field(default=None, description="雪球个股维度 (机构持仓/讨论热度，仅聚合数字)")
+    a_share_structure: Optional[dict] = Field(
+        default=None, description="A股公开机构持股、前十大流通股东与特殊资金类型"
+    )
+    management_capital: Optional[dict] = Field(
+        default=None, description="管理层利益绑定、经营执行与5/10年资本分配长期账本"
+    )
+    filing_calendar: List[dict] = Field(
+        default_factory=list,
+        description="巨潮周期报告的报告期、实际发布日期与原始版本链接",
+    )
+    research_profile: ResearchProfile = Field(
+        default_factory=ResearchProfile,
+        description="按行业/研发/资本回报确定的公司研究画像与重点证据准备度",
+    )
     sentiment: Optional[dict] = Field(default=None, description="雪球讨论区情绪聚合 (看多/看空比例, 一致看多预警, 反向指标)")
     debate: Optional[dict] = Field(default=None, description="雪球多空辩论 (双方核心论点 + 历史验证统计 + 哪方更合理)")
+    primary_evidence: List[dict] = Field(default_factory=list, description="巨潮等一手公告元数据")
+    evidence: List[EvidenceItem] = Field(default_factory=list, description="本次研究实际使用/可用的证据账本")
+    research_quality: ResearchQuality = Field(
+        default_factory=ResearchQuality, description="证据覆盖率、来源质量与缺口"
+    )
+    review: ResearchReview = Field(
+        default_factory=ResearchReview, description="跨维度重复计分、潜在冲突与弱证据审查"
+    )
+    validation: Optional[dict] = Field(
+        default=None, description="最终报告合同校验结果；结构错误会在返回前阻断"
+    )
     summary: StructuredSummary = Field(default_factory=StructuredSummary, description="LLM 生成的结构化分析摘要")
     prompt_version: str = Field(default="", description="生成本报告所用的 prompt 版本号")
     generated_at: int = Field(default=0, description="报告生成时间 (Unix 秒)")

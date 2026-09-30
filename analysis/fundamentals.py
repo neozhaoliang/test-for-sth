@@ -857,6 +857,16 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
         "operating_cash_flow_yoy_pct",
     )
     _fill_metric("rd_investment_yuan", ("研发投入(元)", "研发费用(元)"), "rd_investment_yoy_pct")
+    _fill_metric(
+        "accounts_receivable_yuan",
+        ("应收账款(元)", "应收票据及应收账款(元)", "应收款项(元)"),
+        "accounts_receivable_yoy_pct",
+    )
+    _fill_metric(
+        "inventory_yuan",
+        ("存货(元)",),
+        "inventory_yoy_pct",
+    )
 
     if not metrics:
         missing.append("财务指标表")
@@ -875,6 +885,31 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
         if facts.get("overseas_revenue_yuan") and facts.get("revenue")
         else None
     )
+    # 仅在同一“变动科目”报告期同时取得营收与资产项目时计算。
+    # 季报营收为累计流量，因此这里只作为营运资金压力代理，不作为行业横向估值指标。
+    facts["receivable_to_revenue_pct"] = (
+        round(facts["accounts_receivable_yuan"] / facts["revenue"] * 100, 2)
+        if facts.get("accounts_receivable_yuan") is not None and facts.get("revenue")
+        else None
+    )
+    facts["inventory_to_revenue_pct"] = (
+        round(facts["inventory_yuan"] / facts["revenue"] * 100, 2)
+        if facts.get("inventory_yuan") is not None and facts.get("revenue")
+        else None
+    )
+    ar_yoy = facts.get("accounts_receivable_yoy_pct")
+    inv_yoy = facts.get("inventory_yoy_pct")
+    rev_yoy = facts.get("revenue_yoy_pct")
+    facts["receivable_growth_minus_revenue_pp"] = (
+        round(ar_yoy - rev_yoy, 2)
+        if ar_yoy is not None and rev_yoy is not None
+        else None
+    )
+    facts["inventory_growth_minus_revenue_pp"] = (
+        round(inv_yoy - rev_yoy, 2)
+        if inv_yoy is not None and rev_yoy is not None
+        else None
+    )
 
     valuation = _parse_profile(profile) if profile else {}
     if not valuation:
@@ -887,7 +922,8 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
             f"(疑似同花顺改版, 行业涨跌家数维度会退化为暂缺)"
         )
 
-    sources = [_URLS[p].format(code6=code6) for p in _PAGES if pages.get(p)]
+    source_map = {p: _URLS[p].format(code6=code6) for p in _PAGES if pages.get(p)}
+    sources = list(source_map.values())
 
     return {
         "facts": facts,
@@ -903,6 +939,7 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
         "governance_alerts": governance_alerts,
         "missing": missing,
         "sources": sources,
+        "source_map": source_map,
     }
 
 

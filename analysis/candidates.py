@@ -20,7 +20,8 @@
 根据历史可信度评分，筛选某只股票的高可信度候选用户。
 """
 
-from typing import Dict, List
+from datetime import date
+from typing import Dict, List, Optional
 
 from backtest.score import score_all_users
 from model.m_backtest import StockCredibilityScore, UserCredibilityScore
@@ -33,12 +34,21 @@ def _stock_score_for(user: UserCredibilityScore, stock_code: str) -> StockCredib
     raise ValueError(f"user {user.user_id} has no score for {stock_code}")
 
 
-def find_candidates(stock_code: str, min_wilson: float = 0.0, limit: int = 5) -> List[UserCredibilityScore]:
+def find_candidates(
+    stock_code: str,
+    min_wilson: float = 0.0,
+    limit: int = 5,
+    *,
+    as_of: Optional[date] = None,
+) -> List[UserCredibilityScore]:
     """
     找出历史上对该股票有过验证记录、且该股票 Wilson 分数达到阈值的用户，按该股票的
     Wilson 分数降序取前 limit 个。用户在该股票上没有任何验证记录时不纳入候选。
     """
-    users = [u for u in score_all_users() if any(s.stock_code == stock_code for s in u.by_stock)]
+    users = [
+        u for u in score_all_users(as_of=as_of)
+        if any(s.stock_code == stock_code for s in u.by_stock)
+    ]
     users = [u for u in users if _stock_score_for(u, stock_code).wilson_score >= min_wilson]
     users.sort(key=lambda u: _stock_score_for(u, stock_code).wilson_score, reverse=True)
     return users[:limit]

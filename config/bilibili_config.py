@@ -68,3 +68,11 @@ CRAWLER_MAX_DYNAMICS_COUNT_SINGLENOTES = 50
 
 # Maximum number of crawled opus (专栏图文) items for a single creator
 CRAWLER_MAX_OPUS_COUNT_SINGLENOTES = 50
+
+
+# 是否在指定视频/创作者视频抓取时读取 B 站人工/AI 字幕，供投资知识库蒸馏。
+# 无字幕时只记录 status=none，绝不会用视频简介冒充正文。
+ENABLE_BILI_SUBTITLES = True
+
+# 字幕优先级：优先人工简中，其次 AI 中文，再退化到其他中文轨道。
+BILI_SUBTITLE_PREFERRED_LANGS = ["zh-Hans", "zh-CN", "zh", "ai-zh"]

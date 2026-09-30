@@ -422,8 +422,161 @@ class BilibiliCrawler(AbstractCrawler):
                     video_aids_list.append(video_aid)
                 await bilibili_store.update_bilibili_video(video_detail)
                 await bilibili_store.update_up_info(video_detail)
+                await self.capture_video_subtitles(video_detail)
                 await self.get_bilibili_video(video_detail, semaphore)
         await self.batch_get_video_comments(video_aids_list)
+
+    @staticmethod
+    def _choose_subtitle_track(tracks: List[Dict]) -> Optional[Dict]:
+        if not tracks:
+            return None
+        preferred = list(getattr(config, "BILI_SUBTITLE_PREFERRED_LANGS", []))
+
+        def _rank(track: Dict) -> tuple:
+            lan = str(track.get("lan") or "")
+            lan_doc = str(track.get("lan_doc") or "")
+            is_chinese = ("zh" in lan.lower()) or ("中" in lan_doc)
+            try:
+                ai_type = int(track.get("ai_type") or 0)
+            except (TypeError, ValueError):
+                ai_type = 0
+            is_ai = ai_type != 0 or lan.lower().startswith("ai-")
+            try:
+                lang_rank = preferred.index(lan)
+            except ValueError:
+                lang_rank = len(preferred) + 1
+            # 中文优先；同为中文时人工字幕优先；最后按配置语言顺序。
+            return (0 if is_chinese else 1, 1 if is_ai else 0, lang_rank)
+
+        return sorted(tracks, key=_rank)[0]
+
+    @staticmethod
+    def _subtitle_text(body: List[Dict]) -> str:
+        lines: List[str] = []
+        last_text = ""
+        for segment in body:
+            if not isinstance(segment, dict):
+                continue
+            text = str(segment.get("content") or "").strip()
+            if not text or text == last_text:
+                continue
+            last_text = text
+            try:
+                start = float(segment.get("from") or 0)
+            except (TypeError, ValueError):
+                start = 0.0
+            minute = int(start // 60)
+            second = int(start % 60)
+            lines.append(f"[{minute:02d}:{second:02d}] {text}")
+        return "\n".join(lines)
+
+    async def capture_video_subtitles(self, video_detail: Dict) -> None:
+        """
+        指定视频/创作者视频的真实字幕采集。
+        - 有人工字幕优先人工字幕；
+        - 只有 AI 字幕时保存并显式标记 is_ai；
+        - 没有字幕时记录 status=none，绝不把简介当成文字稿。
+        """
+        if not getattr(config, "ENABLE_BILI_SUBTITLES", True):
+            return
+        view: Dict = (video_detail or {}).get("View") or {}
+        owner: Dict = view.get("owner") or {}
+        try:
+            aid = int(view.get("aid") or 0)
+        except (TypeError, ValueError):
+            aid = 0
+        bvid = str(view.get("bvid") or "")
+        if not aid:
+            return
+
+        pages = view.get("pages") or []
+        if not pages and view.get("cid"):
+            pages = [{"cid": view.get("cid"), "page": 1, "part": view.get("title") or ""}]
+        if not pages:
+            return
+
+        base_title = str(view.get("title") or "")
+        author = str(owner.get("name") or "")
+        pub_ts = int(view.get("pubdate") or 0)
+        base_url = (
+            f"https://www.bilibili.com/video/{bvid}"
+            if bvid else f"https://www.bilibili.com/video/av{aid}"
+        )
+
+        for page in pages:
+            try:
+                cid = int(page.get("cid") or 0)
+            except (TypeError, ValueError):
+                cid = 0
+            if not cid:
+                continue
+            page_no = int(page.get("page") or 1)
+            part = str(page.get("part") or "").strip()
+            title = base_title if len(pages) == 1 else f"{base_title} / P{page_no} {part}".strip()
+            video_url = base_url + (f"?p={page_no}" if len(pages) > 1 else "")
+
+            tracks = await self.bili_client.get_video_subtitle_tracks(
+                aid=aid, cid=cid, bvid=bvid
+            )
+            track = self._choose_subtitle_track(tracks)
+            if not track:
+                await bilibili_store.update_bilibili_video_transcript(
+                    {
+                        "transcript_id": f"{aid}:{cid}",
+                        "video_id": str(aid),
+                        "bvid": bvid,
+                        "cid": str(cid),
+                        "page": page_no,
+                        "title": title,
+                        "author": author,
+                        "pub_ts": pub_ts,
+                        "video_url": video_url,
+                        "language": "",
+                        "language_name": "",
+                        "is_ai": False,
+                        "status": "none",
+                        "transcript": "",
+                        "segments": [],
+                        "last_modify_ts": utils.get_current_timestamp(),
+                    }
+                )
+                continue
+
+            subtitle_json = await self.bili_client.get_subtitle_json(
+                str(track.get("subtitle_url") or "")
+            )
+            body = (subtitle_json or {}).get("body") or []
+            transcript = self._subtitle_text(body)
+            lan = str(track.get("lan") or "")
+            try:
+                ai_type = int(track.get("ai_type") or 0)
+            except (TypeError, ValueError):
+                ai_type = 0
+            is_ai = ai_type != 0 or lan.lower().startswith("ai-")
+            await bilibili_store.update_bilibili_video_transcript(
+                {
+                    "transcript_id": f"{aid}:{cid}",
+                    "video_id": str(aid),
+                    "bvid": bvid,
+                    "cid": str(cid),
+                    "page": page_no,
+                    "title": title,
+                    "author": author,
+                    "pub_ts": pub_ts,
+                    "video_url": video_url,
+                    "language": lan,
+                    "language_name": str(track.get("lan_doc") or ""),
+                    "is_ai": is_ai,
+                    "status": "ok" if transcript else "empty",
+                    "transcript": transcript,
+                    "segments": body,
+                    "last_modify_ts": utils.get_current_timestamp(),
+                }
+            )
+            utils.logger.info(
+                f"[BilibiliCrawler.capture_video_subtitles] {bvid or aid} "
+                f"P{page_no}: {len(body)} segments, ai={is_ai}, lang={lan}"
+            )
 
     async def get_video_info_task(self, aid: int, bvid: str, semaphore: asyncio.Semaphore) -> Optional[Dict]:
         """
