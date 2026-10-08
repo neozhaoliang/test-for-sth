@@ -44,6 +44,7 @@ jobs:
             analysis/commodity.py \
             analysis/a_share_structure.py \
             analysis/valuation_history.py \
+            analysis/valuation_engine.py \
             analysis/rd_team.py \
             analysis/primary_sources.py \
             analysis/policy_context.py \
@@ -122,6 +123,7 @@ jobs:
             tests/test_snapshot_compare.py \
             tests/test_external_synthesis.py \
             tests/test_valuation_history_asof.py \
+            tests/test_valuation_engine.py \
             tests/test_market_context_asof.py \
             tests/test_realtime_price_asof.py \
             tests/test_margin_asof.py \
