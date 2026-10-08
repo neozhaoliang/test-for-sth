@@ -149,6 +149,34 @@ def _pct(text: Optional[str]) -> Optional[float]:
     except ValueError:
         return None
 
+def _coherent_yoy_pct(
+    current: Optional[float],
+    previous: Optional[float],
+    reported: Optional[float],
+) -> Optional[float]:
+    """Repair a lost YoY sign when the table values prove the opposite direction.
+
+    Some F10 tables render the percentage magnitude as a positive number while the
+    increase/decrease direction lives in presentation text that our cell parser does not
+    capture.  When current/previous values imply essentially the same magnitude, trust
+    their direction.  Large magnitude disagreement is left untouched rather than guessed.
+    """
+    if current is None or previous in (None, 0):
+        return reported
+    derived = (current - previous) / abs(previous) * 100
+    if reported is None:
+        return round(derived, 2)
+
+    tolerance = max(0.25, abs(derived) * 0.03)
+    if (
+        reported != 0
+        and derived != 0
+        and reported * derived < 0
+        and abs(abs(reported) - abs(derived)) <= tolerance
+    ):
+        return round(derived, 2)
+    return reported
+
 
 def _first_number(text: str) -> Optional[float]:
     m = re.search(r"-?[\d.]+", text or "")
@@ -528,10 +556,13 @@ def _parse_finance_metrics(html: str) -> tuple:
         for cells in rows[1:]:
             if len(cells) < 3 or not cells[0]:
                 continue
+            current = _amount_yuan(cells[1])
+            previous = _amount_yuan(cells[2])
+            reported_yoy = _pct(cells[3]) if len(cells) > 3 else None
             metrics[cells[0]] = {
-                "current": _amount_yuan(cells[1]),
-                "previous": _amount_yuan(cells[2]),
-                "yoy_pct": _pct(cells[3]) if len(cells) > 3 else None,
+                "current": current,
+                "previous": previous,
+                "yoy_pct": _coherent_yoy_pct(current, previous, reported_yoy),
             }
         newest_period, newest_metrics = period, metrics
 
