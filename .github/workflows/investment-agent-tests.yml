@@ -46,6 +46,7 @@ jobs:
             analysis/valuation_history.py \
             analysis/valuation_engine.py \
             analysis/valuation_assumptions.py \
+            analysis/valuation_payout.py \
             analysis/rd_team.py \
             analysis/primary_sources.py \
             analysis/policy_context.py \
@@ -126,6 +127,7 @@ jobs:
             tests/test_valuation_history_asof.py \
             tests/test_valuation_engine.py \
             tests/test_valuation_assumptions.py \
+            tests/test_valuation_payout.py \
             tests/test_market_context_asof.py \
             tests/test_realtime_price_asof.py \
             tests/test_margin_asof.py \
