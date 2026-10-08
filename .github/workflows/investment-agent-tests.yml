@@ -27,7 +27,7 @@ jobs:
           python -m pip install \
             pytest pytest-asyncio uv \
             "pydantic>=2,<3" "pypdf>=5,<7" \
-            akshare httpx
+            akshare
 
       - name: Verify uv lock is in sync
         run: uv lock --locked
@@ -36,6 +36,7 @@ jobs:
         run: |
           python -m compileall -q \
             analysis/evidence.py \
+            analysis/financial_consistency.py \
             analysis/reviewer.py \
             analysis/research_profile.py \
             analysis/management_capital.py \
