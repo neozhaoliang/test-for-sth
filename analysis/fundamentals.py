@@ -35,6 +35,7 @@ import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
+from analysis.financial_consistency import coherent_yoy_pct
 from tools.httpx_util import make_async_client
 from tools.utils import utils
 
@@ -148,7 +149,6 @@ def _pct(text: Optional[str]) -> Optional[float]:
         return float(m.group(1))
     except ValueError:
         return None
-
 
 def _first_number(text: str) -> Optional[float]:
     m = re.search(r"-?[\d.]+", text or "")
@@ -528,10 +528,13 @@ def _parse_finance_metrics(html: str) -> tuple:
         for cells in rows[1:]:
             if len(cells) < 3 or not cells[0]:
                 continue
+            current = _amount_yuan(cells[1])
+            previous = _amount_yuan(cells[2])
+            reported_yoy = _pct(cells[3]) if len(cells) > 3 else None
             metrics[cells[0]] = {
-                "current": _amount_yuan(cells[1]),
-                "previous": _amount_yuan(cells[2]),
-                "yoy_pct": _pct(cells[3]) if len(cells) > 3 else None,
+                "current": current,
+                "previous": previous,
+                "yoy_pct": coherent_yoy_pct(current, previous, reported_yoy),
             }
         newest_period, newest_metrics = period, metrics
 

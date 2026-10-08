@@ -36,6 +36,7 @@ jobs:
         run: |
           python -m compileall -q \
             analysis/evidence.py \
+            analysis/financial_consistency.py \
             analysis/reviewer.py \
             analysis/research_profile.py \
             analysis/management_capital.py \
@@ -128,6 +129,7 @@ jobs:
             tests/test_knowledge_context.py \
             tests/test_score_asof.py \
             tests/test_shareholder_asof.py \
+            tests/test_fundamentals_consistency.py \
             tests/test_management_capital.py \
             tests/test_macro_rates.py \
             tests/test_commodity_cycle.py \

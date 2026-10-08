@@ -67,7 +67,12 @@ from analysis.report_social import (
     filter_relevant_knowledge,
     load_knowledge_excerpts,
 )
-from analysis.shareholder import get_buyback_history, get_dividend_history, get_shareholder_count_trend
+from analysis.shareholder import (
+    get_buyback_history,
+    get_dividend_history,
+    get_shareholder_count_trend,
+    reconcile_live_shareholder_trend,
+)
 from model.m_analysis import AnalysisReport, CandidateOpinion, KnowledgeExcerpt
 from tools.utils import utils
 
@@ -205,6 +210,12 @@ async def generate_report(
         a_share_structure = point_in_time_ownership
         dividend_history, buyback_history = build_point_in_time_capital_returns(
             primary_evidence
+        )
+
+    else:
+        shareholder_trend = reconcile_live_shareholder_trend(
+            shareholder_trend,
+            fundamentals,
         )
 
     rd_team: Optional[Dict] = None

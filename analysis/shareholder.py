@@ -58,6 +58,118 @@ def _coerce_date(value) -> Optional[date]:
     return None
 
 
+
+
+def _trend_from_f10_facts(fundamentals: Optional[Dict]) -> Optional[Dict]:
+    """Build a live shareholder trend from THS F10 holder-count history.
+
+    The F10 series has no announcement timestamp, so this helper is live-only.  It is
+    useful as a freshness backstop when the AKShare detail endpoint silently returns an
+    old historical tail for an otherwise current stock.
+    """
+    facts = (fundamentals or {}).get("facts") or {}
+    series = facts.get("holder_count_series") or []
+    rows = []
+    for item in series:
+        period = _coerce_date((item or {}).get("period"))
+        holders = (item or {}).get("holders")
+        if period is None or holders in (None, 0):
+            continue
+        try:
+            holders = int(holders)
+        except (TypeError, ValueError):
+            continue
+        rows.append(
+            {
+                "period": period,
+                "holders": holders,
+                "price": (item or {}).get("price"),
+            }
+        )
+    if not rows:
+        return None
+
+    rows.sort(key=lambda x: x["period"])
+    latest = rows[-1]
+    previous = rows[-2] if len(rows) >= 2 else None
+    change_pct = None
+    if previous and previous["holders"]:
+        change_pct = round(
+            (latest["holders"] - previous["holders"]) / previous["holders"] * 100,
+            3,
+        )
+
+    same_period_last_year = next(
+        (
+            row for row in reversed(rows[:-1])
+            if row["period"].month == latest["period"].month
+            and row["period"].day == latest["period"].day
+        ),
+        None,
+    )
+    yoy_pct = None
+    if same_period_last_year and same_period_last_year["holders"]:
+        yoy_pct = round(
+            (latest["holders"] - same_period_last_year["holders"])
+            / same_period_last_year["holders"]
+            * 100,
+            3,
+        )
+
+    return {
+        "latest_count": latest["holders"],
+        "change_pct": change_pct,
+        "yoy_pct": yoy_pct,
+        "trend": (
+            "increasing"
+            if change_pct is not None and change_pct > 0
+            else "decreasing"
+            if change_pct is not None and change_pct < 0
+            else "stable"
+            if change_pct == 0
+            else "unknown"
+        ),
+        "as_of": latest["period"].isoformat(),
+        "period": latest["period"].isoformat(),
+        "published_at": None,
+        "available_at": None,
+        "source_mode": "ths_f10_holder_series",
+        "series": [
+            {
+                "period": row["period"].isoformat(),
+                "holders": row["holders"],
+                "price": row.get("price"),
+            }
+            for row in rows
+        ],
+    }
+
+
+def reconcile_live_shareholder_trend(
+    shareholder_trend: Optional[Dict],
+    fundamentals: Optional[Dict],
+) -> Optional[Dict]:
+    """Prefer the freshest live holder-count source instead of blindly trusting one API."""
+    f10 = _trend_from_f10_facts(fundamentals)
+    if not f10:
+        return shareholder_trend
+    if not shareholder_trend:
+        return f10
+
+    current_period = _coerce_date(
+        shareholder_trend.get("period") or shareholder_trend.get("as_of")
+    )
+    f10_period = _coerce_date(f10.get("period"))
+    if f10_period and (current_period is None or f10_period > current_period):
+        logger.warning(
+            "[shareholder] replacing stale holder-count source %s (%s) with THS F10 (%s)",
+            shareholder_trend.get("source_mode"),
+            current_period,
+            f10_period,
+        )
+        return f10
+    return shareholder_trend
+
 async def get_shareholder_count_trend(
     stock_code: str,
     *,

@@ -20,6 +20,9 @@ _INSIDER_REDUCTION_RE = re.compile(r"减持|减持计划|减持股份")
 _REFINANCING_RE = re.compile(r"定增|增发|配股|可转债|发行股份|发行股票|再融资|募集资金")
 _DIVIDEND_RE = re.compile(r"分红|利润分配|权益分派|现金红利")
 _BUYBACK_RE = re.compile(r"回购")
+_IMPLEMENTED_DIVIDEND_RE = re.compile(
+    r"权益分派实施|分红派息实施|现金红利派发|股息派发|派息实施|实施公告"
+)
 
 
 def _date_year(value) -> Optional[int]:
@@ -76,15 +79,49 @@ def _is_realized_dividend(row: Dict) -> bool:
     """
     Decide whether a dividend record is evidence of an actually implemented distribution.
 
-    Point-in-time CNINFO records carry an explicit progress field. A proposal with a stated
-    amount is still only a proposal and must not be counted as paid. Legacy/live aggregate
-    rows may lack progress; for those, a positive per-10-share cash amount is treated as a
-    realized historical record.
+    Live AKShare rows use Chinese progress labels such as "实施", while point-in-time
+    records use normalized English labels.  Proposal/approval stages must not be mistaken
+    for cash already distributed.
     """
     progress = str(row.get("progress") or "").strip().lower()
     if progress:
-        return progress in {"implemented", "completed", "paid"}
+        if any(
+            token in progress
+            for token in ("预案", "待实施", "董事会通过", "股东大会通过", "proposal")
+        ):
+            return False
+        if any(
+            token in progress
+            for token in (
+                "implemented",
+                "completed",
+                "paid",
+                "实施",
+                "已实施",
+                "完成",
+                "派发",
+                "派息",
+            )
+        ):
+            return True
+        # Unknown non-empty statuses remain conservative.
+        return False
     return (_num(row.get("dividend_per_10_shares")) or 0) > 0
+
+
+def _implemented_primary_dividends(primary: Iterable[Dict]) -> List[Dict]:
+    rows: List[Dict] = []
+    seen = set()
+    for item in primary or []:
+        text = f"{item.get('category','')} {item.get('title','')}"
+        if not _DIVIDEND_RE.search(text) or not _IMPLEMENTED_DIVIDEND_RE.search(text):
+            continue
+        key = item.get("url") or f"{item.get('published_at','')}|{item.get('title','')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(item)
+    return rows
 
 
 def _summarize_window(
@@ -103,11 +140,25 @@ def _summarize_window(
         if _date_year(d.get("announce_date")) in years
         and _is_realized_dividend(d)
     ]
+    primary_in_window = [
+        p for p in primary_evidence
+        if _date_year(p.get("published_at")) in years
+    ]
+    primary_realized_dividends = _implemented_primary_dividends(primary_in_window)
     dividend_years = sorted(
         {
-            _date_year(d.get("announce_date"))
-            for d in div_rows
-            if _date_year(d.get("announce_date"))
+            year
+            for year in (
+                [
+                    _date_year(d.get("announce_date"))
+                    for d in div_rows
+                ]
+                + [
+                    _date_year(p.get("published_at"))
+                    for p in primary_realized_dividends
+                ]
+            )
+            if year
         },
         reverse=True,
     )
@@ -140,10 +191,6 @@ def _summarize_window(
         if _date_year(r.get("announce_date")) in years
     ]
 
-    primary_in_window = [
-        p for p in primary_evidence
-        if _date_year(p.get("published_at")) in years
-    ]
     reductions = _primary_matches(primary_in_window, _INSIDER_REDUCTION_RE)
     governance_negatives = _primary_matches(primary_in_window, _NEGATIVE_GOV_RE)
     primary_refi = _primary_matches(primary_in_window, _REFINANCING_RE)
@@ -166,6 +213,7 @@ def _summarize_window(
         "governance_negative_announcements": len(governance_negatives),
         "primary_refinancing_announcements": len(primary_refi),
         "primary_dividend_announcements": len(primary_dividends),
+        "primary_implemented_dividend_announcements": len(primary_realized_dividends),
         "primary_buyback_announcements": len(primary_buybacks),
     }
 

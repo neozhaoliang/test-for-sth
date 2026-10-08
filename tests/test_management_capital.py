@@ -118,3 +118,66 @@ def test_management_capital_counts_implemented_dividend_with_unknown_amount():
     assert row["cash_dividend_per_10_total"] is None
     assert row["cash_dividend_amount_records"] == 0
     assert row["cash_dividend_amount_complete"] is False
+
+
+
+def test_management_capital_counts_chinese_implemented_dividends():
+    record = build_management_capital_record(
+        dividend_history=[
+            {
+                "announce_date": "2026-06-20",
+                "dividend_per_10_shares": 4.4,
+                "progress": "实施",
+            },
+            {
+                "announce_date": "2025-06-20",
+                "dividend_per_10_shares": 5.2,
+                "progress": "已实施",
+            },
+            {
+                "announce_date": "2024-03-20",
+                "dividend_per_10_shares": 3.0,
+                "progress": "股东大会通过",
+            },
+        ],
+        as_of=date(2026, 10, 2),
+    )
+
+    row = record["five_year"]
+    assert row["dividend_years"] == [2026, 2025]
+    assert row["dividend_years_count"] == 2
+    assert row["dividend_records"] == 2
+    assert row["cash_dividend_per_10_total"] == 9.6
+
+
+def test_management_capital_uses_cninfo_implementation_notices_as_year_fallback():
+    record = build_management_capital_record(
+        dividend_history=[],
+        primary_evidence=[
+            {
+                "published_at": "2026-06-20",
+                "category": "权益分派",
+                "title": "2025年年度权益分派实施公告",
+                "url": "https://example.com/2026-div.pdf",
+            },
+            {
+                "published_at": "2025-06-20",
+                "category": "权益分派",
+                "title": "2024年年度A股分红派息实施公告",
+                "url": "https://example.com/2025-div.pdf",
+            },
+            {
+                "published_at": "2024-03-20",
+                "category": "权益分派",
+                "title": "2023年度利润分配方案公告",
+                "url": "https://example.com/proposal.pdf",
+            },
+        ],
+        as_of=date(2026, 10, 2),
+    )
+
+    row = record["five_year"]
+    assert row["dividend_years"] == [2026, 2025]
+    assert row["dividend_years_count"] == 2
+    assert row["dividend_records"] == 0
+    assert row["primary_implemented_dividend_announcements"] == 2
