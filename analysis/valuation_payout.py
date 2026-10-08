@@ -107,7 +107,7 @@ def collect_declared_fiscal_payout_inputs(*, profitability_trend, dividend_histo
         title=str(evidence.get("title") or "")
         if not re.search(r"权益分派实施|分红派息实施|利润分配实施",title):
             continue
-        years=set(int(y) for y in re.findall(r"(20\d{2})年(?:度|中期|末期)",title))
+        years=set(int(y) for y in re.findall(r"(20\d{2})年(?:年度|度|中期|末期)",title))
         day=str(evidence.get("published_at") or "")[:10]
         if len(years)!=1 or not day or day>cutoff.isoformat() or not evidence.get("url"):
             continue
