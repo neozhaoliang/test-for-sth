@@ -142,10 +142,12 @@ async def _generate_summary(
     # Valuation is a method layer, never counted as primary factual evidence.
     # Load the locally versioned framework on every run (including fallback path).
     method_file = Path(__file__).resolve().parents[1] / "docs" / "valuation_shuangmulin_chensir_knowledge.md"
-    if method_file.is_file():
+    # Prevent point-in-time backtests from seeing rules distilled after their as-of date.
+    as_of = str(getattr(inputs, "as_of", "") or "")[:10]
+    if method_file.is_file() and (not as_of or as_of >= "2026-10-08"):
         prompt += ("\n\n## 估值方法知识库（待以本次数据验证，不构成事实证据）\n"
                    + method_file.read_text(encoding="utf-8"))
-    else:
+    elif not method_file.is_file():
         utils.logger.warning("[analysis.report] 估值方法知识库文件缺失，无法注入长期收益率模型")
 
     # 工具调用路径: 强制十二维度逐一分析后提交
