@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from analysis.evidence import EvidenceItem
+from analysis.valuation_assumptions import estimate_valuation_scenarios
 from analysis.valuation_engine import (ValuationScenario, calculate_scenarios, render_valuation_block)
 from analysis.report_blocks import _build_prompt
 from analysis.report_contract import (
@@ -154,6 +155,21 @@ async def _generate_summary(
     # Pure-Python numeric authority: LLM must not invent or alter these calculations.
     # Missing source-backed scenarios intentionally produce no target price.
     scenario_specs = getattr(inputs, "valuation_scenarios", None) or []
+    assumption_context = getattr(inputs, "valuation_assumption_context", None) or {}
+    estimate = {"status": "manual", "scenarios": scenario_specs}
+    if not scenario_specs and (not as_of or as_of >= "2026-10-08"):
+        # Require provenance for payout and required-return settings.
+        if assumption_context.get("payout_source") and assumption_context.get("required_return_basis"):
+            estimate = estimate_valuation_scenarios(
+                profitability_trend=getattr(inputs, "profitability_trend", None),
+                as_of=as_of or None,
+                payout_pct=assumption_context.get("payout_pct"),
+                required_return_pct=assumption_context.get("required_return_pct"),
+            )
+            scenario_specs = estimate.get("scenarios", [])
+        else:
+            estimate = {"status": "missing_source_basis", "scenarios": [],
+                        "reasons": ["缺少有来源的派息率或要求收益率参数"]}
     if scenario_specs and (not as_of or as_of >= "2026-10-08"):
         try:
             scenarios = [ValuationScenario(**s) for s in scenario_specs]
@@ -169,7 +185,8 @@ async def _generate_summary(
             result = calculate_scenarios([])
     else:
         result = calculate_scenarios([])
-    prompt += ("\\n\\n## 确定性估值计算\\n" + render_valuation_block(result)
+    prompt += ("\\n\\n## 情景推导来源\\n" + json.dumps(estimate, ensure_ascii=False)
+               + "\\n\\n## 确定性估值计算\\n" + render_valuation_block(result)
                + "\\n估值结论必须服从以上计算状态；未计算时不得编造目标价格。")
 
     # 工具调用路径: 强制十二维度逐一分析后提交
