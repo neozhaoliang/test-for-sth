@@ -38,6 +38,6 @@ def test_no_unsourced_payout_or_hurdle():
 
 def test_no_future_roe_when_historical():
     result = estimate_valuation_scenarios(
-        profitability_trend=history(), as_of="2024-12-31",
+        profitability_trend=history(), as_of="2023-12-31",
         payout_pct=50, required_return_pct=11)
     assert result["status"] == "insufficient_history"
