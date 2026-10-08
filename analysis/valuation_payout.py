@@ -66,7 +66,7 @@ def annual_payout_from_eps(*, annual_eps, dividends, as_of):
             "years":[x["fiscal_year"] for x in recent],"observations":recent}
 
 def collect_declared_fiscal_payout_inputs(*, profitability_trend, dividend_history,
-                                          primary_evidence, stock_code, as_of):
+                                          primary_evidence, stock_code, as_of, filing_calendar=None):
     """Join dividends ONLY to same-day issuer implementation notices with explicit fiscal years.
 
     Ambiguous notices and multi-match dates are dropped, not allocated to a guessed year.
@@ -74,6 +74,17 @@ def collect_declared_fiscal_payout_inputs(*, profitability_trend, dividend_histo
     import re
     cutoff=date.fromisoformat(str(as_of)[:10])
     annual_eps=[]
+    annual_filings = {}
+    for filing in filing_calendar or []:
+        if filing.get("report_type") != "annual":
+            continue
+        period = str(filing.get("period") or "")[:10]
+        published = str(filing.get("published_at") or "")[:10]
+        if not period.endswith("-12-31") or not published or published > cutoff.isoformat() or not filing.get("url"):
+            continue
+        old=annual_filings.get(period)
+        if old is None or old["published_at"] < published:
+            annual_filings[period] = {"published_at": published, "url": filing["url"]}
     code="".join(ch for ch in str(stock_code) if ch.isdigit())[-6:]
     for row in (profitability_trend or {}).get("periods") or []:
         period=str(row.get("period") or "")[:10]
@@ -82,13 +93,14 @@ def collect_declared_fiscal_payout_inputs(*, profitability_trend, dividend_histo
         eps=number(row.get("eps_yuan"))
         if eps is None or eps<=0:
             continue
-        # Indicator observation is only eligible after a separate, dated publication
-        # record has been provided; report-period date is NOT a publication date.
-        if not row.get("published_at") or not row.get("source_url"):
+        # The filing calendar timestamps market availability; it does not certify
+        # the third-party EPS against the filed PDF (including later restatements).
+        filing=annual_filings.get(period)
+        if not filing:
             continue
         annual_eps.append({
             "fiscal_year":int(period[:4]),"eps_yuan":eps,
-            "published_at":row["published_at"],"source_url":row["source_url"],
+            "published_at":filing["published_at"],"source_url":filing["url"],
         })
     declarations={}
     for evidence in primary_evidence or []:
@@ -109,4 +121,4 @@ def collect_declared_fiscal_payout_inputs(*, profitability_trend, dividend_histo
         yr,url=notices[0]
         matched.append({**dividend,"fiscal_year":yr,"source_url":url})
     return {"annual_eps":annual_eps,"fiscal_dividends":matched,
-            "note":"未具备带发布时间的EPS来源时，自动派息率保持缺失；公告年份不等于利润归属年度"}
+            "note":"EPS数值来自第三方历史指标，仅用年报披露日标记可用时间；尚未逐项与原始PDF核对，不应用于严格历史回测"}
