@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from analysis.evidence import EvidenceItem
+from analysis.valuation_engine import (ValuationScenario, calculate_scenarios, render_valuation_block)
 from analysis.report_blocks import _build_prompt
 from analysis.report_contract import (
     _ANALYSIS_TOOL_NAMES,
@@ -149,6 +150,27 @@ async def _generate_summary(
                    + method_file.read_text(encoding="utf-8"))
     elif not method_file.is_file():
         utils.logger.warning("[analysis.report] 估值方法知识库文件缺失，无法注入长期收益率模型")
+
+    # Pure-Python numeric authority: LLM must not invent or alter these calculations.
+    # Missing source-backed scenarios intentionally produce no target price.
+    scenario_specs = getattr(inputs, "valuation_scenarios", None) or []
+    if scenario_specs and (not as_of or as_of >= "2026-10-08"):
+        try:
+            scenarios = [ValuationScenario(**s) for s in scenario_specs]
+            valuation = getattr(inputs, "valuation", None) or {}
+            quote = getattr(inputs, "quote", None) or {}
+            result = calculate_scenarios(
+                scenarios,
+                book_value_per_share=valuation.get("book_value_per_share"),
+                market_price=quote.get("latest_price"),
+            )
+        except (TypeError, ValueError, KeyError) as exc:
+            utils.logger.warning(f"[analysis.report] 估值假设无效: {exc}")
+            result = calculate_scenarios([])
+    else:
+        result = calculate_scenarios([])
+    prompt += ("\\n\\n## 确定性估值计算\\n" + render_valuation_block(result)
+               + "\\n估值结论必须服从以上计算状态；未计算时不得编造目标价格。")
 
     # 工具调用路径: 强制十二维度逐一分析后提交
     analyses, submit_input, tool_reason = await call_analysis_with_tools(
