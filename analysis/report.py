@@ -52,6 +52,7 @@ from analysis.policy_context import get_policy_event_context
 from analysis.realtime_price import get_historical_quote, get_realtime_quote, get_stock_name
 from analysis.rd_team import get_rd_team_composition
 from analysis.valuation_history import get_valuation_history
+from analysis.valuation_payout import collect_declared_fiscal_payout_inputs
 from analysis.evidence import ResearchQuality, build_evidence_ledger, evaluate_research_quality
 from analysis.research_profile import ResearchProfile, classify_research_profile
 from analysis.report_contract import _PROMPT_VERSION
@@ -332,6 +333,17 @@ async def generate_report(
                 utils.logger.warning("[valuation] investor hurdle outside 6..25 percent")
         except ValueError:
             utils.logger.warning("[valuation] invalid VALUATION_REQUIRED_RETURN_PCT")
+
+    if not historical_mode:
+        payout_inputs = collect_declared_fiscal_payout_inputs(
+            profitability_trend=profitability_trend,
+            dividend_history=dividend_history,
+            primary_evidence=primary_evidence,
+            stock_code=stock_code,
+            as_of=request.as_of or __import__("datetime").date.today(),
+            filing_calendar=filing_calendar,
+        )
+        valuation_assumption_context.update(payout_inputs)
 
     inputs = AnalysisInputs(
         stock_code=stock_code,
