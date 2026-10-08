@@ -185,9 +185,9 @@ async def _generate_summary(
             result = calculate_scenarios([])
     else:
         result = calculate_scenarios([])
-    prompt += ("\\n\\n## 情景推导来源\\n" + json.dumps(estimate, ensure_ascii=False)
-               + "\\n\\n## 确定性估值计算\\n" + render_valuation_block(result)
-               + "\\n估值结论必须服从以上计算状态；未计算时不得编造目标价格。")
+    prompt += ("\n\n## 情景推导来源\n" + json.dumps(estimate, ensure_ascii=False)
+               + "\n\n## 确定性估值计算\n" + render_valuation_block(result)
+               + "\n估值结论必须服从以上计算状态；未计算时不得编造目标价格。")
 
     # 工具调用路径: 强制十二维度逐一分析后提交
     analyses, submit_input, tool_reason = await call_analysis_with_tools(
