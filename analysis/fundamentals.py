@@ -35,6 +35,7 @@ import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
+from analysis.financial_consistency import coherent_yoy_pct
 from tools.httpx_util import make_async_client
 from tools.utils import utils
 
@@ -148,35 +149,6 @@ def _pct(text: Optional[str]) -> Optional[float]:
         return float(m.group(1))
     except ValueError:
         return None
-
-def _coherent_yoy_pct(
-    current: Optional[float],
-    previous: Optional[float],
-    reported: Optional[float],
-) -> Optional[float]:
-    """Repair a lost YoY sign when the table values prove the opposite direction.
-
-    Some F10 tables render the percentage magnitude as a positive number while the
-    increase/decrease direction lives in presentation text that our cell parser does not
-    capture.  When current/previous values imply essentially the same magnitude, trust
-    their direction.  Large magnitude disagreement is left untouched rather than guessed.
-    """
-    if current is None or previous in (None, 0):
-        return reported
-    derived = (current - previous) / abs(previous) * 100
-    if reported is None:
-        return round(derived, 2)
-
-    tolerance = max(0.25, abs(derived) * 0.03)
-    if (
-        reported != 0
-        and derived != 0
-        and reported * derived < 0
-        and abs(abs(reported) - abs(derived)) <= tolerance
-    ):
-        return round(derived, 2)
-    return reported
-
 
 def _first_number(text: str) -> Optional[float]:
     m = re.search(r"-?[\d.]+", text or "")
@@ -562,7 +534,7 @@ def _parse_finance_metrics(html: str) -> tuple:
             metrics[cells[0]] = {
                 "current": current,
                 "previous": previous,
-                "yoy_pct": _coherent_yoy_pct(current, previous, reported_yoy),
+                "yoy_pct": coherent_yoy_pct(current, previous, reported_yoy),
             }
         newest_period, newest_metrics = period, metrics
 
