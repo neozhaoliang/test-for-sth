@@ -64,3 +64,49 @@ def annual_payout_from_eps(*, annual_eps, dividends, as_of):
     recent=obs[-5:]
     return {"status":"verified","payout_pct":round(median(x["payout_pct"] for x in recent),3),
             "years":[x["fiscal_year"] for x in recent],"observations":recent}
+
+def collect_declared_fiscal_payout_inputs(*, profitability_trend, dividend_history,
+                                          primary_evidence, stock_code, as_of):
+    """Join dividends ONLY to same-day issuer implementation notices with explicit fiscal years.
+
+    Ambiguous notices and multi-match dates are dropped, not allocated to a guessed year.
+    """
+    import re
+    cutoff=date.fromisoformat(str(as_of)[:10])
+    annual_eps=[]
+    code="".join(ch for ch in str(stock_code) if ch.isdigit())[-6:]
+    for row in (profitability_trend or {}).get("periods") or []:
+        period=str(row.get("period") or "")[:10]
+        if not period.endswith("-12-31") or period>cutoff.isoformat():
+            continue
+        eps=number(row.get("eps_yuan"))
+        if eps is None or eps<=0:
+            continue
+        # Indicator observation is only eligible after a separate, dated publication
+        # record has been provided; report-period date is NOT a publication date.
+        if not row.get("published_at") or not row.get("source_url"):
+            continue
+        annual_eps.append({
+            "fiscal_year":int(period[:4]),"eps_yuan":eps,
+            "published_at":row["published_at"],"source_url":row["source_url"],
+        })
+    declarations={}
+    for evidence in primary_evidence or []:
+        title=str(evidence.get("title") or "")
+        if not re.search(r"权益分派实施|分红派息实施|利润分配实施",title):
+            continue
+        years=set(int(y) for y in re.findall(r"(20\d{2})年(?:度|中期|末期)",title))
+        day=str(evidence.get("published_at") or "")[:10]
+        if len(years)!=1 or not day or day>cutoff.isoformat() or not evidence.get("url"):
+            continue
+        declarations.setdefault(day,[]).append((years.pop(),evidence["url"]))
+    matched=[]
+    for dividend in dividend_history or []:
+        day=str(dividend.get("announce_date") or "")[:10]
+        notices=declarations.get(day,[])
+        if len(notices)!=1:
+            continue
+        yr,url=notices[0]
+        matched.append({**dividend,"fiscal_year":yr,"source_url":url})
+    return {"annual_eps":annual_eps,"fiscal_dividends":matched,
+            "note":"未具备带发布时间的EPS来源时，自动派息率保持缺失；公告年份不等于利润归属年度"}
