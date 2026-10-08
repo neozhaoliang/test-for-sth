@@ -181,3 +181,32 @@ def test_management_capital_uses_cninfo_implementation_notices_as_year_fallback(
     assert row["dividend_years_count"] == 2
     assert row["dividend_records"] == 0
     assert row["primary_implemented_dividend_announcements"] == 2
+
+
+def test_management_capital_recognizes_dividend_implementation_variants():
+    record = build_management_capital_record(
+        dividend_history=[
+            {
+                "announce_date": "2026-06-20",
+                "dividend_per_10_shares": 4.4,
+                "progress": "实施方案",
+            },
+            {
+                "announce_date": "2025-06-20",
+                "dividend_per_10_shares": 5.2,
+                "progress": "除权除息",
+            },
+            {
+                "announce_date": "2024-06-20",
+                "dividend_per_10_shares": 4.0,
+                "progress": "股权登记日",
+            },
+        ],
+        as_of=date(2026, 10, 8),
+    )
+
+    row = record["five_year"]
+    assert row["dividend_years"] == [2026, 2025, 2024]
+    assert row["dividend_years_count"] == 3
+    assert row["dividend_records"] == 3
+    assert row["cash_dividend_per_10_total"] == 13.6
