@@ -163,3 +163,29 @@ def test_live_shareholder_reconcile_keeps_newer_primary_source():
 
     assert out is primary
     assert out["period"] == "2026-09-30"
+
+
+def test_live_shareholder_reconcile_uses_latest_f10_fields_without_series():
+    stale = {
+        "latest_count": 188192,
+        "change_pct": -2.0,
+        "period": "2017-09-30",
+        "as_of": "2017-09-30",
+        "source_mode": "detail_history",
+    }
+    fundamentals = {
+        "facts": {
+            "holder_count_latest": 430616,
+            "holder_count_period": "2026-06-30",
+            "holder_count_qoq_pct": 8.36,
+            "holder_count_yoy_pct": 19.23,
+        }
+    }
+
+    out = shareholder.reconcile_live_shareholder_trend(stale, fundamentals)
+
+    assert out["source_mode"] == "ths_f10_holder_latest"
+    assert out["period"] == "2026-06-30"
+    assert out["latest_count"] == 430616
+    assert out["change_pct"] == pytest.approx(8.36)
+    assert out["yoy_pct"] == pytest.approx(19.23)
