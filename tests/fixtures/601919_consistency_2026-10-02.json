@@ -1,0 +1,534 @@
+{
+  "source": "validated-601919-report.zip/601919-report.json",
+  "captured_as_of": "2026-10-02",
+  "report_fields": {
+    "stock_code": "601919",
+    "stock_name": "601919",
+    "research_mode": "live",
+    "as_of": "2026-10-02",
+    "shareholder_trend": {
+      "latest_count": 326080,
+      "change_pct": -11.588068944387,
+      "trend": "decreasing",
+      "as_of": "2017-05-16",
+      "period": "2017-05-16",
+      "published_at": "2017-06-08",
+      "available_at": "2017-06-08",
+      "source_mode": "detail_history"
+    },
+    "dividend_history": [
+      {
+        "announce_date": "2026-08-29",
+        "available_at": "2026-08-29",
+        "dividend_per_10_shares": 4.3,
+        "progress": "预案"
+      },
+      {
+        "announce_date": "2026-06-18",
+        "available_at": "2026-06-18",
+        "dividend_per_10_shares": 4.4,
+        "progress": "实施"
+      },
+      {
+        "announce_date": "2025-10-16",
+        "available_at": "2025-10-16",
+        "dividend_per_10_shares": 5.6,
+        "progress": "实施"
+      },
+      {
+        "announce_date": "2025-06-17",
+        "available_at": "2025-06-17",
+        "dividend_per_10_shares": 10.3,
+        "progress": "实施"
+      },
+      {
+        "announce_date": "2024-08-30",
+        "available_at": "2024-08-30",
+        "dividend_per_10_shares": 5.2,
+        "progress": "实施"
+      },
+      {
+        "announce_date": "2024-06-12",
+        "available_at": "2024-06-12",
+        "dividend_per_10_shares": 2.3,
+        "progress": "实施"
+      },
+      {
+        "announce_date": "2023-12-12",
+        "available_at": "2023-12-12",
+        "dividend_per_10_shares": 5.1,
+        "progress": "实施"
+      },
+      {
+        "announce_date": "2023-06-16",
+        "available_at": "2023-06-16",
+        "dividend_per_10_shares": 13.9,
+        "progress": "实施"
+      },
+      {
+        "announce_date": "2022-12-07",
+        "available_at": "2022-12-07",
+        "dividend_per_10_shares": 20.1,
+        "progress": "实施"
+      },
+      {
+        "announce_date": "2022-06-15",
+        "available_at": "2022-06-15",
+        "dividend_per_10_shares": 8.7,
+        "progress": "实施"
+      },
+      {
+        "announce_date": "2021-07-08",
+        "available_at": "2021-07-08",
+        "dividend_per_10_shares": 0.0,
+        "progress": "实施"
+      },
+      {
+        "announce_date": "2020-03-31",
+        "available_at": "2020-03-31",
+        "dividend_per_10_shares": 0.0,
+        "progress": "不分配"
+      },
+      {
+        "announce_date": "2019-03-30",
+        "available_at": "2019-03-30",
+        "dividend_per_10_shares": 0.0,
+        "progress": "不分配"
+      },
+      {
+        "announce_date": "2018-03-30",
+        "available_at": "2018-03-30",
+        "dividend_per_10_shares": 0.0,
+        "progress": "不分配"
+      },
+      {
+        "announce_date": "2017-03-31",
+        "available_at": "2017-03-31",
+        "dividend_per_10_shares": 0.0,
+        "progress": "不分配"
+      },
+      {
+        "announce_date": "2016-03-31",
+        "available_at": "2016-03-31",
+        "dividend_per_10_shares": 0.0,
+        "progress": "不分配"
+      },
+      {
+        "announce_date": "2015-03-27",
+        "available_at": "2015-03-27",
+        "dividend_per_10_shares": 0.0,
+        "progress": "不分配"
+      },
+      {
+        "announce_date": "2014-03-28",
+        "available_at": "2014-03-28",
+        "dividend_per_10_shares": 0.0,
+        "progress": "不分配"
+      },
+      {
+        "announce_date": "2013-03-28",
+        "available_at": "2013-03-28",
+        "dividend_per_10_shares": 0.0,
+        "progress": "不分配"
+      },
+      {
+        "announce_date": "2012-03-30",
+        "available_at": "2012-03-30",
+        "dividend_per_10_shares": 0.0,
+        "progress": "不分配"
+      },
+      {
+        "announce_date": "2011-06-14",
+        "available_at": "2011-06-14",
+        "dividend_per_10_shares": 0.9,
+        "progress": "实施"
+      },
+      {
+        "announce_date": "2010-04-23",
+        "available_at": "2010-04-23",
+        "dividend_per_10_shares": 0.0,
+        "progress": "不分配"
+      },
+      {
+        "announce_date": "2009-06-23",
+        "available_at": "2009-06-23",
+        "dividend_per_10_shares": 2.9,
+        "progress": "实施"
+      },
+      {
+        "announce_date": "2008-06-11",
+        "available_at": "2008-06-11",
+        "dividend_per_10_shares": 1.8,
+        "progress": "实施"
+      }
+    ],
+    "primary_evidence": [
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2026年中期利润分配方案公告",
+        "published_at": "2026-08-29 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2026-08-29/1225531154.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1225531154",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2025年末期权益分派实施公告",
+        "published_at": "2026-06-18 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2026-06-18/1225376226.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1225376226",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2025年末期利润分配方案的公告",
+        "published_at": "2026-03-20 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2026-03-20/1225019955.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1225019955",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2025年中期权益分派实施公告",
+        "published_at": "2025-10-16 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2025-10-16/1224714716.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1224714716",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2025年中期利润分配方案公告",
+        "published_at": "2025-08-29 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2025-08-29/1224614345.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1224614345",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2024年末期权益分派实施公告",
+        "published_at": "2025-06-17 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2025-06-17/1223888404.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1223888404",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2024年末期利润分配方案的公告",
+        "published_at": "2025-03-22 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2025-03-22/1222870532.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1222870532",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2024年中期权益分派实施公告",
+        "published_at": "2024-09-26 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2024-09-26/1221290881.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1221290881",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2024年中期利润分配方案的公告",
+        "published_at": "2024-08-30 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2024-08-30/1221058564.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1221058564",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2023年末期权益分派实施公告",
+        "published_at": "2024-06-12 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2024-06-12/1220323391.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1220323391",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2023年末期利润分配方案的公告",
+        "published_at": "2024-03-29 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2024-03-29/1219449957.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1219449957",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2023年中期权益分派实施公告",
+        "published_at": "2023-12-12 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2023-12-12/1218578941.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1218578941",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2023年中期利润分配方案公告",
+        "published_at": "2023-08-30 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2023-08-30/1217702410.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1217702410",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2022年末期权益分派实施公告",
+        "published_at": "2023-06-16 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2023-06-16/1217073618.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1217073618",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2022年末期利润分配方案公告",
+        "published_at": "2023-03-31 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2023-03-31/1216282411.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1216282411",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2022年中期权益分派实施公告",
+        "published_at": "2022-12-07 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2022-12-07/1215289417.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1215289417",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2022年中期利润分配方案公告",
+        "published_at": "2022-08-31 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2022-08-31/1214474346.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1214474346",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2021年年度权益分派实施公告",
+        "published_at": "2022-06-15 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2022-06-15/1213704904.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1213704904",
+        "acquisition": "direct_cninfo"
+      },
+      {
+        "source_name": "巨潮资讯",
+        "source_tier": "S",
+        "kind": "fact",
+        "category": "权益分派",
+        "title": "中远海控2021年年度利润分配方案公告",
+        "published_at": "2022-03-31 00:00:00",
+        "url": "https://static.cninfo.com.cn/finalpage/2022-03-31/1212754826.PDF",
+        "stock_name": "中远海控",
+        "announcement_id": "1212754826",
+        "acquisition": "direct_cninfo"
+      }
+    ],
+    "management_capital": {
+      "as_of": "2026-10-02",
+      "alignment": {
+        "chairman": "万敏",
+        "joined_year": 1994,
+        "tenure_years": 32,
+        "chairman_salary_wan": 297.6,
+        "chairman_shares": "5.67万股",
+        "chairman_education": "硕士"
+      },
+      "execution": {
+        "period_start": "2025-03-31",
+        "period_end": "2026-06-30",
+        "period_count": 6,
+        "roe_start_pct": 4.79,
+        "roe_latest_pct": 5.74,
+        "roe_change_pp": 0.95,
+        "roe_min_pct": 2.49,
+        "roe_max_pct": 13.29,
+        "net_profit_growth_positive_periods": 2,
+        "net_profit_growth_observations": 6,
+        "net_profit_growth_latest_pct": -22.31,
+        "net_margin_latest_pct": 14.03,
+        "net_margin_change_pp": -8.8
+      },
+      "five_year": {
+        "window_years": 5,
+        "calendar_years": [
+          2022,
+          2023,
+          2024,
+          2025,
+          2026
+        ],
+        "dividend_years_count": 0,
+        "dividend_years": [],
+        "cash_dividend_per_10_total": 0.0,
+        "dividend_records": 0,
+        "cash_dividend_amount_records": 0,
+        "cash_dividend_amount_complete": true,
+        "buyback_records": 5,
+        "buyback_actual_amount_yuan": 4099311305.77,
+        "refinancing_records": 0,
+        "insider_reduction_announcements": 0,
+        "governance_negative_announcements": 0,
+        "primary_refinancing_announcements": 0,
+        "primary_dividend_announcements": 19,
+        "primary_buyback_announcements": 17
+      },
+      "ten_year": {
+        "window_years": 10,
+        "calendar_years": [
+          2017,
+          2018,
+          2019,
+          2020,
+          2021,
+          2022,
+          2023,
+          2024,
+          2025,
+          2026
+        ],
+        "dividend_years_count": 0,
+        "dividend_years": [],
+        "cash_dividend_per_10_total": 0.0,
+        "dividend_records": 0,
+        "cash_dividend_amount_records": 0,
+        "cash_dividend_amount_complete": true,
+        "buyback_records": 5,
+        "buyback_actual_amount_yuan": 4099311305.77,
+        "refinancing_records": 1,
+        "insider_reduction_announcements": 0,
+        "governance_negative_announcements": 0,
+        "primary_refinancing_announcements": 0,
+        "primary_dividend_announcements": 19,
+        "primary_buyback_announcements": 17
+      },
+      "recent_insider_reduction_events": [],
+      "recent_governance_negative_events": [],
+      "recent_primary_refinancing_events": [],
+      "notes": [],
+      "source_tier": "A",
+      "method": "巨潮一手公告优先；分红/回购历史与F10再融资用于长期资本分配统计。同一事件在管理层与股东回报分析中共享，不作为两份独立证据重复计分。"
+    },
+    "fundamentals": {
+      "facts": {
+        "holder_count_series": [
+          {
+            "period": "2026-06-30",
+            "holders": 430616,
+            "price": 13.26
+          },
+          {
+            "period": "2026-03-31",
+            "holders": 397399,
+            "price": 15.01
+          },
+          {
+            "period": "2026-02-28",
+            "holders": 413687,
+            "price": 15.01
+          },
+          {
+            "period": "2025-12-31",
+            "holders": 375225,
+            "price": 15.18
+          },
+          {
+            "period": "2025-09-30",
+            "holders": 425262,
+            "price": 14.34
+          },
+          {
+            "period": "2025-06-30",
+            "holders": 361152,
+            "price": 15.04
+          },
+          {
+            "period": "2025-03-31",
+            "holders": 368466,
+            "price": 14.55
+          },
+          {
+            "period": "2025-02-28",
+            "holders": 371686,
+            "price": 13.62
+          }
+        ],
+        "holder_count_latest": 430616,
+        "holder_count_period": "2026-06-30",
+        "holder_count_qoq_pct": 8.36,
+        "holder_count_yoy_pct": 19.23,
+        "operating_cash_flow": 23330000000.0,
+        "operating_cash_flow_previous": 25777000000.0,
+        "operating_cash_flow_yoy_pct": 9.49
+      }
+    }
+  }
+}

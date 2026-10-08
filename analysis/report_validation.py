@@ -17,11 +17,14 @@ The validator is safe for CI because it performs no network or LLM calls.
 from __future__ import annotations
 
 from datetime import date, datetime
+from math import isfinite, isclose
 from typing import Dict, List, Optional, Set
 
 from pydantic import BaseModel, Field
 
 from model.m_analysis import AnalysisReport
+from analysis.financial_consistency import coherent_yoy_pct
+from analysis.management_capital import build_management_capital_record
 
 
 _VALID_STANCES = {"bullish", "bearish", "neutral"}
@@ -142,6 +145,70 @@ def _dimension_score_keys(scores: Optional[List[dict]]) -> Set[str]:
     return out
 
 
+def _validate_data_consistency(report: AnalysisReport) -> List[ValidationIssue]:
+    """Reject the source contradictions observed in the 601919 live acceptance.
+
+    Inspect source values, not the model's interpretation. Historical requests must
+    never be compared with a live F10 holder table.
+    """
+    issues: List[ValidationIssue] = []
+    facts = (report.fundamentals or {}).get("facts") or {}
+    if report.research_mode == "live":
+        f10_dates = [
+            _parse_date(facts.get("holder_count_period")),
+            *[
+                _parse_date(row.get("period"))
+                for row in facts.get("holder_count_series") or []
+                if row.get("holders")
+            ],
+        ]
+        f10_latest = max((d for d in f10_dates if d), default=None)
+        holder = report.shareholder_trend or {}
+        selected = _parse_date(holder.get("period") or holder.get("as_of"))
+        if f10_latest and (selected is None or selected < f10_latest):
+            issues.append(_issue(
+                "stale_shareholder_source", "error",
+                f"股东户数采用期次 {selected}，早于已取得的F10期次 {f10_latest}。",
+            ))
+
+    values = [facts.get(key) for key in (
+        "operating_cash_flow", "operating_cash_flow_previous",
+        "operating_cash_flow_yoy_pct",
+    )]
+    if all(isinstance(v, (int, float)) and isfinite(v) for v in values):
+        current, previous, reported = values
+        checked = coherent_yoy_pct(current, previous, reported)
+        if not isclose(checked, reported, abs_tol=0.01):
+            issues.append(_issue(
+                "cashflow_yoy_sign_conflict", "error",
+                f"经营现金流同比 {reported}% 与同口径本期/上期绝对值相矛盾，应为 {checked}%。",
+            ))
+
+    if report.management_capital and (report.dividend_history or report.primary_evidence):
+        cutoff = _parse_date(report.as_of) or _parse_date(report.management_capital.get("as_of"))
+        if cutoff:
+            expected = build_management_capital_record(
+                dividend_history=report.dividend_history,
+                primary_evidence=report.primary_evidence,
+                as_of=cutoff,
+            )
+            for key in ("five_year", "ten_year"):
+                actual = report.management_capital.get(key) or {}
+                reference = expected[key]
+                if actual and actual.get("dividend_years_count") != reference["dividend_years_count"]:
+                    issues.append(_issue(
+                        "dividend_years_conflict", "error",
+                        f"{key}分红年数 {actual.get('dividend_years_count')} 与逐条记录/实施公告"
+                        f"汇总结果 {reference['dividend_years_count']} 不一致。",
+                    ))
+                if reference["cash_dividend_per_10_total"] is None and actual.get("cash_dividend_per_10_total") == 0:
+                    issues.append(_issue(
+                        "unknown_dividend_amount_as_zero", "error",
+                        f"{key}已取得分红实施证据但金额暂缺，不能记为现金分红0元。",
+                    ))
+    return issues
+
+
 def validate_report(report: AnalysisReport) -> ReportValidation:
     errors: List[ValidationIssue] = []
     warnings: List[ValidationIssue] = []
@@ -150,6 +217,7 @@ def validate_report(report: AnalysisReport) -> ReportValidation:
     review = report.review
 
     errors.extend(_validate_historical_cutoff(report))
+    errors.extend(_validate_data_consistency(report))
 
     for field_name in ("stance", "company_quality_stance", "current_odds_stance"):
         value = str(getattr(summary, field_name, "") or "")

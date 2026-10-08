@@ -181,6 +181,37 @@ def test_management_capital_uses_cninfo_implementation_notices_as_year_fallback(
     assert row["dividend_years_count"] == 2
     assert row["dividend_records"] == 0
     assert row["primary_implemented_dividend_announcements"] == 2
+    assert row["cash_dividend_per_10_total"] is None
+    assert row["cash_dividend_amount_complete"] is False
+
+
+def test_management_capital_excludes_zero_cash_and_unimplemented_statuses():
+    record = build_management_capital_record(
+        dividend_history=[
+            {"announce_date": "2021-07-08", "dividend_per_10_shares": 0, "progress": "实施"},
+            {"announce_date": "2022-06-15", "dividend_per_10_shares": 8.7, "progress": "实施"},
+            {"announce_date": "2023-06-15", "dividend_per_10_shares": 2, "progress": "未实施"},
+            {"announce_date": "2024-06-15", "dividend_per_10_shares": 2, "progress": "unpaid"},
+            {"announce_date": "2025-06-15", "dividend_per_10_shares": 2, "progress": "cancelled"},
+        ],
+        as_of=date(2026, 10, 8),
+    )
+    assert record["ten_year"]["dividend_years"] == [2022]
+    assert record["ten_year"]["cash_dividend_per_10_total"] == 8.7
+
+
+def test_primary_only_extra_year_keeps_cash_amount_incomplete():
+    record = build_management_capital_record(
+        dividend_history=[{"announce_date": "2026-06-20", "dividend_per_10_shares": 4.4, "progress": "实施"}],
+        primary_evidence=[{
+            "published_at": "2025-06-20", "category": "权益分派",
+            "title": "2024年年度A股分红派息实施公告", "url": "https://example.com/2025.pdf",
+        }],
+        as_of=date(2026, 10, 8),
+    )
+    assert record["five_year"]["dividend_years_count"] == 2
+    assert record["five_year"]["cash_dividend_per_10_total"] == 4.4
+    assert record["five_year"]["cash_dividend_amount_complete"] is False
 
 
 def test_management_capital_recognizes_dividend_implementation_variants():

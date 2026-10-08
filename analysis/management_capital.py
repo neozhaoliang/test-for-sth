@@ -84,11 +84,20 @@ def _is_realized_dividend(row: Dict) -> bool:
     records use normalized English labels.  Proposal/approval stages must not be mistaken
     for cash already distributed.
     """
+    # An implemented stock dividend (e.g. 10送3、现金派息0) is not a cash return.
+    # Preserve unknown amounts: missing cash data is different from an explicit zero.
+    amount = _num(row.get("dividend_per_10_shares"))
+    if amount is not None and amount <= 0:
+        return False
     progress = str(row.get("progress") or "").strip().lower()
     if progress:
         if any(
             token in progress
-            for token in ("预案", "待实施", "董事会通过", "股东大会通过", "proposal")
+            for token in (
+                "预案", "待实施", "未实施", "不分配", "取消", "终止",
+                "董事会通过", "股东大会通过", "proposal", "pending",
+                "unpaid", "not implemented", "cancelled", "canceled",
+            )
         ):
             return False
         if any(
@@ -110,7 +119,7 @@ def _is_realized_dividend(row: Dict) -> bool:
             return True
         # Unknown non-empty statuses remain conservative.
         return False
-    return (_num(row.get("dividend_per_10_shares")) or 0) > 0
+    return (amount or 0) > 0
 
 
 def _implemented_primary_dividends(primary: Iterable[Dict]) -> List[Dict]:
@@ -149,6 +158,10 @@ def _summarize_window(
         if _date_year(p.get("published_at")) in years
     ]
     primary_realized_dividends = _implemented_primary_dividends(primary_in_window)
+    record_years = {_date_year(d.get("announce_date")) for d in div_rows}
+    primary_only_years = {
+        _date_year(p.get("published_at")) for p in primary_realized_dividends
+    } - record_years
     dividend_years = sorted(
         {
             year
@@ -181,7 +194,7 @@ def _summarize_window(
             4,
         )
         if known_amount_rows
-        else (0.0 if not div_rows else None)
+        else (None if div_rows or primary_realized_dividends else 0.0)
     )
 
     buy_rows = [
@@ -209,7 +222,10 @@ def _summarize_window(
         "cash_dividend_per_10_total": div_total_per10,
         "dividend_records": len(div_rows),
         "cash_dividend_amount_records": len(known_amount_rows),
-        "cash_dividend_amount_complete": len(known_amount_rows) == len(div_rows),
+        "cash_dividend_amount_complete": (
+            len(known_amount_rows) == len(div_rows) and not primary_only_years
+        ),
+        "dividend_year_basis": "implementation_announcement_calendar_year",
         "buyback_records": len(buy_rows),
         "buyback_actual_amount_yuan": round(buyback_actual, 2),
         "refinancing_records": len(refi_rows),
@@ -341,6 +357,8 @@ def build_management_capital_record(
         "source_tier": "A" if primary_evidence else "B",
         "method": (
             "巨潮一手公告优先；分红/回购历史与F10再融资用于长期资本分配统计。"
+            "分红年数按实施公告所在日历年去重，已知现金派息为0的记录不计入；"
+            "公告确认实施但金额未解析时保留缺失标记。"
             "同一事件在管理层与股东回报分析中共享，不作为两份独立证据重复计分。"
         ),
     }
