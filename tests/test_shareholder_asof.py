@@ -112,3 +112,54 @@ async def test_buyback_history_excludes_future_latest_announcements(monkeypatch)
     assert len(out) == 1
     assert out[0]["announce_date"] == "2024-04-01"
     assert out[0]["available_at"] == "2024-04-01"
+
+
+
+def test_live_shareholder_reconcile_replaces_stale_akshare_with_newer_f10():
+    stale = {
+        "latest_count": 188192,
+        "change_pct": -2.0,
+        "period": "2017-09-30",
+        "as_of": "2017-09-30",
+        "source_mode": "detail_history",
+    }
+    fundamentals = {
+        "facts": {
+            "holder_count_series": [
+                {"period": "2026-06-30", "holders": 430616, "price": 14.9},
+                {"period": "2026-03-31", "holders": 397400, "price": 14.2},
+                {"period": "2025-06-30", "holders": 361150, "price": 13.5},
+            ]
+        }
+    }
+
+    out = shareholder.reconcile_live_shareholder_trend(stale, fundamentals)
+
+    assert out["source_mode"] == "ths_f10_holder_series"
+    assert out["period"] == "2026-06-30"
+    assert out["latest_count"] == 430616
+    assert out["change_pct"] == pytest.approx(8.358, abs=0.001)
+    assert out["yoy_pct"] == pytest.approx(19.236, abs=0.001)
+
+
+def test_live_shareholder_reconcile_keeps_newer_primary_source():
+    primary = {
+        "latest_count": 420000,
+        "change_pct": 1.0,
+        "period": "2026-09-30",
+        "as_of": "2026-09-30",
+        "source_mode": "detail_history",
+    }
+    fundamentals = {
+        "facts": {
+            "holder_count_series": [
+                {"period": "2026-06-30", "holders": 430616, "price": 14.9},
+                {"period": "2026-03-31", "holders": 397400, "price": 14.2},
+            ]
+        }
+    }
+
+    out = shareholder.reconcile_live_shareholder_trend(primary, fundamentals)
+
+    assert out is primary
+    assert out["period"] == "2026-09-30"
