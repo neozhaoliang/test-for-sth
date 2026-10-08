@@ -22,6 +22,7 @@
 """
 
 import asyncio
+import os
 import re
 import time
 from typing import Dict, List, Optional
@@ -315,6 +316,23 @@ async def generate_report(
         as_of=request.as_of,
     )
 
+    # Explicit investor hurdle, not a fabricated issuer WACC. Configuration is optional.
+    # Example: VALUATION_REQUIRED_RETURN_PCT=11
+    hurdle_raw = os.environ.get("VALUATION_REQUIRED_RETURN_PCT", "").strip()
+    valuation_assumption_context = {}
+    if hurdle_raw:
+        try:
+            hurdle = float(hurdle_raw)
+            if 6 <= hurdle <= 25:
+                valuation_assumption_context = {
+                    "required_return_pct": hurdle,
+                    "required_return_basis": "investor_config:VALUATION_REQUIRED_RETURN_PCT",
+                }
+            else:
+                utils.logger.warning("[valuation] investor hurdle outside 6..25 percent")
+        except ValueError:
+            utils.logger.warning("[valuation] invalid VALUATION_REQUIRED_RETURN_PCT")
+
     inputs = AnalysisInputs(
         stock_code=stock_code,
         stock_name=stock_name,
@@ -334,6 +352,7 @@ async def generate_report(
         fundamentals=fundamentals,
         valuation=valuation,
         valuation_history=valuation_history,
+        valuation_assumption_context=valuation_assumption_context,
         rd_team=rd_team,
         major_events=major_events,
         refinancing_history=refinancing_history,
