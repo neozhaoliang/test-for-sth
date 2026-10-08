@@ -208,3 +208,42 @@ def test_profile_label_mapping():
 def test_profile_absent_labels_never_invent_values():
     """页面改版时宁可整块缺失，也不能让 PE/PB 变成 0.0 被当成真实估值。"""
     assert _parse_profile("<div class='m_box'>没有任何标签</div>") == {}
+
+
+def test_assemble_reconciles_observe_yoy_with_finance_absolute_values():
+    observe_html = """
+    <div class="m_box" id="observe">
+      <div class="m_tab_content m_tab_content2">
+      一、主要业务 航运业务。 查看全部▼
+      一、主要业务 航运业务。
+      二、经营情况讨论 报告期内，经营活动产生的现金流量净额233.30亿元，同比增加9.49%。
+      </div>
+    </div>
+    """
+    finance_html = """
+    <div class="m_tab_content">
+      <table><tbody>
+      <tr><th>变动科目</th><th>本期数值</th><th>上期数值</th><th>变动幅度</th><th>原因</th></tr>
+      <tr><td>经营活动产生的现金流量净额(元)</td><td>233.30亿</td><td>257.77亿</td><td>9.49%</td><td>变化</td></tr>
+      </tbody></table>
+      <div class="part_all_show_btn"><a data='data_2026-06-30'></a></div>
+    </div>
+    """
+    from analysis.fundamentals import _assemble
+
+    pages = {
+        "operate": None,
+        "holder": None,
+        "finance": finance_html,
+        "profile": None,
+        "event": None,
+        "capital": None,
+        "company": None,
+    }
+    # _assemble reads observe from operate.html, so inject the observe fragment there.
+    pages["operate"] = observe_html
+    out = _assemble("601919", pages)
+    facts = out["facts"]
+    assert facts["operating_cash_flow"] == pytest.approx(23_330_000_000)
+    assert facts["operating_cash_flow_previous"] == pytest.approx(25_777_000_000)
+    assert facts["operating_cash_flow_yoy_pct"] == pytest.approx(-9.49)
