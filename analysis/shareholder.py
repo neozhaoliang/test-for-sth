@@ -87,6 +87,33 @@ def _trend_from_f10_facts(fundamentals: Optional[Dict]) -> Optional[Dict]:
             }
         )
     if not rows:
+        latest_count = facts.get("holder_count_latest")
+        latest_period = _coerce_date(facts.get("holder_count_period"))
+        if latest_count not in (None, 0) and latest_period is not None:
+            try:
+                latest_count = int(latest_count)
+            except (TypeError, ValueError):
+                return None
+            return {
+                "latest_count": latest_count,
+                "change_pct": facts.get("holder_count_qoq_pct"),
+                "yoy_pct": facts.get("holder_count_yoy_pct"),
+                "trend": (
+                    "increasing"
+                    if (facts.get("holder_count_qoq_pct") or 0) > 0
+                    else "decreasing"
+                    if (facts.get("holder_count_qoq_pct") or 0) < 0
+                    else "stable"
+                    if facts.get("holder_count_qoq_pct") == 0
+                    else "unknown"
+                ),
+                "as_of": latest_period.isoformat(),
+                "period": latest_period.isoformat(),
+                "published_at": None,
+                "available_at": None,
+                "source_mode": "ths_f10_holder_latest",
+                "series": [],
+            }
         return None
 
     rows.sort(key=lambda x: x["period"])
