@@ -21,7 +21,8 @@ _REFINANCING_RE = re.compile(r"定增|增发|配股|可转债|发行股份|发�
 _DIVIDEND_RE = re.compile(r"分红|利润分配|权益分派|现金红利")
 _BUYBACK_RE = re.compile(r"回购")
 _IMPLEMENTED_DIVIDEND_RE = re.compile(
-    r"权益分派实施|分红派息实施|现金红利派发|股息派发|派息实施|实施公告"
+    r"权益分派实施|分红派息实施|现金红利派发|股息派发|派息实施|"
+    r"实施公告|实施方案|除权除息|股权登记日"
 )
 
 
@@ -98,9 +99,12 @@ def _is_realized_dividend(row: Dict) -> bool:
                 "paid",
                 "实施",
                 "已实施",
+                "实施方案",
                 "完成",
                 "派发",
                 "派息",
+                "除权除息",
+                "股权登记",
             )
         ):
             return True
