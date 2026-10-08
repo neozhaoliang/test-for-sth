@@ -20,6 +20,7 @@ from typing import Any, Dict, List
 
 from analysis.evidence import EvidenceItem
 from analysis.valuation_assumptions import estimate_valuation_scenarios
+from analysis.valuation_payout import annual_payout_from_eps
 from analysis.valuation_engine import (ValuationScenario, calculate_scenarios, render_valuation_block)
 from analysis.report_blocks import _build_prompt
 from analysis.report_contract import (
@@ -158,6 +159,18 @@ async def _generate_summary(
     assumption_context = getattr(inputs, "valuation_assumption_context", None) or {}
     estimate = {"status": "manual", "scenarios": scenario_specs}
     if not scenario_specs and (not as_of or as_of >= "2026-10-08"):
+        # Strict matching; never infer profit fiscal-year from dividend implementation date.
+        if (assumption_context.get("annual_eps") and assumption_context.get("fiscal_dividends")
+                and not assumption_context.get("payout_source")):
+            payout_evidence = annual_payout_from_eps(
+                annual_eps=assumption_context["annual_eps"],
+                dividends=assumption_context["fiscal_dividends"],
+                as_of=as_of or "2026-10-08",
+            )
+            assumption_context = dict(assumption_context)
+            if payout_evidence["status"] == "verified":
+                assumption_context["payout_pct"] = payout_evidence["payout_pct"]
+                assumption_context["payout_source"] = payout_evidence
         # Require provenance for payout and required-return settings.
         if assumption_context.get("payout_source") and assumption_context.get("required_return_basis"):
             estimate = estimate_valuation_scenarios(
