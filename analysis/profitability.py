@@ -29,7 +29,7 @@ import akshare as ak
 
 from tools.utils import utils
 
-_MAX_PERIODS = 6
+_MAX_PERIODS = 28  # retain enough full fiscal years for 3-5y ROE analysis
 
 
 def _bare_code(stock_code: str) -> str:
@@ -70,6 +70,7 @@ async def get_profitability_trend(stock_code: str) -> Optional[Dict]:
                 "gross_margin_pct": gross_margin,
                 "net_margin_pct": _num(row, "销售净利率(%)"),
                 "roe_pct": _num(row, "净资产收益率(%)"),
+                "eps_yuan": _num(row, "摊薄每股收益(元)"),
                 "debt_ratio_pct": _num(row, "资产负债率(%)"),
                 "net_profit_growth_pct": _num(row, "净利润增长率(%)"),
             }
