@@ -190,7 +190,7 @@ async def _generate_summary(
             quote = getattr(inputs, "quote", None) or {}
             result = calculate_scenarios(
                 scenarios,
-                book_value_per_share=valuation.get("book_value_per_share"),
+                book_value_per_share=valuation.get("book_value_per_share") or valuation.get("nav_per_share"),
                 market_price=quote.get("latest_price"),
             )
         except (TypeError, ValueError, KeyError) as exc:
