@@ -17,6 +17,19 @@ from analysis.report_blocks import (
 )
 
 
+def test_primary_dividend_notice_is_not_rendered_as_no_dividend_record():
+    from datetime import date
+    from analysis.management_capital import build_management_capital_record
+    record = build_management_capital_record(primary_evidence=[{
+        "published_at": "2026-06-20", "category": "权益分派",
+        "title": "2025年年度A股分红派息实施公告", "url": "https://example.com/div.pdf",
+    }], as_of=date(2026, 10, 8))
+    text = _build_management_capital_block(record)
+    assert "逐笔现金金额暂缺" in text
+    assert "未见已实施现金分红记录" not in text
+    assert "现金分红 0" not in text
+
+
 def test_valuation_block_does_not_leak_fund_or_unlock_data():
     text = _build_valuation_history_block(
         {

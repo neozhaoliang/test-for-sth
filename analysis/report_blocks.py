@@ -238,7 +238,9 @@ def _build_management_capital_block(data: Optional[Dict]) -> str:
             # existed: an explicit aggregate amount was historically treated as complete.
             amount_complete = amount_total is not None
             known_amounts = dividend_records if amount_complete else 0
-        if dividend_records == 0:
+        if dividend_records == 0 and row.get("primary_implemented_dividend_announcements"):
+            dividend_amount_text = "已取得分红实施公告，逐笔现金金额暂缺"
+        elif dividend_records == 0:
             dividend_amount_text = "未见已实施现金分红记录"
         elif amount_total is None:
             dividend_amount_text = (

@@ -130,6 +130,7 @@ jobs:
             tests/test_score_asof.py \
             tests/test_shareholder_asof.py \
             tests/test_fundamentals_consistency.py \
+            tests/test_601919_consistency.py \
             tests/test_management_capital.py \
             tests/test_macro_rates.py \
             tests/test_commodity_cycle.py \

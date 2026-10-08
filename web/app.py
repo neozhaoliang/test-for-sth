@@ -924,8 +924,13 @@ function renderManagementCapitalBlock(mc) {
   const renderWindow = (row, label) => {
     if (!row) return '';
     const buybackYi = ((row.buyback_actual_amount_yuan || 0) / 1e8).toFixed(2);
+    const cashTotal = row.cash_dividend_per_10_total;
+    const cashText = cashTotal === null || cashTotal === undefined
+      ? '现金分红累计金额暂缺'
+      : '已知记录累计每10股现金分红 ' + cashTotal + ' 元' +
+        (row.cash_dividend_amount_complete === false ? '（非完整累计）' : '');
     return '<li><b>' + label + ':</b> 分红覆盖 ' + row.dividend_years_count + '/' + row.window_years +
-      ' 个日历年，累计每10股现金分红 ' + row.cash_dividend_per_10_total + ' 元；' +
+      ' 个日历年，' + cashText + '；' +
       '回购 ' + row.buyback_records + ' 次，已回购约 ' + buybackYi + ' 亿元；' +
       'F10再融资 ' + row.refinancing_records + ' 次，巨潮再融资公告 ' +
       row.primary_refinancing_announcements + ' 条；减持公告 ' + row.insider_reduction_announcements +

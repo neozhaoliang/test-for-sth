@@ -317,7 +317,11 @@ async def get_dividend_history(
             {
                 "announce_date": announce_date.isoformat() if announce_date else str(row["公告日期"]),
                 "available_at": announce_date.isoformat() if announce_date else None,
-                "dividend_per_10_shares": float(row["派息"]) if row["派息"] == row["派息"] else 0.0,
+                "dividend_per_10_shares": (
+                    float(row["派息"])
+                    if row["派息"] is not None and row["派息"] == row["派息"]
+                    else None
+                ),
                 "progress": str(row["进度"]),
             }
         )

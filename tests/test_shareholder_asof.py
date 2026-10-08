@@ -87,6 +87,18 @@ async def test_dividend_history_excludes_future_announcements(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_dividend_history_preserves_missing_cash_amount(monkeypatch):
+    df = pd.DataFrame({
+        "公告日期": [date(2026, 6, 1), date(2025, 6, 1)],
+        "派息": [float("nan"), 0.0], "进度": ["实施", "实施"],
+    })
+    monkeypatch.setattr(shareholder.ak, "stock_history_dividend_detail", lambda **kwargs: df)
+    rows = await shareholder.get_dividend_history("601919")
+    assert rows[0]["dividend_per_10_shares"] is None
+    assert rows[1]["dividend_per_10_shares"] == 0.0
+
+
+@pytest.mark.asyncio
 async def test_buyback_history_excludes_future_latest_announcements(monkeypatch):
     df = pd.DataFrame(
         {
