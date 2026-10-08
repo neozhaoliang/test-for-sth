@@ -36,6 +36,7 @@ class AnalysisInputs:
     fundamentals: Optional[Dict] = None
     valuation: Optional[Dict] = None
     valuation_history: Optional[Dict] = None
+    valuation_scenarios: List[Dict] = field(default_factory=list)  # auditable assumptions, optional
     rd_team: Optional[Dict] = None
     major_events: List[Dict] = field(default_factory=list)
     refinancing_history: List[Dict] = field(default_factory=list)
