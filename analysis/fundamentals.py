@@ -836,17 +836,21 @@ def _assemble(code6: str, pages: Dict[str, Optional[str]]) -> Optional[Dict]:
     facts["finance_period"] = finance_period
 
     def _fill_metric(field: str, keys: tuple, yoy_field: Optional[str] = None) -> None:
-        if facts.get(field) is not None:
-            return
         for key in keys:
             entry = metrics.get(key) or {}
-            if entry.get("current") is not None:
+            if entry.get("current") is None:
+                continue
+            if facts.get(field) is None:
                 facts[field] = entry["current"]
-                if entry.get("previous") is not None:
-                    facts[field + "_previous"] = entry["previous"]
-                if yoy_field and entry.get("yoy_pct") is not None:
-                    facts[yoy_field] = entry["yoy_pct"]
-                return
+            if entry.get("previous") is not None:
+                facts[field + "_previous"] = entry["previous"]
+            if yoy_field:
+                facts[yoy_field] = coherent_yoy_pct(
+                    facts.get(field),
+                    entry.get("previous"),
+                    facts.get(yoy_field) if facts.get(yoy_field) is not None else entry.get("yoy_pct"),
+                )
+            return
 
     _fill_metric("revenue", ("营业收入(元)",), "revenue_yoy_pct")
     _fill_metric(
