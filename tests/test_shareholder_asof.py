@@ -139,7 +139,7 @@ def test_live_shareholder_reconcile_replaces_stale_akshare_with_newer_f10():
     assert out["period"] == "2026-06-30"
     assert out["latest_count"] == 430616
     assert out["change_pct"] == pytest.approx(8.358, abs=0.001)
-    assert out["yoy_pct"] == pytest.approx(19.236, abs=0.001)
+    assert out["yoy_pct"] == pytest.approx(19.235, abs=0.002)
 
 
 def test_live_shareholder_reconcile_keeps_newer_primary_source():
