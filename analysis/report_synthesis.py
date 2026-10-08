@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any, Dict, List
 
 from analysis.evidence import EvidenceItem
@@ -138,6 +139,14 @@ async def _generate_summary(
     evidence: List[EvidenceItem],
 ) -> tuple[StructuredSummary, ResearchReview]:
     prompt = _build_prompt(inputs, candidates)
+    # Valuation is a method layer, never counted as primary factual evidence.
+    # Load the locally versioned framework on every run (including fallback path).
+    method_file = Path(__file__).resolve().parents[1] / "docs" / "valuation_shuangmulin_chensir_knowledge.md"
+    if method_file.is_file():
+        prompt += ("\n\n## 估值方法知识库（待以本次数据验证，不构成事实证据）\n"
+                   + method_file.read_text(encoding="utf-8"))
+    else:
+        utils.logger.warning("[analysis.report] 估值方法知识库文件缺失，无法注入长期收益率模型")
 
     # 工具调用路径: 强制十二维度逐一分析后提交
     analyses, submit_input, tool_reason = await call_analysis_with_tools(
