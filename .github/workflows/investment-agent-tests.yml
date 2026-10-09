@@ -129,6 +129,7 @@ jobs:
             tests/test_valuation_assumptions.py \
             tests/test_valuation_payout.py \
             tests/test_valuation_filing_join.py \
+            tests/test_valuation_real_filings_2025.py \
             tests/test_market_context_asof.py \
             tests/test_realtime_price_asof.py \
             tests/test_margin_asof.py \
