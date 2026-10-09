@@ -568,6 +568,13 @@ _INDEX_HTML = """<!DOCTYPE html>
   .valuation-lab { border-color:#cbd5ff !important; }
   .valuation-lab .model-tag { display:inline-block; padding:3px 9px; font-size:11px; font-weight:700;
     color:#475ad1; border:1px solid #d8deff; background:#eef1ff; border-radius:30px; }
+  .research-narrative h3 { margin:0 0 8px; }
+  .analysis-entry { padding:20px 0; border-top:1px solid var(--line); }
+  .analysis-entry:first-of-type { border-top:0; }
+  .analysis-entry h4 { display:flex; align-items:center; gap:12px; font-size:17px; margin:0 0 12px; color:var(--ink); }
+  .analysis-index { flex:0 0 33px; height:33px; display:inline-flex; align-items:center; justify-content:center;
+    border-radius:10px; color:#4b5dce; background:#edf0ff; font-weight:800; font-size:12px; font-variant-numeric:tabular-nums; }
+  .analysis-prose { white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; line-height:1.85; color:#32445f; }
   .lab-layout { display:grid; grid-template-columns:1.15fr 1fr; gap:20px; align-items:start; }
   .slider-row { padding:11px 0; border-bottom:1px solid var(--line); }
   .slider-row:last-child { border-bottom:0; }
@@ -2185,6 +2192,42 @@ function activateValuationLab(report) {
   redraw();
 }
 
+// Render precisely one full research narrative. Never duplicate it as a
+// per-dimension thesis overview, and never hide the detailed analysis in <details>.
+function renderDimensionAnalysisSection(summary) {
+  const analyses = (summary || {}).dimension_analyses || {};
+  const order = [
+    ['management','管理层'], ['fundamentals','经营基本面'],
+    ['rd','研发能力'], ['chip_flow','筹码与资金'],
+    ['price_position','股价位置'], ['cycle_position','行业周期'],
+    ['policy_geopolitics','政策与国际形势'], ['retail_sentiment','市场情绪'],
+    ['shareholder_returns','股东回报'], ['growth_elasticity','成长弹性'],
+    ['a_share_structure','A股资金结构'], ['risk_quality','财务质量与尾部风险']
+  ];
+  const valid = order.filter(([key]) =>
+    typeof analyses[key] === 'string' && analyses[key].trim());
+  if (!valid.length) {
+    const fallback = String((summary || {}).thesis_summary || '').trim();
+    return fallback
+      ? '<section class="research-panel"><h3>研究分析</h3><p style="white-space:pre-wrap;">' +
+        escapeHtml(fallback) + '</p></section>'
+      : '<section class="research-panel"><h3>研究分析</h3><p class="section-caption">本次暂无可展示的详细分析。</p></section>';
+  }
+  let html = '<section class="research-panel research-narrative">' +
+    '<h3>十二维度详细分析</h3>' +
+    '<p class="section-caption">完整分析直接展示，不重复逐项概述；判断依据请结合后文原始证据核对。</p>';
+  order.forEach(([key, label], idx) => {
+    const detail = String(analyses[key] || '').trim();
+    html += '<article class="analysis-entry">' +
+      '<h4><span class="analysis-index">' + String(idx + 1).padStart(2, '0') +
+      '</span>' + escapeHtml(label) + '</h4>' +
+      '<div class="analysis-prose">' +
+      (detail ? escapeHtml(detail) : '<span class="section-caption">该项分析暂缺</span>') +
+      '</div></article>';
+  });
+  return html + '</section>';
+}
+
 function renderResult(report) {
   const el = document.getElementById('result');
   let html = '<h2>' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
@@ -2309,9 +2352,9 @@ function renderResult(report) {
     html += '</details>';
   }
 
-  if (summary.thesis_summary) {
-    html += '<div class="thesis-block"><b>关键论据:</b> ' + escapeHtml(summary.thesis_summary) + '</div>';
-  }
+  // The full twelve-dimension narrative is rendered exactly once below.
+  // thesis_summary is kept in the API for backward compatibility, but is not
+  // shown as a second per-dimension overview when detailed content exists.
   if (summary.core_counter_evidence) {
     html += '<div class="counter-evidence-block"><b>与结论相悖的最强证据:</b> ' +
       escapeHtml(summary.core_counter_evidence) + '</div>';
@@ -2327,21 +2370,7 @@ function renderResult(report) {
   html += renderDashboardCharts(report);
   html += renderValuationLab(report);
 
-  if (summary.dimension_analyses && Object.keys(summary.dimension_analyses).length >= 6) {
-    const dimLabels = {
-      management: '管理层', fundamentals: '基本面', rd: '研发能力', chip_flow: '筹码',
-      price_position: '股价位置', cycle_position: '周期', policy_geopolitics: '政策形势',
-      retail_sentiment: '散户情绪', shareholder_returns: '股东回报', growth_elasticity: '成长弹性',
-      a_share_structure: 'A股资金结构', risk_quality: '财务质量与尾部风险',
-    };
-    html += '<details class="research-panel"><summary style="cursor:pointer;font-weight:700;">逐项阅读十二维度详细分析</summary>';
-    Object.keys(summary.dimension_analyses).forEach(k => {
-      html += '<div style="margin:8px 0;white-space:pre-wrap;"><b>' +
-        escapeHtml(dimLabels[k] || k) + ':</b> ' +
-        escapeHtml(summary.dimension_analyses[k]) + '</div>';
-    });
-    html += '</details>';
-  }
+  html += renderDimensionAnalysisSection(summary);
 
   if (summary.dimension_scores && summary.dimension_scores.length >= 6) {
     html += '<details class="research-panel"><summary style="cursor:pointer;font-weight:700;">展开十二维度雷达视图</summary>' +
