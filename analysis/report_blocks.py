@@ -1260,6 +1260,9 @@ def _build_time_contract_block(inputs: Any) -> str:
     )
 
 
+from analysis.chip_position import render_chip_price_context
+
+
 def _build_prompt(inputs: Any, candidates: List[CandidateOpinion]) -> str:
     quote = inputs.quote
     if quote:
@@ -1302,7 +1305,7 @@ def _build_prompt(inputs: Any, candidates: List[CandidateOpinion]) -> str:
         market_block=_build_market_block(inputs.market_context),
         shareholder_block=_build_shareholder_block(
             inputs.shareholder_trend, inputs.dividend_history, inputs.buyback_history
-        ),
+        ) + "\n" + render_chip_price_context(getattr(inputs, "chip_price_context", None)),
         margin_block=_build_margin_block(inputs.margin_signal, inputs.valuation, inputs.quote),
         a_share_structure_block=_build_a_share_structure_block(inputs.a_share_structure),
         kb_fund_flow_block=_build_kb_fund_flow_block(inputs.knowledge_excerpts),
