@@ -29,6 +29,7 @@ from typing import Dict, List, Optional
 
 from analysis.a_share_structure import get_a_share_structure
 from analysis.candidates import find_candidates
+from analysis.chip_position import assess_chip_price_context
 from analysis.commodity import get_cycle_commodity_signal, get_rmb_trend_signal
 from analysis.freight import get_container_freight_signal
 from analysis.fundamentals import get_ths_fundamentals
@@ -345,6 +346,11 @@ async def generate_report(
         )
         valuation_assumption_context.update(payout_inputs)
 
+    chip_price_context = assess_chip_price_context(
+        market_context, shareholder_trend,
+        as_of=str(request.as_of) if historical_mode else None,
+    )
+
     inputs = AnalysisInputs(
         stock_code=stock_code,
         stock_name=stock_name,
@@ -354,6 +360,7 @@ async def generate_report(
         knowledge_excerpts=knowledge_excerpts,
         industry_comparison=industry_comparison,
         shareholder_trend=shareholder_trend,
+        chip_price_context=chip_price_context,
         dividend_history=dividend_history,
         buyback_history=buyback_history,
         profitability_trend=profitability_trend,
