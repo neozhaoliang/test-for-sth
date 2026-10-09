@@ -102,7 +102,7 @@ assert.equal(Number(nodes['lab-payout'].value),51.98);
 const keys=['management','fundamentals','rd','chip_flow','price_position',
   'cycle_position','policy_geopolitics','retail_sentiment','shareholder_returns',
   'growth_elasticity','a_share_structure','risk_quality'];
-const analyses=Object.fromEntries(keys.map((key,i)=>[key,'FULL_DETAIL_'+i]));
+const analyses=Object.fromEntries(keys.map(key=>[key,'UNIQUE_DETAIL_'+key.toUpperCase()+'_END']));
 const detailHtml=context.renderDimensionAnalysisSection({
   dimension_analyses:analyses,
   thesis_summary:'DUPLICATE_OVERVIEW_TOKEN',
@@ -110,7 +110,7 @@ const detailHtml=context.renderDimensionAnalysisSection({
 assert.ok(detailHtml.includes('十二维度详细分析'));
 assert.ok(!detailHtml.includes('<details'));
 assert.ok(!detailHtml.includes('DUPLICATE_OVERVIEW_TOKEN'));
-keys.forEach((key,i)=>assert.equal(detailHtml.split('FULL_DETAIL_'+i).length-1,1));
+keys.forEach(key=>assert.equal(detailHtml.split('UNIQUE_DETAIL_'+key.toUpperCase()+'_END').length-1,1));
 const singleReport={...report,stock_name:'示例股票',stock_code:'601717',
   research_mode:'live',candidates:[],
   summary:{...report.summary,thesis_summary:'DUPLICATE_OVERVIEW_TOKEN',
@@ -121,5 +121,5 @@ const rendered=nodes['result'].innerHTML;
 assert.equal(rendered.split('十二维度详细分析').length-1,1);
 assert.ok(!rendered.includes('DUPLICATE_OVERVIEW_TOKEN'));
 assert.ok(!rendered.includes('逐项阅读十二维度详细分析'));
-assert.ok(rendered.includes('FULL_DETAIL_0'));
+keys.forEach(key=>assert.equal(rendered.split('UNIQUE_DETAIL_'+key.toUpperCase()+'_END').length-1,1));
 console.log('Dashboard UI checks passed: valuation, charts and single directly-visible detailed twelve-dimension report.');
