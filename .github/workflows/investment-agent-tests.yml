@@ -45,6 +45,10 @@ jobs:
             analysis/a_share_structure.py \
             analysis/valuation_history.py \
             analysis/valuation_engine.py \
+            analysis/valuation_models.py \
+            analysis/valuation_macro.py \
+            analysis/valuation_orchestrator.py \
+            analysis/valuation_config.py \
             analysis/valuation_assumptions.py \
             analysis/valuation_payout.py \
             analysis/chip_position.py \
@@ -130,6 +134,7 @@ jobs:
             tests/test_external_synthesis.py \
             tests/test_valuation_history_asof.py \
             tests/test_valuation_engine.py \
+            tests/test_valuation_industry_models.py \
             tests/test_valuation_assumptions.py \
             tests/test_valuation_payout.py \
             tests/test_valuation_filing_join.py \
