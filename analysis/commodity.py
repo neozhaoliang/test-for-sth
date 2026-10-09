@@ -324,40 +324,55 @@ async def _get_comex_copper_price() -> Optional[float]:
     return float(row.iloc[0]["最新价"])
 
 
-async def _get_rmb_trend(as_of: Optional[date] = None) -> Optional[str]:
-    """近 30 个交易日美元/人民币中间价趋势 (报价为每 100 美元兑人民币)。"""
+async def _get_rmb_observation(as_of: Optional[date] = None) -> Optional[Dict]:
+    """Dated USD/CNY fixing direction, one USD quoted in CNY; never invent as-of."""
     try:
+        import pandas as pd
         df = await asyncio.to_thread(ak.currency_boc_safe)
     except Exception as e:
         logger.error(f"[commodity] currency_boc_safe failed: {e}")
         return None
-    if df is None or df.empty:
+    if df is None or df.empty or "美元" not in df.columns:
         return None
+    date_col = next((x for x in ("日期", "date", "时间") if x in df.columns), None)
+    if not date_col:
+        # No point-in-time date means no auditable exchange-rate observation.
+        return None
+    rows = df.copy()
+    rows["_asof"] = pd.to_datetime(rows[date_col], errors="coerce").dt.date
+    rows["_usd"] = pd.to_numeric(rows["美元"], errors="coerce")
+    rows = rows.dropna(subset=["_asof", "_usd"])
     if as_of is not None:
-        date_col = next(
-            (x for x in ("日期", "date", "时间") if x in df.columns),
-            None,
-        )
-        if date_col is None:
-            return None
-        import pandas as pd
-        temp = df.copy()
-        temp["_parsed_date"] = pd.to_datetime(temp[date_col], errors="coerce")
-        temp = temp[temp["_parsed_date"].dt.date <= as_of]
-        if temp.empty:
-            return None
-        df = temp
-    if len(df) < 30:
+        rows = rows[rows["_asof"] <= as_of]
+    if rows.empty:
         return None
+    rows = rows.sort_values("_asof").drop_duplicates(subset=["_asof"], keep="last")
+    recent = rows.tail(30)
+    if len(recent) < 30:
+        return None
+    first = float(recent["_usd"].iloc[0])
+    last = float(recent["_usd"].iloc[-1])
+    if first <= 0 or last <= 0:
+        return None
+    change_pct = (last / first - 1) * 100
+    trend = (
+        "appreciating" if change_pct < -.3 else
+        "depreciating" if change_pct > .3 else "stable"
+    )
+    return {
+        "as_of": str(recent["_asof"].iloc[-1]),
+        "usdcny_midpoint_cny_per_usd": round(last / 100, 5),
+        "usdcny_change_30obs_pct": round(change_pct, 3),
+        "rmb_trend": trend,
+        "source_name": "AkShare currency_boc_safe (SAFE fixing)",
+        "currency_unit": "CNY per USD (original per 100 USD)",
+        "sample_observations": 30,
+    }
 
-    recent = df["美元"].tail(30)
-    change_pct = (recent.iloc[-1] - recent.iloc[0]) / recent.iloc[0] * 100
-    # 美元/人民币报价下降 = 同样多美元换的人民币变少 = 人民币升值
-    if change_pct < -0.3:
-        return "appreciating"
-    if change_pct > 0.3:
-        return "depreciating"
-    return "stable"
+
+async def _get_rmb_trend(as_of: Optional[date] = None) -> Optional[str]:
+    obs = await _get_rmb_observation(as_of=as_of)
+    return obs["rmb_trend"] if obs else None
 
 
 async def get_rmb_trend_signal(
@@ -375,18 +390,18 @@ async def get_rmb_trend_signal(
     if as_of is None and time.time() < (_rmb_cache.get("expire_at") or 0):
         return _rmb_cache["value"]  # type: ignore[return-value]
 
-    trend = await _get_rmb_trend(as_of=as_of)
-    if trend is None:
-        logger.warning("[commodity] 人民币汇率趋势获取失败，本维度记为暂缺")
+    observation = await _get_rmb_observation(as_of=as_of)
+    if observation is None:
+        logger.warning("[commodity] 人民币汇率中间价缺少可核验的最新日期/30个观察值")
         return None
 
+    trend = observation["rmb_trend"]
     value = {
-        "as_of": as_of.isoformat() if as_of is not None else None,
-        "rmb_trend": trend,
+        **observation,
         "rmb_trend_note": {
-            "appreciating": "人民币近期升值 (近 30 个交易日美元兑人民币中间价下行)",
-            "depreciating": "人民币近期贬值 (近 30 个交易日美元兑人民币中间价上行)",
-            "stable": "人民币近期基本稳定 (近 30 个交易日中间价波动幅度小于 0.3%)",
+            "appreciating": "人民币近期升值 (近30个报价观察日美元兑人民币中间价下降)",
+            "depreciating": "人民币近期贬值 (近30个报价观察日美元兑人民币中间价上升)",
+            "stable": "人民币近期基本稳定 (30个报价观察日波动小于0.3%)",
         }.get(trend, trend),
     }
     if as_of is None:
