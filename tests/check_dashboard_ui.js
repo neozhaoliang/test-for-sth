@@ -54,6 +54,18 @@ assert.equal((panel.match(/type="range"/g)||[]).length,5);
 assert.ok(panel.includes('恢复初始参数'));
 assert.ok(context.renderProfitabilityTrendChart(report.profitability_trend).includes('<svg'));
 assert.ok(context.renderDashboardCharts(report).includes('数据概览与维度图谱'));
+const lowPriceChip = context.renderChipPositionChart({
+  status:'contextualized',position_52w_pct:12.5,
+  holder_change_pct:20,holder_period:'2026-09-30',
+  holder_context:'low_price_more_holders_neutral',
+});
+assert.ok(lowPriceChip.includes('低位增户：不自动扣分'));
+const highPriceChip = context.renderChipPositionChart({
+  status:'contextualized',position_52w_pct:89,
+  holder_change_pct:20,holder_period:'2026-09-30',
+  holder_context:'high_price_more_holders_watch',
+});
+assert.ok(highPriceChip.includes('高位分散：待核验'));
 const capitalChart=context.renderDividendChart([{
   year:'2025',dividend_per_10:4,buyback_per_10:1,total_per_10:5,yield_pct:4,
 }]);
