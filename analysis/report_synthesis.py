@@ -109,6 +109,10 @@ async def _score_dimensions(
         utils.logger.warning(f"[analysis.report] {stock_code} 维度打分失败: {e}")
         return None
     if not isinstance(parsed, list):
+        utils.logger.warning(
+            f"[analysis.report] {stock_code} 维度评分未返回12项JSON数组；"
+            "该图表是可选附加结果，不影响已完成的文字研究"
+        )
         return None
     scores: List[Dict] = []
     seen = set()
@@ -131,7 +135,13 @@ async def _score_dimensions(
                 "note": str(item.get("note", "") or "")[:30],
             }
         )
-    return scores if len(scores) == len(_DIMENSION_LABELS) else None
+    if len(scores) != len(_DIMENSION_LABELS):
+        utils.logger.warning(
+            f"[analysis.report] {stock_code} 维度评分只解析到"
+            f" {len(scores)}/{len(_DIMENSION_LABELS)} 项；不补造分数"
+        )
+        return None
+    return scores
 
 
 async def _generate_summary(
@@ -178,6 +188,7 @@ async def _generate_summary(
         "submit_report",
     )
     parsed = submit_input if isinstance(submit_input, dict) else None
+    fallback_stop_reason = None
     if parsed and parsed.get("stance") in _VALID_STANCES:
         utils.logger.info(
             f"[analysis.report] {inputs.stock_code} 工具调用完成: "
@@ -196,7 +207,7 @@ async def _generate_summary(
                 + "\n\n".join(f"### {name}\n{text}" for name, text in analyses.items())
                 + "\n\n请基于以上维度分析与数据块输出最终结构化报告 JSON。"
             )
-        parsed, stop_reason = await call_json_ex(
+        parsed, fallback_stop_reason = await call_json_ex(
             prompt, max_tokens=_SUMMARY_MAX_TOKENS, repair_requirements=_REPAIR_REQUIREMENTS
         )
         if not isinstance(parsed, dict):
@@ -204,19 +215,20 @@ async def _generate_summary(
 
     if not parsed or parsed.get("stance") not in _VALID_STANCES:
         utils.logger.error(
-            f"[analysis.report] {inputs.stock_code} 摘要生成失败 "
-            f"(tool_reason={tool_reason}, parsed={'dict' if isinstance(parsed, dict) else type(parsed).__name__})"
+            f"[analysis.report] {inputs.stock_code} 核心综合研究失败 "
+            f"(tool_reason={tool_reason}, json_stop_reason={fallback_stop_reason}, "
+            f"parsed={'dict' if isinstance(parsed, dict) else type(parsed).__name__})"
         )
-        return (
-            StructuredSummary(
-                lynch_category="",
-                stance="",
-                thesis_summary="",
-                core_counter_evidence="",
-                invalidation_condition="",
-                risk_notes="LLM 生成失败，请参考以上原始数据自行判断。",
-            ),
-            ResearchReview(),
+        if fallback_stop_reason == "refusal":
+            raise RuntimeError(
+                "AI 模型/第三方兼容接口拒绝输出股票研究内容；"
+                "这不是该公司财务数据或评分算法错误。"
+                "请检查模型供应商过滤策略，或切换可正常输出结构化研究的模型。"
+            )
+        raise RuntimeError(
+            "AI 模型未返回合格的核心结构化研究结果；"
+            "请检查模型接口、工具调用兼容性及终端日志。"
+            "为避免编造研究结论，本次没有发布报告。"
         )
     review = review_dimension_analyses(analyses, evidence)
     parsed = await _apply_review_to_draft(parsed, review, inputs.stock_code)

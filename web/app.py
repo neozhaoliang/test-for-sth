@@ -2033,6 +2033,11 @@ function renderDashboardCharts(report) {
   const cashRatio=numericOrNull(facts.cash_to_profit_ratio);
   let html='<section class="dashboard-charts"><h3>数据概览与维度图谱</h3>'+
     '<p class="section-caption">图表仅展示当前报告真实返回的数据，不对缺失年份插值，也不自动将半年ROE年化。</p>';
+  if (!scores.length) {
+    html += '<div class="evidence-block" role="status"><b>十二维度评分图暂不可用</b>：'+
+      '模型接口没有返回可用的评分JSON；这是非核心图表服务异常，已完成的文字研究照常展示，'+
+      '不会自动补造12个零分。</div>';
+  }
   html+='<div class="metric-strip">'+
     metricCard('参考股价',price===null?'暂缺':price.toFixed(2)+' 元',quote.quote_time || report.as_of || '报价时点未知')+
     metricCard('市净率 PB',pb===null?'暂缺':pb.toFixed(2)+' 倍',val.valuation_as_of || 'F10时点未知')+

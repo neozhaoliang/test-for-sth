@@ -246,25 +246,39 @@ def validate_report(report: AnalysisReport) -> ReportValidation:
             )
         )
 
+    # Charts are optional enrichment: an LLM gateway can return a refusal or
+    # unparsable JSON for the score-only request even after full research
+    # succeeds. Missing *all* scores must not discard a validated report.
+    # Partial scores are still a structural error: never silently complete
+    # the series using invented neutral scores.
     scores = summary.dimension_scores or []
-    score_keys = _dimension_score_keys(scores)
-    missing_scores = [x for x in _DIMENSION_KEYS if x not in score_keys]
-    if missing_scores:
-        errors.append(
+    if not scores:
+        warnings.append(
             _issue(
-                "missing_dimension_scores",
-                "error",
-                "缺少维度评分: " + ", ".join(missing_scores),
+                "dimension_scores_unavailable",
+                "warning",
+                "十二维度评分服务未返回有效数据；完整文字分析照常保留，评分图暂不展示。",
             )
         )
-    if len(scores) != len(_DIMENSION_KEYS):
-        errors.append(
-            _issue(
-                "dimension_score_count",
-                "error",
-                f"维度评分应恰有 {len(_DIMENSION_KEYS)} 项，实际 {len(scores)} 项。",
+    else:
+        score_keys = _dimension_score_keys(scores)
+        missing_scores = [x for x in _DIMENSION_KEYS if x not in score_keys]
+        if missing_scores:
+            errors.append(
+                _issue(
+                    "missing_dimension_scores",
+                    "error",
+                    "缺少维度评分: " + ", ".join(missing_scores),
+                )
             )
-        )
+        if len(scores) != len(_DIMENSION_KEYS):
+            errors.append(
+                _issue(
+                    "dimension_score_count",
+                    "error",
+                    f"维度评分应恰有 {len(_DIMENSION_KEYS)} 项，实际 {len(scores)} 项。",
+                )
+            )
     for row in scores:
         try:
             score = float(row.get("score"))

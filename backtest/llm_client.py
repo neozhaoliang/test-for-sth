@@ -241,6 +241,27 @@ _REPAIR_PROMPT = (
 )
 
 
+_REFUSAL_PHRASES = (
+    "很抱歉，我无法回答您的问题",
+    "抱歉，我无法回答您的问题",
+    "我无法协助完成此请求",
+    "我不能协助处理此请求",
+    "i cannot assist with that request",
+    "i can't help with that request",
+    "i'm sorry, but i can't",
+)
+
+
+def _is_model_refusal(raw_text: Optional[str]) -> bool:
+    """Do not feed a provider/model refusal back as malformed JSON for repair."""
+    text = str(raw_text or "").strip().lower()
+    # Restrict to short, standalone refusals; legitimate reports might mention
+    # the same text as examples or quoted evidence.
+    return bool(text) and len(text) <= 400 and any(
+        text.startswith(phrase.lower()) for phrase in _REFUSAL_PHRASES
+    )
+
+
 async def call_json_ex(
     prompt: str, max_tokens: int = 1024, repair_requirements: str = ""
 ) -> tuple:
@@ -257,6 +278,13 @@ async def call_json_ex(
     raw_text, stop_reason = await _call_llm_raw_ex(prompt, max_tokens)
     if raw_text is None:
         return None, stop_reason
+    if _is_model_refusal(raw_text):
+        utils.logger.error(
+            f"[llm_client.call_json_ex] 模型或兼容网关拒绝生成结构化输出 "
+            f"(model={_MODEL}, stop_reason={stop_reason}, len={len(raw_text)})；"
+            "不将拒答送回JSON修复",
+        )
+        return None, "refusal"
 
     parsed = _parse_json(raw_text)
     if parsed is not None:
@@ -268,6 +296,11 @@ async def call_json_ex(
             f"(len={len(raw_text)})，用 {_RETRY_MAX_TOKENS} 重试一次"
         )
         raw_text, stop_reason = await _call_llm_raw_ex(prompt, _RETRY_MAX_TOKENS)
+        if _is_model_refusal(raw_text):
+            utils.logger.error(
+                f"[llm_client.call_json_ex] 增长预算重试后收到模型拒答 (model={_MODEL})",
+            )
+            return None, "refusal"
         if raw_text is not None:
             parsed = _parse_json(raw_text)
             if parsed is not None:
@@ -289,6 +322,11 @@ async def call_json_ex(
             _REPAIR_PROMPT.format(raw=raw_text, requirements=requirements),
             _RETRY_MAX_TOKENS,
         )
+        if _is_model_refusal(repair_raw):
+            utils.logger.warning(
+                f"[llm_client.call_json_ex] JSON修复请求遭到模型拒答 (model={_MODEL})",
+            )
+            return None, "refusal"
         if repair_raw:
             parsed = _parse_json(repair_raw)
             if parsed is not None:
@@ -349,6 +387,16 @@ async def call_analysis_with_tools(
         tool_uses = [b for b in response.content if getattr(b, "type", "") == "tool_use"]
 
         if not tool_uses:
+            non_tool_text = "".join(
+                getattr(b, "text", "") or ""
+                for b in response.content if getattr(b, "type", "") == "text"
+            )
+            if _is_model_refusal(non_tool_text):
+                utils.logger.error(
+                    f"[llm_client.call_analysis_with_tools] 模型/网关拒答 "
+                    f"(model={_MODEL}, 已分析维度={len(analyses)})，提前停止工具循环"
+                )
+                return analyses, submit_input, "refusal"
             missing = [t for t in required_tool_names if t not in analyses]
             if missing and stop_reason != "max_tokens":
                 messages.append({"role": "assistant", "content": response.content})

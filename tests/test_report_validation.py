@@ -95,6 +95,28 @@ def test_valid_report_passes_contract():
     assert result.errors == []
 
 
+def test_score_only_provider_refusal_keeps_complete_research_publishable():
+    report = valid_report()
+    report.summary.dimension_scores = None
+    result = validate_report(report)
+    assert result.ok
+    assert result.errors == []
+    assert any(x.code == "dimension_scores_unavailable" for x in result.warnings)
+    # No placeholders: a missing chart is preferable to 12 invented zeros.
+    assert report.summary.dimension_scores is None
+
+
+def test_empty_scores_dont_mask_missing_essential_dimension_analysis():
+    report = valid_report()
+    report.summary.dimension_scores = []
+    del report.summary.dimension_analyses["analyze_management"]
+    result = validate_report(report)
+    assert not result.ok
+    assert any(x.code == "missing_dimension_analyses" for x in result.errors)
+    assert any(x.code == "dimension_scores_unavailable" for x in result.warnings)
+
+
+
 def test_missing_dimension_and_counter_evidence_fail_contract():
     report = valid_report()
     report.summary.dimension_analyses.pop("analyze_rd_capability")
