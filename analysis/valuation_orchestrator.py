@@ -174,6 +174,8 @@ def build_industry_valuation_report(inputs: Any) -> dict:
             "required_return_pct": payload.get("required_return_pct"),
             "terminal_growth_pct": payload.get("terminal_growth_pct"),
         },
+        "interactive_inputs": payload if val.get("status") == "calculated" else None,
+        "provenance": source_manifest if val.get("status") == "calculated" else None,
         "warnings": [
             "市值风格变化属于市场定价条件，不得替代企业现金流、利润质量和资本结构",
             "宏观系数不经公司层面的实证校验，不直接加减估值价格",
