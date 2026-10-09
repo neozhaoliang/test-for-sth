@@ -2150,7 +2150,7 @@ function renderResult(report) {
 
   const summary = report.summary || {};
   const stanceClass = 'stance-' + (summary.stance || 'neutral');
-  html += '<h3>综合分析</h3>';
+  html += '<section class="result-summary"><h3>投资结论</h3>';
   html += '<p><span class="stance-badge ' + stanceClass + '">' + stanceLabel(summary.stance) + '</span>';
   if (summary.company_quality_stance || summary.current_odds_stance) {
     html += '<span style="margin-left:12px;">企业长期质量: <b>' +
@@ -2267,6 +2267,10 @@ function renderResult(report) {
     html += '<div class="risk-block"><b>风险提示:</b> ' + escapeHtml(summary.risk_notes) + '</div>';
   }
 
+  html += '</section>';
+  html += renderDashboardCharts(report);
+  html += renderValuationLab(report);
+
   if (summary.dimension_analyses && Object.keys(summary.dimension_analyses).length >= 6) {
     const dimLabels = {
       management: '管理层', fundamentals: '基本面', rd: '研发能力', chip_flow: '筹码',
@@ -2274,7 +2278,7 @@ function renderResult(report) {
       retail_sentiment: '散户情绪', shareholder_returns: '股东回报', growth_elasticity: '成长弹性',
       a_share_structure: 'A股资金结构', risk_quality: '财务质量与尾部风险',
     };
-    html += '<details class="evidence-block"><summary style="cursor:pointer;">十二维度详细分析 (展开)</summary>';
+    html += '<details class="research-panel"><summary style="cursor:pointer;font-weight:700;">逐项阅读十二维度详细分析</summary>';
     Object.keys(summary.dimension_analyses).forEach(k => {
       html += '<div style="margin:8px 0;white-space:pre-wrap;"><b>' +
         escapeHtml(dimLabels[k] || k) + ':</b> ' +
@@ -2284,10 +2288,8 @@ function renderResult(report) {
   }
 
   if (summary.dimension_scores && summary.dimension_scores.length >= 6) {
-    html += '<div class="evidence-block"><b>十二维度倾向 (-10 利空 ~ +10 利多):</b><br>' +
-      renderDimensionBars(summary.dimension_scores) +
-      '<details style="margin-top:8px;"><summary style="cursor:pointer;">查看雷达图</summary>' +
-      renderDimensionRadar(summary.dimension_scores) + '</details></div>';
+    html += '<details class="research-panel"><summary style="cursor:pointer;font-weight:700;">展开十二维度雷达视图</summary>' +
+      renderDimensionRadar(summary.dimension_scores) + '</details>';
   }
 
   html += renderEvidenceSection(report);
@@ -2323,6 +2325,7 @@ function renderResult(report) {
   }
 
   el.innerHTML = html;
+  activateValuationLab(report);
   attachRadarTooltips();
 }
 
