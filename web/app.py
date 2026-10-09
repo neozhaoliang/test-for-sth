@@ -2270,6 +2270,215 @@ function renderDimensionAnalysisSection(summary) {
   return html + '</section>';
 }
 
+// The industry engine, not the old perpetual-ROE dividend toy, owns the
+// investable-valuation panel. Missing verified projections => NO target price.
+const INDUSTRY_MODEL_LABELS = {
+  owner_fcfe:'股权自由现金流 FCFE',
+  midcycle_fcfe:'跨周期中枢 FCFE',
+  regulated_dividend_discount:'受监管现金分红折现',
+  bank_residual_income:'银行残余收益 RIM',
+  financial_residual_income:'非银金融残余收益 RIM',
+  adjusted_nav:'调整后净资产 NAV',
+  insurance_embedded_value:'保险精算内含价值（待审核）',
+};
+function industryModelName(id) {return INDUSTRY_MODEL_LABELS[id] || id || '尚未识别';}
+function industryInputLabel(id) {
+  const labels={
+    annual_cash_flow_per_share:'未来逐年股权自由现金流（元/股）',
+    terminal_cash_flow_per_share:'下一年可持续 FCFE（元/股）',
+    annual_dividends_per_share:'未来逐年可分配现金股息（元/股）',
+    terminal_dividend_per_share:'下一年可持续股息（元/股）',
+    opening_book_per_share:'可用普通股每股净资产',
+    annual_roe_pct:'未来逐年ROE情景',
+    annual_payout_pct:'未来逐年现金分红比例',
+    required_return_pct:'投资者要求收益率',
+    terminal_growth_pct:'长期增长上限',
+    fair_assets_per_share:'资产公允价值/股',
+    total_obligations_per_share:'全部债务及其他义务/股',
+    realization_tax_and_cost_per_share:'变现税费/股',
+    cycle_span_years:'覆盖完整周期的年数',
+    maintenance_capex_basis:'维持性资本开支来源',
+    dividend_coverage_by_fcfe:'现金股息FCFE覆盖率',
+    capital_adequacy_verified:'监管资本充足率已核验',
+  };
+  return labels[id] || id;
+}
+function industryModelCompute(route, src, hurdlePct, growthPct, stressPct, policyPct) {
+  // Mirrors analysis/valuation_models.py; stress is explicitly a hypothetical
+  // earnings/cash-flow or ROE shock, not a presumed currency or Treasury beta.
+  const type=route.primary, inp=src || {};
+  const k=(hurdlePct+policyPct)/100;
+  if(!Number.isFinite(k)||k<.04||k>.35) return null;
+  let value=0, components={},terminalShare=null;
+  if(['owner_fcfe','midcycle_fcfe','regulated_dividend_discount'].includes(type)) {
+    const flows=inp.annual_cash_flow_per_share || inp.annual_dividends_per_share;
+    const terminal=Number(inp.terminal_cash_flow_per_share ?? inp.terminal_dividend_per_share);
+    if(!Array.isArray(flows)||flows.length<3||flows.length>15||!Number.isFinite(terminal)||terminal<=0) return null;
+    const g=growthPct/100;
+    if(g>.04||k-g<.04-1e-12) return null;
+    const multiplier=1+stressPct/100;
+    if(multiplier<=0) return null;
+    const annual=flows.map(Number);
+    if(annual.some(x=>!Number.isFinite(x))) return null;
+    const pv=annual.reduce((sum,cf,i)=>sum+cf*multiplier/Math.pow(1+k,i+1),0);
+    const tail=terminal*multiplier/(k-g)/Math.pow(1+k,annual.length);
+    value=pv+tail;
+    terminalShare=value>0?100*tail/value:null;
+    components={pvExplicit:pv,pvTerminal:tail};
+  } else if(['bank_residual_income','financial_residual_income'].includes(type)) {
+    let book=Number(inp.opening_book_per_share);
+    const roes=inp.annual_roe_pct, payouts=inp.annual_payout_pct;
+    if(!Number.isFinite(book)||book<=0||!Array.isArray(roes)||!Array.isArray(payouts)||
+       roes.length!==payouts.length||roes.length<3||roes.length>15) return null;
+    let pv=0;
+    for(let i=0;i<roes.length;i++) {
+      const roe=(Number(roes[i])+stressPct)/100, p=Number(payouts[i])/100;
+      if(!Number.isFinite(roe)||!Number.isFinite(p)||p<0||p>1)return null;
+      pv+=(roe-k)*book/Math.pow(1+k,i+1);
+      book+=book*roe*(1-p);
+      if(book<=0)return null;
+    }
+    value=Number(inp.opening_book_per_share)+pv;
+    components={pvResidual:pv,endingBook:book};
+  } else if(type==='adjusted_nav') {
+    // For NAV, stress means haircut on asset fair value; style premium is
+    // not a mathematical component of liquidation NAV.
+    if(policyPct!==0)return null;
+    value=Number(inp.fair_assets_per_share)*(1+stressPct/100)-
+      Number(inp.total_obligations_per_share)-Number(inp.realization_tax_and_cost_per_share);
+  } else return null;
+  if(!Number.isFinite(value)||value<=0)return null;
+  return {price:value,terminalShare,components};
+}
+function renderIndustryValuationLab(report) {
+  const model=report.valuation_model || {};
+  const route=model.route || {};
+  const calc=model.valuation || {};
+  const macro=model.macro_context || {};
+  const primary=route.primary || '';
+  let html='<section class="valuation-lab" id="industryValuationLab">'+
+    '<span class="model-tag">行业匹配 · 宏观约束 · 证据校验</span>'+
+    '<h3 style="margin-top:10px;">'+escapeHtml(industryModelName(primary))+' · 估值研究</h3>'+
+    '<p class="section-caption">行业与商业模式决定估值模型；A股风格、美元汇率、美债利率和政策变化先核实传导渠道，不再无依据地修改公司内在价值。</p>';
+  if(!route.primary) {
+    html+='<div class="chart-empty">旧版报告尚未包含行业估值结果。请用更新后的Agent重新分析。</div>';
+  } else if(calc.status!=='calculated'||!model.interactive_inputs) {
+    const missing=(model.evidence_gate || {}).missing || calc.missing || [];
+    const invalid=(model.evidence_gate || {}).invalid || [];
+    html+='<div class="evidence-block missing"><b>当前不输出目标价</b>'+
+      '<p>模型已选定，但缺少可审计的逐年预测、资本/资产数据或对应来源。</p>'+
+      '<p><b>尚缺：</b>'+escapeHtml(missing.length?missing.map(industryInputLabel).join('、'):'模型适用性或来源校验')+'</p>'+
+      (invalid.length?'<p><b>输入错误：</b>'+escapeHtml(invalid.join('；'))+'</p>':'')+
+      '<p class="section-caption">可在本地 config/valuation_cases.local.json 填入按公司与时点标注的预测和来源；缺失时宁可不定价。</p></div>';
+  } else {
+    const initial=Number(model.interactive_inputs.required_return_pct || 10);
+    const initialG=Number(model.interactive_inputs.terminal_growth_pct || 0);
+    const hasDiscount=primary!=='adjusted_nav';
+    const hasGrowth=['owner_fcfe','midcycle_fcfe','regulated_dividend_discount'].includes(primary);
+    const stressLabel=['bank_residual_income','financial_residual_income'].includes(primary)?
+      '各年ROE压力调整（百分点）' : primary==='adjusted_nav'?
+      '资产公允价值压力情景' : '现金流压力情景（全期比例）';
+    const slider=(key,label,min,max,step,val,unit)=>'<div class="slider-row"><div class="slider-top">'+
+      '<label for="sector-'+key+'">'+escapeHtml(label)+'</label><output id="sector-'+key+'-value">'+
+      Number(val).toFixed(2)+unit+'</output></div>'+
+      '<input type="range" id="sector-'+key+'" min="'+min+'" max="'+max+'" step="'+step+
+      '" value="'+val+'"></div>';
+    html+='<div class="lab-layout"><div>'+
+      (hasDiscount?slider('discount','人民币股权要求收益率',4,35,.25,initial,'%'):'')+
+      (hasGrowth?slider('growth','下一年可持续现金流增长率',-3,4,.25,initialG,'%'):'')+
+      slider('stress',stressLabel,primary==='adjusted_nav'?-50:primary.includes('residual_income')?-5:-40,
+        primary==='adjusted_nav'?20:primary.includes('residual_income')?5:40,
+        primary.includes('residual_income')?.25:5,0,primary.includes('residual_income')?'pp':'%')+
+      (hasDiscount?slider('premium','A股风格/流动性风险溢价压力',-2,4,.25,0,'pp'):'')+
+      slider('safety','额外安全边际折价',0,50,5,20,'%')+
+      '<div class="lab-actions"><button type="button" id="sector-reset">恢复已核验的初始假设</button></div>'+
+      '<p class="section-caption">所有压力变化都是人为情景：不代表预测到美债/汇率实际影响。行业模型需要经过审核的现金流、资产质量或监管资本数据。</p>'+
+      '</div><div class="lab-result" aria-live="polite"><h4>模型条件下的股权价值 · 非买卖指令</h4>'+
+      '<div class="lab-price" id="sector-price">—</div>'+
+      '<div class="lab-stat-grid"><div><span>安全边际后的情景价</span><b id="sector-buy">—</b></div>'+
+      '<div><span>终值依赖度</span><b id="sector-terminal">—</b></div></div>'+
+      '<div class="lab-foot" id="sector-note">计算中</div>'+
+      '<div id="sector-sensitivity"></div></div></div>';
+  }
+  const observed=(macro.observations || []).filter(x=>x.usable && x.value!==null);
+  html+='<div class="chart-grid" style="margin-top:16px;">'+
+    chartTile('宏观观察值（含数据时点）','仅显示有明确日期、未过期的指标',
+      observed.length?'<div class="evidence-block">'+observed.map(x=>
+        '<div><b>'+escapeHtml(x.metric)+':</b> '+escapeHtml(String(x.value))+
+        ' <small>('+escapeHtml(x.as_of)+')</small></div>').join('')+'</div>':'')+
+    chartTile('外围与国内市场传导','不自动根据风格叙事调整合理股价',
+      '<div class="evidence-block">'+
+      '美元兑人民币：'+escapeHtml(macro.rmb_direction || '资料不足')+
+      '；海外营收占比：'+escapeHtml(macro.overseas_revenue_pct===null||macro.overseas_revenue_pct===undefined?
+        '资料不足':String(macro.overseas_revenue_pct)+'%')+
+      '<p>未审计套保/美元债及汇率敏感度前，禁止给出固定估值调整。</p></div>')+'</div>';
+  const routes=(macro.transmission_paths || []);
+  html+='<details class="evidence-block" style="margin-top:16px;"><summary>查阅中国政策、A股风格与外围市场风险传导依据</summary>'+
+    '<ul>'+routes.map(x=>'<li><b>'+escapeHtml(x.factor)+':</b> '+
+      escapeHtml(x.route)+'；'+escapeHtml(x.evidence)+'</li>').join('')+'</ul></details>';
+  return html+'</section>';
+}
+function activateIndustryValuationLab(report) {
+  const model=report.valuation_model || {};
+  const route=model.route || {}, inputs=model.interactive_inputs;
+  if(!inputs || (model.valuation || {}).status!=='calculated')return;
+  const primary=route.primary;
+  const names=primary==='adjusted_nav'?['stress','safety']:
+    ['discount',...(['owner_fcfe','midcycle_fcfe','regulated_dividend_discount'].includes(primary)?['growth']:[]),
+      'stress','premium','safety'];
+  const get=id=>document.getElementById(id);
+  const sliders=Object.fromEntries(names.map(key=>[key,get('sector-'+key)]));
+  const initial=Object.fromEntries(names.map(key=>[key,Number(sliders[key].value)]));
+  function recalculate() {
+    const props=Object.fromEntries(names.map(key=>[key,Number(sliders[key].value)]));
+    names.forEach(key=>{
+      get('sector-'+key+'-value').textContent=props[key].toFixed(2)+
+        ((key==='premium'||(key==='stress'&&primary.includes('residual_income')))?'pp':'%');
+    });
+    const k=props.discount===undefined?10:props.discount;
+    const growth=props.growth===undefined?0:props.growth;
+    const penalty=props.premium||0;
+    const result=industryModelCompute(route,inputs,k,growth,props.stress,penalty);
+    get('sector-price').textContent=result?result.price.toFixed(2)+'元/股':'情景不适用';
+    get('sector-buy').textContent=result?(result.price*(1-props.safety/100)).toFixed(2)+'元':'暂缺';
+    get('sector-terminal').textContent=result&&result.terminalShare!==null?
+      result.terminalShare.toFixed(1)+'%':'不适用';
+    const msgs=['参数为情景分析，不是市场真实预期。'];
+    if(result && result.terminalShare!==null && result.terminalShare>70)
+      msgs.push('终值超过70%，远期预测主导价值。');
+    if(!result)msgs.push('折现率/终值距离或资本约束不满足；拒绝生成情景价。');
+    if(penalty!==0)msgs.push('A股风格风险溢价为手动输入，并非已校准的市场β。');
+    get('sector-note').textContent=msgs.join(' ');
+    if(!result){get('sector-sensitivity').innerHTML='';return;}
+    const variations=primary==='adjusted_nav'?[-20,-10,0,10,20]:
+      [-2,-1,0,1,2];
+    let bars='<svg viewBox="0 0 420 176" width="100%" role="img" aria-label="估值压力敏感性图">';
+    const series=variations.map(shift=>{
+      const v=primary==='adjusted_nav'?
+        industryModelCompute(route,inputs,k,growth,shift,0):
+        industryModelCompute(route,inputs,k+shift,growth,props.stress,penalty);
+      return v?.price??null;
+    });
+    const scale=Math.max(1,...series.filter(x=>x!==null));
+    series.forEach((val,i)=>{
+      const x=18+i*82,h=val===null?0:Math.max(2,90*val/scale);
+      bars+='<rect x="'+x+'" y="'+(129-h).toFixed(1)+'" width="60" height="'+h.toFixed(1)+
+        '" rx="4" fill="'+(i===2?'#91c8ff':'#7787ce')+'"/>'+
+        '<text x="'+(x+30)+'" y="'+(121-h).toFixed(1)+'" text-anchor="middle" font-size="10" fill="white">'+
+        (val===null?'不适用':val.toFixed(1))+'</text>'+
+        '<text x="'+(x+30)+'" y="150" text-anchor="middle" font-size="10" fill="#dde6ff">'+
+        variations[i]+(primary==='adjusted_nav'?'%':'pp')+'</text>';
+    });
+    get('sector-sensitivity').innerHTML=bars+'</svg>';
+  }
+  names.forEach(key=>sliders[key].addEventListener('input',recalculate));
+  get('sector-reset').addEventListener('click',()=>{
+    names.forEach(key=>sliders[key].value=initial[key]);
+    recalculate();
+  });
+  recalculate();
+}
+
 function renderResult(report) {
   const el = document.getElementById('result');
   let html = '<h2>' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
@@ -2410,7 +2619,7 @@ function renderResult(report) {
 
   html += '</section>';
   html += renderDashboardCharts(report);
-  html += renderValuationLab(report);
+  html += renderIndustryValuationLab(report);
 
   html += renderDimensionAnalysisSection(summary);
 
@@ -2452,7 +2661,7 @@ function renderResult(report) {
   }
 
   el.innerHTML = html;
-  activateValuationLab(report);
+  activateIndustryValuationLab(report);
   attachRadarTooltips();
 }
 
