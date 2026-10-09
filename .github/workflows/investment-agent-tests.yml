@@ -27,7 +27,7 @@ jobs:
           python -m pip install \
             pytest pytest-asyncio uv \
             "pydantic>=2,<3" "pypdf>=5,<7" \
-            akshare
+            akshare anthropic python-dotenv
 
       - name: Verify uv lock is in sync
         run: uv lock --locked
@@ -58,6 +58,7 @@ jobs:
             analysis/candidates.py \
             analysis/shareholder.py \
             backtest/score.py \
+            backtest/llm_client.py \
             analysis/report_contract.py \
             analysis/report_inputs.py \
             analysis/report_validation.py \
@@ -131,6 +132,7 @@ jobs:
             tests/test_research_profile.py \
             tests/test_report_blocks.py \
             tests/test_report_validation.py \
+            tests/test_llm_refusal_handling.py \
             tests/test_research_context.py \
             tests/test_snapshot_store.py \
             tests/test_snapshot_compare.py \
