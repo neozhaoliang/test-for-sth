@@ -20,7 +20,7 @@ from typing import Any, Dict, List
 
 from analysis.evidence import EvidenceItem
 from analysis.valuation_assumptions import estimate_valuation_scenarios
-from analysis.valuation_payout import annual_payout_from_eps
+from analysis.valuation_payout import annual_payout_from_cash_totals
 from analysis.valuation_engine import (ValuationScenario, calculate_scenarios, render_valuation_block)
 from analysis.report_blocks import _build_prompt
 from analysis.report_contract import (
@@ -160,11 +160,11 @@ async def _generate_summary(
     estimate = {"status": "manual", "scenarios": scenario_specs}
     if not scenario_specs and (not as_of or as_of >= "2026-10-08"):
         # Strict matching; never infer profit fiscal-year from dividend implementation date.
-        if (assumption_context.get("annual_eps") and assumption_context.get("fiscal_dividends")
+        if (assumption_context.get("annual_profits") and assumption_context.get("dividend_totals")
                 and not assumption_context.get("payout_source")):
-            payout_evidence = annual_payout_from_eps(
-                annual_eps=assumption_context["annual_eps"],
-                dividends=assumption_context["fiscal_dividends"],
+            payout_evidence = annual_payout_from_cash_totals(
+                annual_profits=assumption_context["annual_profits"],
+                dividend_totals=assumption_context["dividend_totals"],
                 as_of=as_of or "2026-10-08",
             )
             assumption_context = dict(assumption_context)
