@@ -170,6 +170,10 @@ def build_industry_valuation_report(inputs: Any) -> dict:
     cross_checks = []
     independent_inputs = context.get("cross_check_inputs") or {}
     independent_sources = context.get("cross_check_provenance") or {}
+    if not isinstance(independent_inputs, dict):
+        independent_inputs = {}
+    if not isinstance(independent_sources, dict):
+        independent_sources = {}
     for secondary in route["cross_checks"]:
         item = independent_inputs.get(secondary) or {}
         prov = independent_sources.get(secondary) or {}
@@ -220,8 +224,14 @@ def build_industry_valuation_report(inputs: Any) -> dict:
     # Shock coefficients are company-specific calibrated observations, not
     # market-wide constants. No calibrated exposure => no numerical stress.
     scenario_context = context.get("scenario_context") or {}
+    if not isinstance(scenario_context, dict):
+        scenario_context = {}
     calibrated = scenario_context.get("macro_sensitivities") or {}
     user_shocks = scenario_context.get("macro_shocks") or []
+    if not isinstance(calibrated, dict):
+        calibrated = {}
+    if not isinstance(user_shocks, list):
+        user_shocks = []
     macro_stress = []
     if val.get("status") == "calculated":
         for scenario_shock in user_shocks[:8]:
