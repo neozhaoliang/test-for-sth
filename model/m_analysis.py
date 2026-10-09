@@ -90,6 +90,7 @@ class AnalysisReport(BaseModel):
     knowledge_excerpts: List[KnowledgeExcerpt] = Field(default_factory=list, description="知识库背景资料 (全量，未按股票筛选)")
     industry_comparison: Optional[dict] = Field(default=None, description="所属行业涨跌家数对比 (行业普涨/普跌判断)")
     shareholder_trend: Optional[dict] = Field(default=None, description="股东户数环比变化 (散户情绪/筹码集中度代理)")
+    chip_price_context: Optional[dict] = Field(default=None, description="52周价格位置与股东户数变化的联合审慎判断")
     dividend_history: List[dict] = Field(default_factory=list, description="历史分红记录")
     buyback_history: List[dict] = Field(default_factory=list, description="历史回购记录")
     dividend_chart: Optional[List[dict]] = Field(
