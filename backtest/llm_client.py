@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 
 from tools.utils import utils
 
-_ROOT_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+_ROOT_ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 if _ROOT_ENV_PATH.exists():
     load_dotenv(_ROOT_ENV_PATH)
 
