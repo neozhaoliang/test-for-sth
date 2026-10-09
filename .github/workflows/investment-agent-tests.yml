@@ -112,6 +112,9 @@ jobs:
           PY
           node --check /tmp/investment-webui.js
 
+      - name: Verify interactive dashboard sliders and charts
+        run: node tests/check_dashboard_ui.js /tmp/investment-webui.js
+
       - name: Run investment-agent unit/regression tests
         run: |
           pytest -q \
