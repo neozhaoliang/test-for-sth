@@ -227,3 +227,64 @@ def test_foreign_exposure_future_calibration_disallowed():
         as_of="2026-10-09")
     assert outcome["status"] == "unquantifiable"
 
+
+
+def test_cycle_requires_complete_cycle_not_peak_year():
+    payload={
+        "annual_cash_flow_per_share":[2,2,2,2,2],
+        "terminal_cash_flow_per_share":2,
+        "required_return_pct":10,"terminal_growth_pct":2,
+        "cycle_span_years":2,"maintenance_capex_basis":"仅最近两年",
+    }
+    report=build_industry_valuation_report(Inputs(
+        research_profile=Profile(archetype="cyclical",industry="航运"),
+        valuation_assumption_context={
+            "industry_valuation_inputs":payload,
+            "industry_valuation_provenance":manifest_for(payload),
+        }))
+    assert report["status"] == "insufficient_evidence"
+    assert "至少五年" in report["valuation"]["reason"]
+
+
+def test_regulated_dividend_requires_fcfe_coverage():
+    payload={
+        "annual_dividends_per_share":[1,1,1,1,1],
+        "terminal_dividend_per_share":1,
+        "required_return_pct":10,"terminal_growth_pct":1,
+        "dividend_coverage_by_fcfe":.8,
+    }
+    report=build_industry_valuation_report(Inputs(
+        research_profile=Profile(archetype="stable_yield",industry="核电"),
+        valuation_assumption_context={
+            "industry_valuation_inputs":payload,
+            "industry_valuation_provenance":manifest_for(payload),
+        }))
+    assert report["status"] == "insufficient_evidence"
+    assert "覆盖" in report["valuation"]["reason"]
+
+
+def test_independent_dividend_cross_check_can_disagree_without_auto_averaging():
+    primary={
+        "annual_cash_flow_per_share":[2,2,2,2,2],
+        "terminal_cash_flow_per_share":2,
+        "required_return_pct":10,"terminal_growth_pct":2,
+    }
+    secondary={
+        "annual_dividends_per_share":[.5,.5,.5,.5,.5],
+        "terminal_dividend_per_share":.5,
+        "required_return_pct":10,"terminal_growth_pct":2,
+    }
+    report=build_industry_valuation_report(Inputs(
+        research_profile=Profile(archetype="consumer_brand",industry="白酒"),
+        valuation_assumption_context={
+            "industry_valuation_inputs":primary,
+            "industry_valuation_provenance":manifest_for(primary),
+            "cross_check_inputs":{"dividend_discount":secondary},
+            "cross_check_provenance":{"dividend_discount":manifest_for(secondary)},
+        }))
+    assert report["status"] == "calculated"
+    check=report["cross_checks"][0]
+    assert check["status"] == "calculated"
+    assert check["valuation"]["intrinsic_per_share"] < report["valuation"]["intrinsic_per_share"]
+    assert abs(check["disagreement_pct_of_primary"]) >= 30
+    assert "不能取平均" in check["warning"]
