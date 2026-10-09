@@ -120,6 +120,9 @@ jobs:
       - name: Verify interactive dashboard sliders and charts
         run: node tests/check_dashboard_ui.js /tmp/investment-webui.js
 
+      - name: Verify industry-specific valuation UI and no-target-price safeguards
+        run: node tests/check_industry_valuation_ui.js /tmp/investment-webui.js
+
       - name: Run investment-agent unit/regression tests
         run: |
           pytest -q \
@@ -371,3 +374,4 @@ jobs:
         run: |
           node --check /tmp/investment-dashboard.js
           node tests/check_dashboard_ui.js /tmp/investment-dashboard.js
+          node tests/check_industry_valuation_ui.js /tmp/investment-dashboard.js
