@@ -71,8 +71,14 @@ nodes['lab-payout'].value=0;
 nodes['lab-payout'].listeners.input();
 assert.equal(nodes['lab-fair-price'].textContent,'暂无法定价');
 assert.ok(nodes['lab-note'].textContent.includes('不适用'));
-const missing={...report,valuation:{}};
-assert.equal(context.pickValuationDefaults(missing).nav,null);
-assert.ok(context.renderValuationLab(missing).includes('模型假设') === false ||
-          context.pickValuationDefaults(missing).payout.source.includes('核验'));
+const missing={...report,valuation:{},valuation_model:null,profitability_trend:null};
+const fallback=context.pickValuationDefaults(missing);
+assert.equal(fallback.nav,null);
+assert.equal(fallback.roe.value,12);
+assert.equal(fallback.payout.value,50);
+assert.equal(fallback.discount.value,10);
+assert.ok(fallback.roe.source.includes('模型假设'));
+nodes['lab-reset'].listeners.click();
+assert.equal(Number(nodes['lab-discount'].value),11);
+assert.equal(Number(nodes['lab-payout'].value),51.98);
 console.log('Dashboard UI checks passed: defaults, five sliders, SVG charts, discount sensitivity, invalid-state guard.');
