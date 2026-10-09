@@ -559,7 +559,7 @@ _INDEX_HTML = """<!DOCTYPE html>
   .metric strong { display:block; margin-top:5px; font-size:23px; font-weight:800; letter-spacing:-.04em; font-variant-numeric:tabular-nums; }
   .metric small { font-size:11px; color:var(--muted); overflow-wrap:anywhere; }
   .chart-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
-  .chart-tile { min-width:0; padding:18px; border:1px solid var(--line); border-radius:14px; background:#fcfdff; }
+  .chart-tile { min-width:0; padding:18px; border:1px solid var(--line); border-radius:14px; background:#fcfdff; overflow-x:auto; }
   .chart-tile h4 { font-size:14px; margin:0 0 5px; }
   .chart-tile .section-caption { margin-bottom:10px; }
   .chart-tile svg { display:block; max-width:100%; height:auto; }
@@ -1899,7 +1899,7 @@ function chartTile(title, subtitle, image) {
 // Three reported-ratio trend lines. Values are shown as reported: do not
 // annualize interim YTD ROE and do not interpolate missing observations.
 function renderProfitabilityTrendChart(trend) {
-  const rows = ((trend || {}).periods || []).filter(x => x.period).slice(-9);
+  const rows = ((trend || {}).periods || []).filter(x => x.period).slice().sort((a,b)=>String(a.period).localeCompare(String(b.period))).slice(-9);
   if (rows.length < 2) return '';
   const metrics = [
     {key:'roe_pct',name:'ROE',color:'#5362d5'},
@@ -1965,6 +1965,20 @@ function renderSentimentMixChart(sentiment) {
   });
   return svg+'</svg>';
 }
+
+function renderIndustryBreadthChart(industry) {
+  if (!industry) return '';
+  const adv=numericOrNull(industry.advancing),dec=numericOrNull(industry.declining);
+  if (adv===null || dec===null || adv<0 || dec<0 || adv+dec<=0) return '';
+  const total=adv+dec,aw=adv/total*540,dw=dec/total*540;
+  return '<svg viewBox="0 0 590 108" width="100%" role="img" aria-label="行业上涨和下跌家数">'+
+    '<rect x="20" y="14" width="'+aw.toFixed(1)+'" height="34" rx="5" fill="#ce5c68"/>'+
+    '<rect x="'+(20+aw).toFixed(1)+'" y="14" width="'+dw.toFixed(1)+'" height="34" rx="5" fill="#159a79"/>'+
+    '<text x="20" y="80" font-size="12" fill="#ad3e53">上涨 '+adv+' 家（'+(100*adv/total).toFixed(0)+'%）</text>'+
+    '<text x="290" y="80" font-size="12" fill="#197c68">下跌 '+dec+' 家（'+(100*dec/total).toFixed(0)+'%）</text>'+
+    '</svg>';
+}
+
 function renderDashboardCharts(report) {
   const quote=report.realtime_quote || {};
   const val=report.valuation || {};
@@ -1991,6 +2005,10 @@ function renderDashboardCharts(report) {
     (report.dividend_chart || []).length?renderDividendChart(report.dividend_chart):'');
   html+=chartTile('市场讨论结构','雪球言论只能作为情绪信号，不能替代财务事实',
     renderSentimentMixChart(report.sentiment));
+  html+=chartTile('行业上涨与下跌家数','同一交易时点的行业广度，不能独立当作投资结论',
+    renderIndustryBreadthChart(report.industry_comparison));
+  html+=chartTile('历史估值区间','PE(TTM)历史序列，失真区间将按原图分位裁剪',
+    renderValuationHistoryChart((report.valuation_history || {}).history_monthly || []));
   html+='</div></section>';
   return html;
 }
@@ -2047,8 +2065,8 @@ function renderValuationLab(report) {
     '<p class="section-caption">模型 k = ROE × 留存率 × 转化效率 + 股息收益率。适用于可持续稳态情景，' +
     '不等于有限期自由现金流 DCF，也不能代替实际资本开支与周期分析。默认值标明事实与假设。</p>'+
     '<div class="lab-layout"><div class="lab-inputs">'+
-    labSlider('roe','可持续 ROE',1,35,.5,p.roe)+
-    labSlider('payout','现金分红率',0,100,1,p.payout)+
+    labSlider('roe','可持续 ROE',1,35,.01,p.roe)+
+    labSlider('payout','现金分红率',0,100,.01,p.payout)+
     labSlider('efficiency','留存收益转化效率',0,100,5,p.efficiency)+
     labSlider('discount','要求收益率 / 折现率',6,20,.25,p.discount)+
     labSlider('safety','买入安全边际',0,50,5,p.safety)+
