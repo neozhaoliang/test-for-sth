@@ -2095,7 +2095,7 @@ function pickValuationDefaults(report) {
   const normal=history.length>=3 ? median(history) : Math.min(roe,12);
   const normalSource=history.length>=3
     ? '近'+history.length+'个完整财年的ROE中位数（不保证未来保持）'
-    : '模型假设：长期ROE最高12%；历史完整财年不足3年';
+    : '模型假设：长期ROE暂用不高于12%的审慎假设；历史完整财年不足3年';
   return {
     roe:{value:Math.min(35,Math.max(1,roe)),source:roeSource},
     normalized:{value:Math.max(1,Math.min(35,normal)),source:normalSource},
@@ -2169,7 +2169,7 @@ function renderValuationLab(report) {
     '<h4>有限期折现 · 模型情景价（非目标价）</h4><div class="lab-price" id="lab-fair-price">—</div>'+
     '<div class="lab-stat-grid">'+
     '<div><span>情景 PB</span><b id="lab-pb">—</b></div>'+
-    '<div><span>安全边际后价格</span><b id="lab-buy">—</b></div>'+
+    '<div><span>情景折扣价（非买点）</span><b id="lab-buy">—</b></div>'+
     '<div><span>终值实际增长率</span><b id="lab-growth">—</b></div>'+
     '<div><span>终值占总估值比例</span><b id="lab-return">—</b></div></div>'+
     '<div class="lab-foot" id="lab-note">正在核查可用财务数据。</div>'+
