@@ -154,11 +154,21 @@ async def _generate_summary(
     # Model family is selected by operating economics (industry classification),
     # NOT by whichever formula generates a flattering target price.
     # No explicit per-share forecast + dated provenance => no numeric target.
-    inputs.valuation_model_result = build_industry_valuation_report(inputs)
-    prompt += (
-        "\\n\\n## 行业专用估值与A股宏观传导（不可虚构价值）\\n"
-        + industry_model_prompt_block(inputs.valuation_model_result)
-    )
+    if (getattr(inputs, "research_mode", "") == "historical"
+            and as_of and as_of < "2026-10-09"):
+        inputs.valuation_model_result = {
+            "status": "historical_method_not_available",
+            "valuation": {"status": "historical_method_not_available",
+                          "reason": "行业估值引擎于2026-10-09才纳入研究流程"},
+            "route": {}, "macro_context": {}, "interactive_inputs": None,
+        }
+        prompt += ("\\n\\n历史研究基准日早于行业估值引擎上线日；"
+                   "不得把后来才形成的研究框架和宏观情景倒灌到历史报告，"
+                   "不输出自动目标价。")
+    else:
+        inputs.valuation_model_result = build_industry_valuation_report(inputs)
+        prompt += ("\\n\\n## 行业专用估值与A股宏观传导（不可虚构价值）\\n"
+                   + industry_model_prompt_block(inputs.valuation_model_result))
 
     # 工具调用路径: 强制十二维度逐一分析后提交
     analyses, submit_input, tool_reason = await call_analysis_with_tools(
