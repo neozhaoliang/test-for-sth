@@ -195,7 +195,35 @@ def test_macro_context_does_not_use_stale_us10y_or_fx_direction_as_beta():
         fundamentals={"facts":{"overseas_revenue_pct":90}},
         as_of="2026-10-09",
     )
-    assert macro["observations"][0]["usable"] is False
+    us_obs = next(x for x in macro["observations"] if x["metric"] == "us_10y_yield_pct")
+    assert us_obs["usable"] is False
     assert macro["quantified_equity_impact"] is None
     assert macro["macro_shocks_applied"] is False
     assert not macro["rmb_is_dated"]
+
+def test_china_style_regime_is_observation_not_equity_return_premium():
+    ctx=build_macro_valuation_context(
+        research_profile=Profile(), as_of="2026-10-09",
+        market_context={"indices":[
+            {"name":"上证红利","ytd_pct":18,"latest_date":"2026-10-08"},
+            {"name":"科创50","ytd_pct":0,"latest_date":"2026-10-08"},
+            {"name":"创业板指","ytd_pct":2,"latest_date":"2026-10-08"},
+        ]},
+    )
+    assert ctx["a_share_style"]["regime"] == "dividend_leading"
+    assert ctx["a_share_style"]["dividend_minus_growth_ytd_pp"] == 17
+    assert ctx["quantified_equity_impact"] is None
+
+
+def test_foreign_exposure_future_calibration_disallowed():
+    base={"annual_cash_flow_per_share":[1,1,1],
+          "terminal_cash_flow_per_share":1,
+          "required_return_pct":10,"terminal_growth_pct":2}
+    outcome=stress_valuation_with_verified_exposures(
+        archetype="technology",industry="软件",model_inputs=base,
+        shock={"usdcny_change_pct":3},
+        exposures={"source_url":"https://example.org/test",
+          "as_of":"2026-10-20","fcfe_pct_per_1pct_usdcny":.4},
+        as_of="2026-10-09")
+    assert outcome["status"] == "unquantifiable"
+
