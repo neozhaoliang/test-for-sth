@@ -54,6 +54,7 @@ from analysis.realtime_price import get_historical_quote, get_realtime_quote, ge
 from analysis.rd_team import get_rd_team_composition
 from analysis.valuation_history import get_valuation_history
 from analysis.valuation_payout import collect_declared_fiscal_payout_inputs
+from analysis.valuation_config import load_local_valuation_case
 from analysis.evidence import ResearchQuality, build_evidence_ledger, evaluate_research_quality
 from analysis.research_profile import ResearchProfile, classify_research_profile
 from analysis.report_contract import _PROMPT_VERSION
@@ -345,6 +346,19 @@ async def generate_report(
             filing_calendar=filing_calendar,
         )
         valuation_assumption_context.update(payout_inputs)
+
+    # Optional user-reviewed per-stock forecasts. Never backfill a live
+    # configuration into a historical as-of report.
+    local_case = load_local_valuation_case(
+        stock_code, as_of=request.as_of if historical_mode else None,
+    )
+    if local_case["status"] == "configured":
+        valuation_assumption_context.update(local_case["context"])
+    elif local_case["status"] not in ("not_configured",):
+        utils.logger.warning(
+            "[valuation] local case rejected for %s: %s",
+            stock_code, local_case["status"],
+        )
 
     chip_price_context = assess_chip_price_context(
         market_context, shareholder_trend,
