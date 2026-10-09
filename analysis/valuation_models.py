@@ -170,7 +170,9 @@ def residual_income(
     residual_pv = 0.0
     rows: List[Dict] = []
     for i, (raw_r, raw_p) in enumerate(zip(annual_roe_pct, annual_payout_pct), start=1):
-        roe, payout = _rate(raw_r, allow_negative=True), _rate(raw_p)
+        roe = _rate(raw_r, allow_negative=True)
+        payout_raw = _f(raw_p)
+        payout = payout_raw / 100
         if payout > 1:
             raise ValueError("cash payout cannot exceed 100% in this model")
         earnings = book * roe
