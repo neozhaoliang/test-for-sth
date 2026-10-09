@@ -51,6 +51,10 @@ def build_macro_valuation_context(
         day = _date(when)
         safe = value is not None and day is not None and (
             request_day is None or day <= request_day)
+        if label in ("stock_ytd_return_pct",
+                     "usdcny_midpoint_cny_per_usd", "usdcny_change_30obs_pct"):
+            safe = safe and (request_day is None or (
+                day is not None and 0 <= (request_day - day).days <= 7))
         if fresh is not None:
             safe = safe and bool(fresh)
         return {"metric": label, "value": value if safe else None,
@@ -73,7 +77,7 @@ def build_macro_valuation_context(
         dates = [_date(red.get("latest_date"))]+[_date(row.get("latest_date")) for row in growth]
         if all(v is not None for v in returns) and all(d is not None for d in dates):
             if (max(dates)-min(dates)).days <= 7 and (
-                request_day is None or max(dates) <= request_day
+                request_day is None or 0 <= (request_day-max(dates)).days <= 7
             ):
                 spread = returns[0] - sum(returns[1:]) / len(growth)
                 regime = "dividend_leading" if spread >= 8 else (
