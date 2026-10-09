@@ -1881,6 +1881,120 @@ function attachRadarTooltips() {
   });
 }
 
+
+function numericOrNull(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+function metricCard(label, value, source) {
+  return '<div class="metric"><label>' + escapeHtml(label) + '</label><strong>' +
+    escapeHtml(String(value)) + '</strong><small>' + escapeHtml(source) + '</small></div>';
+}
+function chartTile(title, subtitle, image) {
+  return '<div class="chart-tile"><h4>' + escapeHtml(title) + '</h4><p class="section-caption">' +
+    escapeHtml(subtitle) + '</p>' + (image || '<div class="chart-empty">当前没有足够的可比数据，暂不绘图</div>') + '</div>';
+}
+
+// Three reported-ratio trend lines. Values are shown as reported: do not
+// annualize interim YTD ROE and do not interpolate missing observations.
+function renderProfitabilityTrendChart(trend) {
+  const rows = ((trend || {}).periods || []).filter(x => x.period).slice(-9);
+  if (rows.length < 2) return '';
+  const metrics = [
+    {key:'roe_pct',name:'ROE',color:'#5362d5'},
+    {key:'gross_margin_pct',name:'毛利率',color:'#0a9c9a'},
+    {key:'net_margin_pct',name:'净利率',color:'#dc8654'},
+  ];
+  const observed = [];
+  rows.forEach(row => metrics.forEach(m => {
+    const value = numericOrNull(row[m.key]); if (value !== null) observed.push(value);
+  }));
+  if (observed.length < 3) return '';
+  const W=640,H=252,L=50,R=16,T=34,B=51,plotW=W-L-R,plotH=H-T-B;
+  let low=Math.min(...observed,0), high=Math.max(...observed,0);
+  const span=Math.max(4,high-low); low-=span*.10; high+=span*.10;
+  const x=i=>L + i*plotW/(rows.length-1);
+  const y=v=>T+(high-v)*plotH/(high-low);
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="报告期ROE毛利率净利率趋势">';
+  for(let j=0;j<=4;j++) {
+    const val=low+(high-low)*j/4, yp=y(val);
+    svg+='<line x1="'+L+'" y1="'+yp.toFixed(1)+'" x2="'+(W-R)+'" y2="'+yp.toFixed(1)+'" stroke="#e8edf6"/>';
+    svg+='<text x="'+(L-7)+'" y="'+(yp+4).toFixed(1)+'" text-anchor="end" font-size="11" fill="#6c7c97">'+val.toFixed(1)+'%</text>';
+  }
+  metrics.forEach((m,j) => {
+    const legendX=L+j*150;
+    svg+='<line x1="'+legendX+'" y1="12" x2="'+(legendX+18)+'" y2="12" stroke="'+m.color+'" stroke-width="3"/>';
+    svg+='<text x="'+(legendX+23)+'" y="16" font-size="12" fill="#40516e">'+m.name+'</text>';
+    let segment=[];
+    const flush=()=>{ if(segment.length>=2) svg+='<polyline points="'+segment.join(' ')+'" fill="none" stroke="'+m.color+'" stroke-width="2.6" stroke-linejoin="round"/>'; segment=[]; };
+    rows.forEach((row,i)=>{
+      const v=numericOrNull(row[m.key]);
+      if(v===null){flush();return;}
+      segment.push(x(i).toFixed(1)+','+y(v).toFixed(1));
+      svg+='<circle class="holder-mark" cx="'+x(i).toFixed(1)+'" cy="'+y(v).toFixed(1)+'" r="3.4" fill="'+m.color+'" data-tip="'+
+        escapeHtml(String(row.period)+' '+m.name+' '+v+'%')+'"/>';
+    });
+    flush();
+  });
+  rows.forEach((row,i)=>{
+    if(i!==0 && i!==rows.length-1 && i%2===1) return;
+    svg+='<text x="'+x(i).toFixed(1)+'" y="'+(H-23)+'" text-anchor="middle" font-size="10" fill="#6c7c97">'+
+      escapeHtml(String(row.period).slice(2,7))+'</text>';
+  });
+  svg+='</svg>';
+  return svg;
+}
+function renderSentimentMixChart(sentiment) {
+  if(!sentiment) return '';
+  const values=[
+    ['看多',numericOrNull(sentiment.bullish),'#cc5364'],
+    ['看空',numericOrNull(sentiment.bearish),'#18977b'],
+    ['中性',numericOrNull(sentiment.neutral),'#9ba8bd']
+  ];
+  if(values.some(x=>x[1]===null)||values.reduce((a,x)=>a+x[1],0)<=0) return '';
+  const total=values.reduce((a,x)=>a+x[1],0);
+  let pos=0, svg='<svg viewBox="0 0 590 108" width="100%" role="img" aria-label="雪球观点方向比例">';
+  values.forEach((item,i)=>{
+    const width=item[1]/total*550;
+    svg+='<rect x="'+(20+pos).toFixed(1)+'" y="17" width="'+width.toFixed(1)+'" height="32" fill="'+item[2]+'"><title>'+
+      escapeHtml(item[0]+': '+item[1])+'</title></rect>';
+    svg+='<circle cx="'+(25+i*184)+'" cy="79" r="5" fill="'+item[2]+'"/>';
+    svg+='<text x="'+(36+i*184)+'" y="83" font-size="12" fill="#40516e">'+item[0]+' '+(item[1]/total*100).toFixed(1)+'%</text>';
+    pos+=width;
+  });
+  return svg+'</svg>';
+}
+function renderDashboardCharts(report) {
+  const quote=report.realtime_quote || {};
+  const val=report.valuation || {};
+  const facts=(report.fundamentals || {}).facts || {};
+  const scores=(report.summary || {}).dimension_scores || [];
+  const price=numericOrNull(quote.latest_price);
+  const pb=numericOrNull(val.pb);
+  const roe=numericOrNull(val.roe_pct);
+  const cashRatio=numericOrNull(facts.cash_to_profit_ratio);
+  let html='<section class="dashboard-charts"><h3>数据概览与维度图谱</h3>'+
+    '<p class="section-caption">图表仅展示当前报告真实返回的数据，不对缺失年份插值，也不自动将半年ROE年化。</p>';
+  html+='<div class="metric-strip">'+
+    metricCard('参考股价',price===null?'暂缺':price.toFixed(2)+' 元',quote.quote_time || report.as_of || '报价时点未知')+
+    metricCard('市净率 PB',pb===null?'暂缺':pb.toFixed(2)+' 倍',val.valuation_as_of || 'F10时点未知')+
+    metricCard('F10 披露ROE',roe===null?'暂缺':roe.toFixed(2)+'%',val.valuation_as_of || '需注意报告期间')+
+    metricCard('现金流/利润',cashRatio===null?'暂缺':cashRatio.toFixed(2)+' 倍',facts.finance_period || '报告期未知')+
+    '</div>';
+  html+='<div class="chart-grid" style="margin-top:16px;">';
+  html+=chartTile('盈利质量的变化','ROE、毛利率与净利率；季报ROE为报告期间累计数，不跨期年化',
+    renderProfitabilityTrendChart(report.profitability_trend));
+  html+=chartTile('十二维度的多空力度','模型评分 -10 至 +10；依据仍以证据账本为准',
+    scores.length>=6?renderDimensionBars(scores):'');
+  html+=chartTile('历年分红与回购','金额和回购分开理解，原图含历史金额及备注',
+    (report.dividend_chart || []).length?renderDividendChart(report.dividend_chart):'');
+  html+=chartTile('市场讨论结构','雪球言论只能作为情绪信号，不能替代财务事实',
+    renderSentimentMixChart(report.sentiment));
+  html+='</div></section>';
+  return html;
+}
+
 function renderResult(report) {
   const el = document.getElementById('result');
   let html = '<h2>' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
