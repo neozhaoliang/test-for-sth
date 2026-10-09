@@ -75,7 +75,7 @@ class StructuredSummary(BaseModel):
     )
     dimension_analyses: Optional[Dict[str, str]] = Field(
         default=None,
-        description="十二维度详细分析原文 (工具名 -> 该维度完整分析, 供 UI 展开查看)",
+        description="十二维度完整分析原文 (工具名 -> 该维度完整分析，UI 直接展示且不重复概述)",
     )
 
 
