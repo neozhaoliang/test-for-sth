@@ -50,7 +50,9 @@ assert.equal(defaults.roe.value,18.88);
 assert.equal(defaults.payout.value,51.98);
 assert.equal(defaults.discount.value,11);
 const panel=context.renderValuationLab(report);
-assert.equal((panel.match(/type="range"/g)||[]).length,5);
+assert.equal((panel.match(/type="range"/g)||[]).length,7);
+assert.equal(defaults.normalized.value,12);
+assert.equal(defaults.terminalGrowth.value,2);
 assert.ok(panel.includes('恢复初始参数'));
 assert.ok(context.renderProfitabilityTrendChart(report.profitability_trend).includes('<svg'));
 assert.ok(context.renderDashboardCharts(report).includes('数据概览与维度图谱'));
@@ -71,7 +73,7 @@ const capitalChart=context.renderDividendChart([{
 }]);
 assert.ok(capitalChart.includes('回购不是现金分红'));
 assert.ok(capitalChart.includes('非股息率'));
-['roe','payout','efficiency','discount','safety'].forEach(key => {
+['roe','normalized','payout','efficiency','discount','terminalGrowth','safety'].forEach(key => {
   nodes['lab-'+key] = {
     value:defaults[key].value,listeners:{},
     addEventListener(type,callback){this.listeners[type]=callback;},
@@ -87,7 +89,7 @@ assert.ok(cheaper<first, 'Higher hurdle should reduce valuation');
 nodes['lab-payout'].value=0;
 nodes['lab-payout'].listeners.input();
 assert.equal(nodes['lab-fair-price'].textContent,'暂无法定价');
-assert.ok(nodes['lab-note'].textContent.includes('不适用'));
+assert.ok(nodes['lab-note'].textContent.includes('不能自动假设终值分红'));
 const missing={...report,valuation:{},valuation_model:null,profitability_trend:null};
 const fallback=context.pickValuationDefaults(missing);
 assert.equal(fallback.nav,null);
@@ -98,6 +100,15 @@ assert.ok(fallback.roe.source.includes('模型假设'));
 nodes['lab-reset'].listeners.click();
 assert.equal(Number(nodes['lab-discount'].value),11);
 assert.equal(Number(nodes['lab-payout'].value),51.98);
+// Regression: old perpetuity model showed 1366 yuan and 179x PB.
+const pathology=context.calculateTwoStageValuation(27.9,28.7,50,10,12,2,7.60);
+assert.ok(pathology,'Two-stage model should have a defined finite scenario result');
+assert.ok(Math.abs(pathology.price - 8.5888428)<.001);
+assert.ok(Math.abs(pathology.pb - 1.13011)<.0001);
+const lessPayout=context.calculateTwoStageValuation(27.9,20,50,10,12,2,7.60);
+assert.ok(lessPayout.price<pathology.price, 'Reducing payout should not cause absurd value blowup');
+assert.ok(pathology.terminalShare>70, 'High terminal exposure should be surfaced');
+assert.equal(context.calculateTwoStageValuation(27.9,0,50,10,12,2,7.6),null);
 // One detailed twelve-dimension report. Summary thesis must not repeat it.
 const keys=['management','fundamentals','rd','chip_flow','price_position',
   'cycle_position','policy_geopolitics','retail_sentiment','shareholder_returns',
@@ -122,4 +133,4 @@ assert.equal(rendered.split('十二维度详细分析').length-1,1);
 assert.ok(!rendered.includes('DUPLICATE_OVERVIEW_TOKEN'));
 assert.ok(!rendered.includes('逐项阅读十二维度详细分析'));
 keys.forEach(key=>assert.equal(rendered.split('UNIQUE_DETAIL_'+key.toUpperCase()+'_END').length-1,1));
-console.log('Dashboard UI checks passed: valuation, charts and single directly-visible detailed twelve-dimension report.');
+console.log('Dashboard UI checks passed: finite-stage DDM regression, 7 sliders, charts and single detailed analysis.');
