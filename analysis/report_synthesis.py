@@ -198,6 +198,20 @@ async def _generate_summary(
             result = calculate_scenarios([])
     else:
         result = calculate_scenarios([])
+    inputs.valuation_model_result = {
+        "status": result.get("status"),
+        "estimate": estimate,
+        "calculation": result,
+        "assumptions": {
+            "required_return_pct": assumption_context.get("required_return_pct"),
+            "payout_pct": (assumption_context.get("payout_pct")
+                           if assumption_context.get("payout_source") else None),
+        },
+        "sources": {
+            "required_return_basis": assumption_context.get("required_return_basis"),
+            "payout_source": assumption_context.get("payout_source"),
+        },
+    }
     prompt += ("\n\n## 情景推导来源\n" + json.dumps(estimate, ensure_ascii=False)
                + "\n\n## 确定性估值计算\n" + render_valuation_block(result)
                + "\n估值结论必须服从以上计算状态；未计算时不得编造目标价格。")
