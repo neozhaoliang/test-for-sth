@@ -98,7 +98,7 @@ def _evidence_status(inputs: Mapping[str, Any], provenance: Mapping[str, Any],
         if key.endswith("_per_share") or key == "opening_book_per_share":
             if meta.get("unit") != "CNY/share":
                 invalid.append(f"{key}: required CNY/share unit (convert first)")
-    return {"status": "verified_input_manifest" if not (missing or invalid) else "incomplete",
+    return {"status": "documented_input_manifest" if not (missing or invalid) else "incomplete",
             "missing": missing, "invalid": invalid}
 
 
@@ -154,8 +154,8 @@ def build_industry_valuation_report(inputs: Any) -> dict:
     reasons = []
     if route["primary"] == "insurance_embedded_value":
         reasons.append("保险内含价值估值暂不自动执行：需要精算与偿付能力审计")
-    if checked["status"] != "verified_input_manifest":
-        reasons.append("缺少已核验的行业模型输入与来源，不采用任意ROE/payout默认值生成目标价")
+    if checked["status"] != "documented_input_manifest":
+        reasons.append("缺少标记来源及假设依据的行业模型输入，不采用任意ROE/payout默认值生成目标价")
     policy = _extra_guards(route["primary"], payload)
     if policy:
         reasons.append(policy)
@@ -164,7 +164,7 @@ def build_industry_valuation_report(inputs: Any) -> dict:
         "required": list(required), "missing": checked["missing"],
         "reason": "；".join(reasons) if reasons else "尚未满足模型适用性",
     }
-    if checked["status"] == "verified_input_manifest" and not reasons:
+    if checked["status"] == "documented_input_manifest" and not reasons:
         val = calculate_industry_valuation(
             archetype=archetype, industry=industry, inputs=payload, market_price=price)
     cross_checks = []
@@ -174,7 +174,7 @@ def build_industry_valuation_report(inputs: Any) -> dict:
         item = independent_inputs.get(secondary) or {}
         prov = independent_sources.get(secondary) or {}
         check = _evidence_status(item, prov, _EVIDENCE_RULES[secondary], as_of)
-        if check["status"] != "verified_input_manifest":
+        if check["status"] != "documented_input_manifest":
             cross_checks.append({
                 "model": secondary, "status": "not_run",
                 "reason": "缺少独立输入来源，不能伪造第二种模型的验证结果",
@@ -236,6 +236,7 @@ def build_industry_valuation_report(inputs: Any) -> dict:
         macro["macro_shocks_applied"] = any(x.get("status") == "calculated" for x in macro_stress)
     return {
         "framework_version": "industry-multimodel-2026-10-09-v1",
+        "assumption_status": "user_documented_not_independently_audited",
         "status": val["status"], "route": route,
         "valuation": val, "cross_checks": cross_checks,
         "evidence_gate": checked, "macro_context": macro,
@@ -246,6 +247,7 @@ def build_industry_valuation_report(inputs: Any) -> dict:
         "interactive_inputs": payload if val.get("status") == "calculated" else None,
         "provenance": source_manifest if val.get("status") == "calculated" else None,
         "warnings": [
+            "输入来源清单通过格式校验不代表已核验原始年报、现金流预测可靠性或财务调整正确性",
             "市值风格变化属于市场定价条件，不得替代企业现金流、利润质量和资本结构",
             "宏观系数不经公司层面的实证校验，不直接加减估值价格",
             "不同币种、不同日期的资产和现金流不得直接拼接",
