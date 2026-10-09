@@ -2228,6 +2228,31 @@ function renderIndustryValuationLab(report) {
       '<div class="lab-foot" id="sector-note">计算中</div>'+
       '<div id="sector-sensitivity"></div></div></div>';
   }
+  const independent=model.cross_checks || [];
+  if(independent.length) {
+    html+='<div class="evidence-block" style="margin-top:16px;"><b>独立模型交叉检验</b><ul>'+
+      independent.map(x=>'<li>'+escapeHtml(industryModelName(x.model))+'：'+
+        (x.status==='calculated'?
+          escapeHtml(String((x.valuation || {}).intrinsic_per_share))+'元/股（独立情景）'+
+          (x.disagreement_pct_of_primary===undefined?'':'；与主模型差'+
+            escapeHtml(String(x.disagreement_pct_of_primary))+'%'):
+          '尚无法定价（'+escapeHtml(x.reason || x.status || '数据缺失')+'）')+
+        (x.warning?'；'+escapeHtml(x.warning):'')+'</li>').join('')+
+      '</ul><p class="section-caption">不同模型结果不能机械取均值；每套模型需要各自独立的来源和适用性检验。</p></div>';
+  }
+  const stresses=model.macro_stress_scenarios || [];
+  if(stresses.length) {
+    html+='<div class="evidence-block" style="margin-top:14px;"><b>带公司敏感度来源的宏观压力测试</b><ul>'+
+      stresses.map(x=>'<li>'+(
+        x.status==='calculated'?
+          '情景股权价值 '+escapeHtml(String((x.result || {}).valuation?.intrinsic_per_share ||
+            (x.result || {}).intrinsic_per_share || '暂缺'))+'元/股'+
+          '；来源 '+escapeHtml(x.source_url || '未注明')+
+          '；系数日期 '+escapeHtml(x.source_as_of || '未知'):
+          '未能量化：'+escapeHtml(x.reason || x.status)
+      )+'</li>').join('')+
+      '</ul></div>';
+  }
   const observed=(macro.observations || []).filter(x=>x.usable && x.value!==null);
   html+='<div class="chart-grid" style="margin-top:16px;">'+
     chartTile('宏观观察值（含数据时点）','仅显示有明确日期、未过期的指标',
@@ -2240,6 +2265,18 @@ function renderIndustryValuationLab(report) {
       '；海外营收占比：'+escapeHtml(macro.overseas_revenue_pct===null||macro.overseas_revenue_pct===undefined?
         '资料不足':String(macro.overseas_revenue_pct)+'%')+
       '<p>未审计套保/美元债及汇率敏感度前，禁止给出固定估值调整。</p></div>')+'</div>';
+  const style=macro.a_share_style || {};
+  if(style.status==='observed') {
+    const styleLabel={
+      dividend_leading:'红利风格相对领先',
+      growth_leading:'科技成长相对领先',mixed:'红利与成长差距有限',
+    }[style.regime] || '风格无法确定';
+    html+='<p class="section-caption" style="margin-top:12px;">A股观察：'+
+      escapeHtml(styleLabel)+'；上证红利相对科创50/创业板指年内差'+
+      escapeHtml(String(style.dividend_minus_growth_ytd_pp))+'个百分点（'+
+      escapeHtml(style.as_of || '未知日期')+
+      '）。这是风格相对收益，不直接改变内在价值。</p>';
+  }
   const routes=(macro.transmission_paths || []);
   html+='<details class="evidence-block" style="margin-top:16px;"><summary>查阅中国政策、A股风格与外围市场风险传导依据</summary>'+
     '<ul>'+routes.map(x=>'<li><b>'+escapeHtml(x.factor)+':</b> '+
