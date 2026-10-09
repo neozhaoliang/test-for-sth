@@ -10,10 +10,17 @@ from typing import Any, Dict, Mapping, Optional
 
 from analysis.valuation_macro import (build_macro_valuation_context,
                                       stress_valuation_with_verified_exposures)
-from analysis.valuation_models import calculate_industry_valuation, select_models
+from analysis.valuation_models import (calculate_industry_valuation, select_models,
+                                       dividend_discount, adjusted_nav)
 
 
 _EVIDENCE_RULES = {
+    "dividend_discount": {
+        "annual_dividends_per_share": "forecast",
+        "terminal_dividend_per_share": "forecast",
+        "required_return_pct": "policy",
+        "terminal_growth_pct": "policy",
+    },
     "owner_fcfe": {
         "annual_cash_flow_per_share": "forecast",
         "terminal_cash_flow_per_share": "forecast",
@@ -161,11 +168,55 @@ def build_industry_valuation_report(inputs: Any) -> dict:
         val = calculate_industry_valuation(
             archetype=archetype, industry=industry, inputs=payload, market_price=price)
     cross_checks = []
-    # A cross-check is genuinely independent only with its own input+provenance,
-    # not simply by changing the discount rate in the same model.
+    independent_inputs = context.get("cross_check_inputs") or {}
+    independent_sources = context.get("cross_check_provenance") or {}
     for secondary in route["cross_checks"]:
-        cross_checks.append({"model": secondary, "status": "not_run",
-                             "reason": "未提供独立的模型现金流/资产质量数据，不伪造交叉验证"})
+        item = independent_inputs.get(secondary) or {}
+        prov = independent_sources.get(secondary) or {}
+        check = _evidence_status(item, prov, _EVIDENCE_RULES[secondary], as_of)
+        if check["status"] != "verified_input_manifest":
+            cross_checks.append({
+                "model": secondary, "status": "not_run",
+                "reason": "缺少独立输入来源，不能伪造第二种模型的验证结果",
+                "missing": check["missing"], "invalid": check["invalid"],
+            })
+            continue
+        try:
+            if secondary == "dividend_discount":
+                other = dividend_discount(
+                    annual_dividends_per_share=item["annual_dividends_per_share"],
+                    terminal_dividend_per_share=item["terminal_dividend_per_share"],
+                    required_return_pct=item["required_return_pct"],
+                    terminal_growth_pct=item["terminal_growth_pct"],
+                    market_price=price,
+                )
+            elif secondary == "adjusted_nav":
+                other = adjusted_nav(
+                    fair_assets_per_share=item["fair_assets_per_share"],
+                    total_obligations_per_share=item["total_obligations_per_share"],
+                    realization_tax_and_cost_per_share=item["realization_tax_and_cost_per_share"],
+                    market_price=price,
+                )
+            else:
+                other = calculate_industry_valuation(
+                    archetype="general", inputs=item, market_price=price,
+                )
+        except (TypeError, ValueError, OverflowError) as exc:
+            cross_checks.append({"model": secondary, "status": "invalid_inputs",
+                                 "reason": str(exc)})
+            continue
+        entry = {"model": secondary, "status": other.get("status"),
+                 "valuation": other}
+        if val.get("status") == "calculated" and other.get("status") == "calculated":
+            main_val = val["intrinsic_per_share"]
+            second_val = other["intrinsic_per_share"]
+            if main_val > 0:
+                entry["disagreement_pct_of_primary"] = round(
+                    100 * (second_val - main_val) / main_val, 2
+                )
+                if abs(entry["disagreement_pct_of_primary"]) >= 30:
+                    entry["warning"] = "模型估值相差30%以上：不能取平均，须核对资本开支、终值及资产负债口径"
+        cross_checks.append(entry)
     # Shock coefficients are company-specific calibrated observations, not
     # market-wide constants. No calibrated exposure => no numerical stress.
     scenario_context = context.get("scenario_context") or {}
@@ -230,6 +281,7 @@ def industry_model_prompt_block(model: dict) -> str:
         f"行业/市场传导路径={macro.get('transmission_paths')}",
         f"宏观证据缺口={macro.get('warnings')}",
         f"经校准的宏观压力情景={model.get('macro_stress_scenarios')}",
+        f"独立第二种模型交叉检验={model.get('cross_checks')}",
         "严禁用海外收入占比直接推美元净敞口，不得将美债利率或A股红利风格自动加成固定PE。",
         "若模型状态不为calculated，不得给出Python核验过的合理目标价；"
         "可讨论价格、历史估值分位和风险情景，但必须区分事实、假设及未知。",
