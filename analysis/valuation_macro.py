@@ -56,7 +56,47 @@ def build_macro_valuation_context(
         return {"metric": label, "value": value if safe else None,
                 "as_of": when, "source": source, "usable": bool(safe)}
 
+    indices = (market_context or {}).get("indices") or []
+    idx = {str(row.get("name") or ""): row for row in indices}
+    red = idx.get("上证红利")
+    growth = [idx.get("科创50"), idx.get("创业板指")]
+    growth = [row for row in growth if row]
+    style_context = {
+        "status": "insufficient_data",
+        "regime": "unknown",
+        "dividend_minus_growth_ytd_pp": None,
+        "policy_threshold_pp": 8.0,
+        "note": "短期风格相对收益不是企业盈利预测，不能自动加减合理价值",
+    }
+    if red and growth:
+        returns = [_valid(red.get("ytd_pct"))]+[_valid(row.get("ytd_pct")) for row in growth]
+        dates = [_date(red.get("latest_date"))]+[_date(row.get("latest_date")) for row in growth]
+        if all(v is not None for v in returns) and all(d is not None for d in dates):
+            if (max(dates)-min(dates)).days <= 7 and (
+                request_day is None or max(dates) <= request_day
+            ):
+                spread = returns[0] - sum(returns[1:]) / len(growth)
+                regime = "dividend_leading" if spread >= 8 else (
+                    "growth_leading" if spread <= -8 else "mixed"
+                )
+                style_context = {
+                    "status": "observed",
+                    "regime": regime,
+                    "dividend_minus_growth_ytd_pp": round(spread, 2),
+                    "as_of": max(dates).isoformat(),
+                    "policy_threshold_pp": 8,
+                    "note": "使用上证红利相对科创50/创业板指年内收益；8pp为情景标签阈值，非经验定价beta",
+                }
+
     observations = [
+        observation("usdcny_midpoint_cny_per_usd",
+                    _valid((rmb_signal or {}).get("usdcny_midpoint_cny_per_usd")),
+                    (rmb_signal or {}).get("as_of"),
+                    (rmb_signal or {}).get("source_name")),
+        observation("usdcny_change_30obs_pct",
+                    _valid((rmb_signal or {}).get("usdcny_change_30obs_pct")),
+                    (rmb_signal or {}).get("as_of"),
+                    (rmb_signal or {}).get("source_name")),
         observation("us_10y_yield_pct", _valid(us.get("us10y_yield_pct")),
                     us.get("us10y_as_of"),
                     (us.get("source_urls") or {}).get("us10y"),
@@ -77,7 +117,8 @@ def build_macro_valuation_context(
     fx_direction = rmb.get("rmb_trend") if rmb.get("rmb_trend") in (
         "appreciating", "depreciating", "stable") else None
     if rmb.get("as_of") is None or (
-        request_day and _date(rmb.get("as_of")) != request_day
+        request_day and (not _date(rmb.get("as_of")) or
+        not 0 <= (request_day - _date(rmb.get("as_of"))).days <= 7)
     ):
         # Direction is qualitative live context, not historical model input.
         fx_usable = False
@@ -92,7 +133,7 @@ def build_macro_valuation_context(
          "quantifiable": False},
         {"factor": "US_10Y",
          "route": "美债收益率 → 全球风险偏好/美元融资成本/行业估值；需美元债权重和历史敏感度",
-         "evidence": "新鲜美债10年期数据" if observations[0]["usable"] else "美债数据不可用/过期",
+         "evidence": "新鲜美债10年期数据" if any(x["metric"] == "us_10y_yield_pct" and x["usable"] for x in observations) else "美债数据不可用/过期",
          "quantifiable": False},
         {"factor": "China_rates",
          "route": "LPR/政策和国债利率 → 信贷成本、融资约束与人民币股权折现率",
@@ -123,12 +164,13 @@ def build_macro_valuation_context(
         warnings.append("海外收入占比并非美元净敞口，不能直接推导汇兑损益或税后利润")
     if not fx_usable:
         warnings.append("美元兑人民币仅有定性趋势或缺少完整观测日期，不进入数值估值")
-    if not observations[0]["usable"]:
+    if not any(x["metric"] == "us_10y_yield_pct" and x["usable"] for x in observations):
         warnings.append("美债收益率缺少新鲜数据，数值敏感性保持缺失")
     return {
         "status": "context_only", "industry_archetype": archetype,
         "industry": industry, "as_of": str(request_day or ""),
         "observations": observations,
+        "a_share_style": style_context,
         "rmb_direction": fx_direction,
         "rmb_is_dated": fx_usable,
         "overseas_revenue_pct": external_share,
