@@ -1359,7 +1359,7 @@ function renderEvidenceSection(report) {
 
   const dc = report.dividend_chart;
   if (dc && dc.length) {
-    html += '<div class="evidence-block"><b>分红与回购 (回购折算元/10股并入; 柱顶标注按现价股息率):</b><br>' +
+    html += '<div class="evidence-block"><b>分红与回购 (回购折算元/10股并入; 柱顶为等价返还比例，非股息率):</b><br>' +
       renderDividendChart(dc) + '</div>';
   } else {
     const div = report.dividend_history || [];
@@ -1544,7 +1544,7 @@ function renderEvidenceSection(report) {
 }
 
 // 年度分红+回购柱状图 (回购按总股本折算成 元/10股 并入分红, 同一条 y 轴)。
-// 柱顶标注按现价折算的股息率; 悬停显示数值, 图下附原始数据表。
+// 柱顶标注等价回报比例（含回购，非股息率）; 悬停显示数值, 图下附数据表。
 function renderDividendChart(data) {
   const n = data.length;
   const W = 640, H = 250, padL = 52, padR = 16, padT = 40, padB = 36;
@@ -1558,18 +1558,18 @@ function renderDividendChart(data) {
   data.forEach((d, i) => {
     const xc = padL + slot * i + slot / 2;
     const yDiv = yOf(d.dividend_per_10);
-    const yBuy = yOf(d.buyback_per_10);
+    const yTotal = yOf(d.total_per_10);
     bars += '<rect class="holder-mark" x="' + (xc - barW / 2).toFixed(1) + '" y="' + yDiv.toFixed(1) +
       '" width="' + barW.toFixed(1) + '" height="' + Math.max(0.5, padT + plotH - yDiv).toFixed(1) +
       '" fill="#1a73e8" fill-opacity="0.85" data-tip="' + escapeHtml(d.year) +
       ': 分红 ' + d.dividend_per_10 + ' 元/10股"/>';
     if (d.buyback_per_10 > 0) {
-      bars += '<rect class="holder-mark" x="' + (xc - barW / 2).toFixed(1) + '" y="' + yBuy.toFixed(1) +
-        '" width="' + barW.toFixed(1) + '" height="' + Math.max(0.5, yDiv - yBuy).toFixed(1) +
+      // Stacking must use cumulative total, not yOf(buyback) in isolation.
+      bars += '<rect class="holder-mark" x="' + (xc - barW / 2).toFixed(1) + '" y="' + yTotal.toFixed(1) +
+        '" width="' + barW.toFixed(1) + '" height="' + Math.max(0.5, yDiv - yTotal).toFixed(1) +
         '" fill="#d97706" stroke="#fff" stroke-width="2" data-tip="' + escapeHtml(d.year) +
         ': 回购折算 ' + d.buyback_per_10 + ' 元/10股"/>';
     }
-    const yTotal = yOf(d.total_per_10);
     labels += '<text x="' + xc.toFixed(1) + '" y="' + (yTotal - 7).toFixed(1) +
       '" text-anchor="middle" font-size="11" fill="#666">' +
       (d.yield_pct === null || d.yield_pct === undefined ? '--' : d.yield_pct + '%') + '</text>';
@@ -1613,14 +1613,15 @@ function renderDividendChart(data) {
     '<td style="padding:2px 6px;color:#666;">合计(元/10股)</td>' +
     data.map(d => '<td style="padding:2px 8px;border-left:1px solid #eee;text-align:center;">' +
       d.total_per_10 + '</td>').join('') + '</tr><tr>' +
-    '<td style="padding:2px 6px;color:#666;">股息率(按现价)</td>' +
+    '<td style="padding:2px 6px;color:#666;">等价回报比例(含回购，非股息率)</td>' +
     data.map(d => '<td style="padding:2px 8px;border-left:1px solid #eee;text-align:center;">' +
       (d.yield_pct === null || d.yield_pct === undefined ? '--' : d.yield_pct + '%') + '</td>').join('') +
     '</tr></table>';
 
   return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" style="max-width:100%;"' +
     ' role="img" aria-label="年度分红与回购柱状图">' +
-    grid + bars + labels + xLabels + legend + '</svg>' + table;
+    grid + bars + labels + xLabels + legend + '</svg>' +
+    '<p class="section-caption">回购不是现金分红；合计比例仅为按现价折算的资本返还指标，不等于真实现金股息率。</p>' + table;
 }
 
 // 股东户数(柱,蓝) + 同期股价(线,橙) 走势图。两条序列都以首期=100 指数化、
