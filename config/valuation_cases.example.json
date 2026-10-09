@@ -1,0 +1,35 @@
+{
+  "_note": "此文件完全是合成样例，不含任何真实公司估值。复制到 config/valuation_cases.local.json 后，必须替换来源和所有假设才可使用。",
+  "stocks": {
+    "000000": {
+      "explicit_user_approval": true,
+      "as_of": "2026-10-09",
+      "inputs": {
+        "annual_cash_flow_per_share": [1.0, 1.05, 1.1, 1.15, 1.2],
+        "terminal_cash_flow_per_share": 1.22,
+        "required_return_pct": 10.0,
+        "terminal_growth_pct": 2.0
+      },
+      "provenance": {
+        "annual_cash_flow_per_share": {
+          "available_at": "2026-10-09",
+          "assumption_basis": "合成样例。请根据逐年维持性CAPEX、营运资金、净借款、股权激励及摊薄重建FCFE，并逐年列出财报依据。",
+          "unit": "CNY/share"
+        },
+        "terminal_cash_flow_per_share": {
+          "available_at": "2026-10-09",
+          "assumption_basis": "合成样例。必须单独论证长期现金创造能力和终值投资要求。",
+          "unit": "CNY/share"
+        },
+        "required_return_pct": {
+          "available_at": "2026-10-09",
+          "assumption_basis": "合成样例。人民币股权要求收益率为投资者情景参数，并非企业WACC。"
+        },
+        "terminal_growth_pct": {
+          "available_at": "2026-10-09",
+          "assumption_basis": "合成样例。终值增长2%，与要求收益率至少差4个百分点。"
+        }
+      }
+    }
+  }
+}
