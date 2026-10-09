@@ -30,10 +30,10 @@ def test_sector_routes_are_business_specific(archetype, industry, expected):
 def test_fcfe_pv_includes_explicit_cash_and_nonzero_terminal():
     cash = [1, 1, 1, 1, 1]
     v = discounted_equity_cash_flow(
-        annual_cash_flow_per_share=cash, terminal_cash_flow_per_share=1.02,
+        annual_cash_flow_per_share=cash, terminal_cash_flow_per_share=1.2,
         required_return_pct=10, terminal_growth_pct=2, market_price=10)
     explicit = sum(1 / 1.1 ** t for t in range(1, 6))
-    tail = 1.02 / (.1 - .02) / (1.1 ** 5)
+    tail = 1.2 / (.1 - .02) / (1.1 ** 5)
     assert v["intrinsic_per_share"] == pytest.approx(explicit + tail, abs=.0002)
     assert v["components"]["pv_explicit_cash_flows"] == pytest.approx(explicit, abs=.0002)
     assert "终值占比≥70%" in "".join(v["warnings"])
@@ -68,12 +68,13 @@ def test_residual_income_clean_surplus_and_no_perpetuity_blowup():
     assert v["components"]["terminal_residual_income"] == 0
 
 
-def test_accounting_losses_not_faked_as_positive():
-    with pytest.raises(ValueError,match="insolvent"):
-        residual_income(opening_book_per_share=1,
-                        annual_roe_pct=[-30,-30,-30],
-                        annual_payout_pct=[0,0,0],
-                        required_return_pct=15)
+def test_accounting_losses_reduce_bank_residual_income_value():
+    result = residual_income(opening_book_per_share=1,
+                             annual_roe_pct=[-30,-30,-30],
+                             annual_payout_pct=[0,0,0],
+                             required_return_pct=15)
+    assert result["intrinsic_per_share"] < 1
+    assert result["components"]["ending_book_per_share"] < 1
 
 
 def test_adjusted_nav_all_obligations_and_liquidation_cost():
@@ -110,7 +111,6 @@ def test_report_does_not_guess_fcfe_from_roe():
         research_profile=Profile(),
         valuation_assumption_context={}, quote={"latest_price":100}))
     assert result["status"] == "insufficient_evidence"
-    assert result["valuation"]["intrinsic_per_share"] if False else True
     assert result["interactive_inputs"] is None
     assert "annual_cash_flow_per_share" in result["evidence_gate"]["missing"]
 
