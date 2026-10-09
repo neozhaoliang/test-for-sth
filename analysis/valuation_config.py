@@ -53,8 +53,12 @@ def load_local_valuation_case(stock_code: str, *, as_of: Optional[date] = None):
     provenance = stock.get("provenance")
     if not isinstance(payload, dict) or not isinstance(provenance, dict):
         return {"status": "invalid_config", "context": {}}
+    scenario_context = stock.get("scenario_context") or {}
+    if not isinstance(scenario_context, dict):
+        return {"status": "invalid_config", "error": "scenario_context must be an object",
+                "context": {}}
     return {"status": "configured", "context": {
         "industry_valuation_inputs": payload,
         "industry_valuation_provenance": provenance,
-        "scenario_context": stock.get("scenario_context") or {},
+        "scenario_context": scenario_context,
     }}
