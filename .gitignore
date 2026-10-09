@@ -180,3 +180,6 @@ debug_tools
 
 database/*.db
 .omx//tmp_debug/
+
+# User-audited valuation scenarios; do not publish company-specific assumptions
+config/valuation_cases.local.json
