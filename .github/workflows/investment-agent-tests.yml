@@ -138,6 +138,7 @@ jobs:
             tests/test_valuation_history_asof.py \
             tests/test_valuation_engine.py \
             tests/test_valuation_industry_models.py \
+            tests/test_valuation_config.py \
             tests/test_valuation_assumptions.py \
             tests/test_valuation_payout.py \
             tests/test_valuation_filing_join.py \
