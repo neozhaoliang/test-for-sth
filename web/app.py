@@ -489,12 +489,130 @@ _INDEX_HTML = """<!DOCTYPE html>
   .crawl-hint { color: #999; font-size: 12px; margin: 2px 0 8px; }
   .crawl-log { max-height: 160px; overflow-y: auto; font-size: 12px; }
   .crawl-status { font-size: 13px; margin: 4px 0; color: #555; }
+
+  /* Research dashboard visual system — accessible without external CSS libraries */
+  :root { color-scheme: light; --paper:#f3f6fc; --panel:#ffffff; --ink:#15243c; --muted:#66758d;
+    --brand:#4c5ce5; --brand-strong:#3443bf; --line:#e4eaf4; --rise:#d44d57; --fall:#159676;
+    --radius:18px; --shadow:0 14px 38px rgba(24,43,85,.065); }
+  *, *::before, *::after { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body { max-width:1180px; margin:0 auto; padding:26px 24px 56px; background:var(--paper); color:var(--ink);
+    font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; line-height:1.65; }
+  header { position:relative; overflow:hidden; border-radius:26px; padding:36px 40px 32px; margin:0 0 18px;
+    color:#fff; background:linear-gradient(118deg,#141e40 0%,#273d7d 54%,#6053bb 100%); }
+  header::after { content:""; position:absolute; width:420px; height:420px; right:-90px; top:-260px;
+    border:1px solid rgba(255,255,255,.19); border-radius:50%; box-shadow:0 0 0 76px rgba(255,255,255,.04),
+    0 0 0 150px rgba(255,255,255,.035); pointer-events:none; }
+  header .eyebrow { display:block; color:#a9c5ff; font-size:11px; font-weight:800; text-transform:uppercase;
+    letter-spacing:.16em; margin-bottom:8px; }
+  header h1 { font-size:clamp(28px,4vw,38px); letter-spacing:-.045em; margin:0 0 8px; font-weight:800; }
+  header p { color:#d9e2ff; font-size:14px; max-width:620px; }
+  .search-bar, .research-options, .watchlist, .crawl-section, #result > .evidence-section, #result > .research-panel,
+  #result > .result-summary, #result > .dashboard-charts, #result > .valuation-lab { background:var(--panel);
+    border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); }
+  .search-bar { padding:16px; margin:0 0 10px; gap:12px; align-items:stretch; }
+  .search-bar input { flex:1; width:auto; min-width:0; height:46px; }
+  button { background:var(--brand); border-radius:11px; font-weight:700; padding:10px 20px; transition:filter .18s,transform .18s; }
+  button:hover { background:var(--brand-strong); filter:brightness(1.05); transform:translateY(-1px); }
+  button:disabled { opacity:.55; cursor:not-allowed; transform:none; }
+  input,select { background:#fff; border:1px solid #cfd9e8; color:var(--ink); border-radius:10px; }
+  input:focus-visible,select:focus-visible,button:focus-visible,summary:focus-visible,
+  .stock-chip:focus-visible { outline:3px solid #93a7ff; outline-offset:2px; }
+  input[type="checkbox"] { width:auto; accent-color:var(--brand); }
+  input[type="range"] { width:100%; padding:0; border:none; accent-color:var(--brand); cursor:pointer; }
+  .research-options { padding:12px 16px; margin:0 0 12px; font-size:12px; }
+  .research-mode-controls select,.research-mode-controls input[type="date"] { border-radius:8px; }
+  .temporal-status { color:#53617b; background:#f1f5fb; border-color:#e7edf7; border-radius:30px; }
+  .watchlist { padding:14px 16px 8px; margin:0 0 16px; }
+  .watchlist p { font-weight:700; color:#52617b; }
+  .stock-chip { border:1px solid #dce4f5; color:#385078; background:#f8faff; margin-bottom:8px;
+    transition:background .2s,border-color .2s; }
+  .stock-chip:hover { color:var(--brand-strong); background:#ecf0ff; border-color:#8495ef; }
+  #status { padding:4px 2px; margin:9px 0; color:var(--muted); }
+  #result { display:flex; flex-direction:column; gap:16px; min-width:0; }
+  #result > h2 { margin:10px 4px 0; font-size:29px; letter-spacing:-.04em; }
+  #result > h3 { margin:8px 4px 0; font-size:21px; }
+  #result > p { margin:0 4px; }
+  #result .result-summary,#result .research-panel,#result .dashboard-charts,#result .valuation-lab { padding:24px; }
+  #result .evidence-section { padding:22px 24px; margin:0; }
+  #result .evidence-section > h3 { margin-top:0; font-size:20px; }
+  #result .evidence-block { background:#f8faff; border:1px solid #e9eef7; border-left:3px solid #c9d5f3;
+    border-radius:12px; padding:14px 17px; margin:12px 0; overflow-x:auto; }
+  #result details.evidence-block { cursor:default; }
+  #result details summary { cursor:pointer; }
+  #result .candidate { border:1px solid var(--line); background:#fff; border-radius:14px; box-shadow:var(--shadow); padding:18px; margin:0; }
+  .thesis-block,.counter-evidence-block,.risk-block,.invalidation-block { padding:14px 17px; border-radius:12px; margin:12px 0; }
+  .thesis-block { background:#f1f5ff; border-left:3px solid #5266cf; }
+  .counter-evidence-block { background:#fff3f2; border-left:3px solid #d76363; }
+  .invalidation-block { background:#f0f8fe; border-left:3px solid #3b92c0; }
+  .risk-block { background:#fff8ec; border-left:3px solid #e1ad52; }
+  .stance-badge { font-weight:750; padding:5px 12px; }
+  .stance-bullish { background:var(--rise); }.stance-bearish { background:var(--fall); }
+  .live-banner,.historical-banner { margin:0; border-radius:10px; }
+  .quote { display:inline-flex; gap:12px; align-items:center; }
+  .result-summary h3 { margin:0 0 10px; font-size:20px; }
+  .dashboard-charts h3, .valuation-lab h3 { margin:0 0 5px; font-size:21px; }
+  .section-caption { font-size:12px; color:var(--muted); margin:0 0 16px; }
+  .metric-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:0; }
+  .metric { padding:15px; border:1px solid var(--line); border-radius:13px; background:#f8faff; min-width:0; }
+  .metric label { font-size:11px; color:var(--muted); display:block; }
+  .metric strong { display:block; margin-top:5px; font-size:23px; font-weight:800; letter-spacing:-.04em; font-variant-numeric:tabular-nums; }
+  .metric small { font-size:11px; color:var(--muted); overflow-wrap:anywhere; }
+  .chart-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+  .chart-tile { min-width:0; padding:18px; border:1px solid var(--line); border-radius:14px; background:#fcfdff; }
+  .chart-tile h4 { font-size:14px; margin:0 0 5px; }
+  .chart-tile .section-caption { margin-bottom:10px; }
+  .chart-tile svg { display:block; max-width:100%; height:auto; }
+  .chart-empty { padding:32px 10px; text-align:center; background:#f7f9ff; border:1px dashed #d6e1f1;
+    border-radius:10px; font-size:12px; color:var(--muted); }
+  .valuation-lab { border-color:#cbd5ff !important; }
+  .valuation-lab .model-tag { display:inline-block; padding:3px 9px; font-size:11px; font-weight:700;
+    color:#475ad1; border:1px solid #d8deff; background:#eef1ff; border-radius:30px; }
+  .lab-layout { display:grid; grid-template-columns:1.15fr 1fr; gap:20px; align-items:start; }
+  .slider-row { padding:11px 0; border-bottom:1px solid var(--line); }
+  .slider-row:last-child { border-bottom:0; }
+  .slider-top { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+  .slider-top label { color:#3b4e6c; font-weight:700; font-size:13px; }
+  .slider-top output { color:var(--brand-strong); font-weight:800; font-variant-numeric:tabular-nums; }
+  .slider-source { margin:4px 0 6px; font-size:11px; color:var(--muted); }
+  .lab-result { border-radius:16px; background:linear-gradient(145deg,#172344,#303d80); padding:22px;
+    color:#fff; position:sticky; top:16px; }
+  .lab-result h4 { color:#cfdbff; margin:0 0 4px; font-size:12px; }
+  .lab-price { font-size:clamp(27px,3vw,40px); line-height:1.2; font-weight:850; letter-spacing:-.04em;
+    font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+  .lab-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:15px 0; }
+  .lab-stat-grid div { padding:10px; border:1px solid rgba(255,255,255,.2); border-radius:10px; }
+  .lab-stat-grid span { display:block; color:#d6def8; font-size:11px; }
+  .lab-stat-grid b { display:block; font-size:18px; font-variant-numeric:tabular-nums; }
+  .lab-foot { font-size:11px; color:#d5defb; line-height:1.65; }
+  .lab-actions { display:flex; align-items:center; gap:10px; margin-top:14px; flex-wrap:wrap; }
+  .lab-actions button { background:#edf0ff; color:#3443ad; }
+  .lab-scenario-chart { margin-top:16px; }
+  .crawl-section { margin:22px 0; padding:20px 24px; }
+  .crawl-hint,.credibility-note,.prompt-version { color:var(--muted); }
+  .crawl-log,pre { background:#f4f7fe; color:#30405b; }
+  .disclaimer { color:var(--muted); border-color:var(--line); }
+  @media(max-width:800px) {
+    body { padding:12px; } header { border-radius:18px; padding:26px 24px; }
+    .metric-strip,.chart-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .lab-layout { grid-template-columns:1fr; }.lab-result { position:static; }
+    #result .result-summary,#result .research-panel,#result .dashboard-charts,#result .valuation-lab,
+    #result .evidence-section { padding:16px; }
+  }
+  @media(max-width:500px) {
+    .search-bar { flex-wrap:wrap; }.search-bar button { width:100%; }
+    .metric-strip,.chart-grid { grid-template-columns:1fr; }
+    .research-options { align-items:stretch; }
+    .metric strong { font-size:21px; }
+  }
+  @media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto !important; transition:none !important; } }
 </style>
 </head>
 <body>
 <header>
-  <h1>股票投资助手</h1>
-  <p>输入股票代码，查看历史高可信度用户的观点与最新发言综合分析。</p>
+  <span class="eyebrow">EVIDENCE-FIRST · INVESTMENT RESEARCH</span>
+  <h1>股票投资助手 <span style="font-weight:400;color:#c2d1ff;">/ Research Desk</span></h1>
+  <p>用长期经营数据与可追溯证据研究公司价值。行业、筹码、现金流、估值和反方论据，尽量交给图表与计算来说话。</p>
 </header>
 <div class="search-bar">
   <input id="stockCode" placeholder="股票代码或名称，如 SH603408 / 洛阳钼业" />
