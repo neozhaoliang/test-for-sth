@@ -8,7 +8,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Dict, Mapping, Optional
 
-from analysis.valuation_macro import build_macro_valuation_context
+from analysis.valuation_macro import (build_macro_valuation_context,
+                                      stress_valuation_with_verified_exposures)
 from analysis.valuation_models import calculate_industry_valuation, select_models
 
 
@@ -165,6 +166,23 @@ def build_industry_valuation_report(inputs: Any) -> dict:
     for secondary in route["cross_checks"]:
         cross_checks.append({"model": secondary, "status": "not_run",
                              "reason": "未提供独立的模型现金流/资产质量数据，不伪造交叉验证"})
+    # Shock coefficients are company-specific calibrated observations, not
+    # market-wide constants. No calibrated exposure => no numerical stress.
+    scenario_context = context.get("scenario_context") or {}
+    calibrated = scenario_context.get("macro_sensitivities") or {}
+    user_shocks = scenario_context.get("macro_shocks") or []
+    macro_stress = []
+    if val.get("status") == "calculated":
+        for scenario_shock in user_shocks[:8]:
+            if not isinstance(scenario_shock, dict):
+                continue
+            macro_stress.append(stress_valuation_with_verified_exposures(
+                archetype=archetype, industry=industry,
+                model_inputs=payload, shock=scenario_shock, exposures=calibrated,
+                market_price=price, as_of=as_of,
+            ))
+    if macro_stress:
+        macro["macro_shocks_applied"] = any(x.get("status") == "calculated" for x in macro_stress)
     return {
         "framework_version": "industry-multimodel-2026-10-09-v1",
         "status": val["status"], "route": route,
@@ -211,6 +229,7 @@ def industry_model_prompt_block(model: dict) -> str:
         f"外围收入占比={macro.get('overseas_revenue_pct')}%；"
         f"行业/市场传导路径={macro.get('transmission_paths')}",
         f"宏观证据缺口={macro.get('warnings')}",
+        f"经校准的宏观压力情景={model.get('macro_stress_scenarios')}",
         "严禁用海外收入占比直接推美元净敞口，不得将美债利率或A股红利风格自动加成固定PE。",
         "若模型状态不为calculated，不得给出Python核验过的合理目标价；"
         "可讨论价格、历史估值分位和风险情景，但必须区分事实、假设及未知。",
