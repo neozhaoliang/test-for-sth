@@ -19,9 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from analysis.evidence import EvidenceItem
-from analysis.valuation_assumptions import estimate_valuation_scenarios
-from analysis.valuation_payout import annual_payout_from_cash_totals
-from analysis.valuation_engine import (ValuationScenario, calculate_scenarios, render_valuation_block)
+from analysis.valuation_orchestrator import build_industry_valuation_report, industry_model_prompt_block
 from analysis.report_blocks import _build_prompt
 from analysis.report_contract import (
     _ANALYSIS_TOOL_NAMES,
@@ -153,68 +151,14 @@ async def _generate_summary(
     elif not method_file.is_file():
         utils.logger.warning("[analysis.report] 估值方法知识库文件缺失，无法注入长期收益率模型")
 
-    # Pure-Python numeric authority: LLM must not invent or alter these calculations.
-    # Missing source-backed scenarios intentionally produce no target price.
-    scenario_specs = getattr(inputs, "valuation_scenarios", None) or []
-    assumption_context = getattr(inputs, "valuation_assumption_context", None) or {}
-    estimate = {"status": "manual", "scenarios": scenario_specs}
-    if not scenario_specs and (not as_of or as_of >= "2026-10-08"):
-        # Strict matching; never infer profit fiscal-year from dividend implementation date.
-        if (assumption_context.get("annual_profits") and assumption_context.get("dividend_totals")
-                and not assumption_context.get("payout_source")):
-            payout_evidence = annual_payout_from_cash_totals(
-                annual_profits=assumption_context["annual_profits"],
-                dividend_totals=assumption_context["dividend_totals"],
-                as_of=as_of or "2026-10-08",
-            )
-            assumption_context = dict(assumption_context)
-            if payout_evidence["status"] == "verified":
-                assumption_context["payout_pct"] = payout_evidence["payout_pct"]
-                assumption_context["payout_source"] = payout_evidence
-        # Require provenance for payout and required-return settings.
-        if assumption_context.get("payout_source") and assumption_context.get("required_return_basis"):
-            estimate = estimate_valuation_scenarios(
-                profitability_trend=getattr(inputs, "profitability_trend", None),
-                as_of=as_of or None,
-                payout_pct=assumption_context.get("payout_pct"),
-                required_return_pct=assumption_context.get("required_return_pct"),
-            )
-            scenario_specs = estimate.get("scenarios", [])
-        else:
-            estimate = {"status": "missing_source_basis", "scenarios": [],
-                        "reasons": ["缺少有来源的派息率或要求收益率参数"]}
-    if scenario_specs and (not as_of or as_of >= "2026-10-08"):
-        try:
-            scenarios = [ValuationScenario(**s) for s in scenario_specs]
-            valuation = getattr(inputs, "valuation", None) or {}
-            quote = getattr(inputs, "quote", None) or {}
-            result = calculate_scenarios(
-                scenarios,
-                book_value_per_share=valuation.get("book_value_per_share") or valuation.get("nav_per_share"),
-                market_price=quote.get("latest_price"),
-            )
-        except (TypeError, ValueError, KeyError) as exc:
-            utils.logger.warning(f"[analysis.report] 估值假设无效: {exc}")
-            result = calculate_scenarios([])
-    else:
-        result = calculate_scenarios([])
-    inputs.valuation_model_result = {
-        "status": result.get("status"),
-        "estimate": estimate,
-        "calculation": result,
-        "assumptions": {
-            "required_return_pct": assumption_context.get("required_return_pct"),
-            "payout_pct": (assumption_context.get("payout_pct")
-                           if assumption_context.get("payout_source") else None),
-        },
-        "sources": {
-            "required_return_basis": assumption_context.get("required_return_basis"),
-            "payout_source": assumption_context.get("payout_source"),
-        },
-    }
-    prompt += ("\n\n## 情景推导来源\n" + json.dumps(estimate, ensure_ascii=False)
-               + "\n\n## 确定性估值计算\n" + render_valuation_block(result)
-               + "\n估值结论必须服从以上计算状态；未计算时不得编造目标价格。")
+    # Model family is selected by operating economics (industry classification),
+    # NOT by whichever formula generates a flattering target price.
+    # No explicit per-share forecast + dated provenance => no numeric target.
+    inputs.valuation_model_result = build_industry_valuation_report(inputs)
+    prompt += (
+        "\\n\\n## 行业专用估值与A股宏观传导（不可虚构价值）\\n"
+        + industry_model_prompt_block(inputs.valuation_model_result)
+    )
 
     # 工具调用路径: 强制十二维度逐一分析后提交
     analyses, submit_input, tool_reason = await call_analysis_with_tools(
