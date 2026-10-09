@@ -54,6 +54,11 @@ assert.equal((panel.match(/type="range"/g)||[]).length,5);
 assert.ok(panel.includes('恢复初始参数'));
 assert.ok(context.renderProfitabilityTrendChart(report.profitability_trend).includes('<svg'));
 assert.ok(context.renderDashboardCharts(report).includes('数据概览与维度图谱'));
+const capitalChart=context.renderDividendChart([{
+  year:'2025',dividend_per_10:4,buyback_per_10:1,total_per_10:5,yield_pct:4,
+}]);
+assert.ok(capitalChart.includes('回购不是现金分红'));
+assert.ok(capitalChart.includes('非股息率'));
 ['roe','payout','efficiency','discount','safety'].forEach(key => {
   nodes['lab-'+key] = {
     value:defaults[key].value,listeners:{},
