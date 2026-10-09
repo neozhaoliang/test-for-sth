@@ -38,6 +38,7 @@ class AnalysisInputs:
     valuation_history: Optional[Dict] = None
     valuation_scenarios: List[Dict] = field(default_factory=list)  # auditable assumptions, optional
     valuation_assumption_context: Dict = field(default_factory=dict)  # payout and hurdle provenance
+    valuation_model_result: Optional[Dict] = None  # structured, checked scenario outputs
     rd_team: Optional[Dict] = None
     major_events: List[Dict] = field(default_factory=list)
     refinancing_history: List[Dict] = field(default_factory=list)
