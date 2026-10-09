@@ -436,6 +436,7 @@ async def generate_report(
         policy_events=policy_events,
         fundamentals=inputs.fundamentals,
         valuation=inputs.valuation,
+        valuation_model=inputs.valuation_model_result,
         valuation_history=valuation_history,
         rd_team=rd_team,
         major_events=major_events,
