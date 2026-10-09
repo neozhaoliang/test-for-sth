@@ -1182,10 +1182,22 @@ function renderEvidenceSection(report) {
 
   const st = report.shareholder_trend;
   if (st) {
-    html += '<div class="evidence-block"><b>股东户数 (散户情绪代理):</b> 最新 ' + st.latest_count + ' 户 (截止 ' +
-      escapeHtml(st.as_of) + ')，环比变化 ' + st.change_pct + '%，筹码趋于' + (st.trend === 'increasing' ? '分散' : '集中') + '</div>';
+    const movement = st.trend === 'increasing' ? '户数增加' : st.trend === 'decreasing' ? '户数减少' : '户数变化不明确';
+    html += '<div class="evidence-block"><b>股东户数（须结合股价位置）:</b> ' +
+      escapeHtml(String(st.latest_count ?? '暂缺')) + ' 户 (截止 ' +
+      escapeHtml(st.as_of || '未知') + ')，环比变化 ' +
+      escapeHtml(String(st.change_pct ?? '暂缺')) + '%，'+movement+
+      '。股东户数多本身不是利空。</div>';
   } else {
     html += '<div class="evidence-block missing"><b>股东户数:</b> 暂缺</div>';
+  }
+  const chip=report.chip_price_context || {};
+  if(chip.assessment) {
+    html += '<div class="evidence-block"><b>股价与筹码联合判断:</b> '+
+      escapeHtml(chip.assessment) +
+      (chip.position_52w_pct === null || chip.position_52w_pct === undefined?'':'；52周位置 '+Number(chip.position_52w_pct).toFixed(1)+'%')+
+      '；股东户数报告期 '+escapeHtml(chip.holder_period || '未知')+
+      '，股价时点 '+escapeHtml(chip.price_date || '未知')+'</div>';
   }
 
   const mg = report.margin_signal;
@@ -1980,6 +1992,29 @@ function renderIndustryBreadthChart(industry) {
     '</svg>';
 }
 
+function renderChipPositionChart(context) {
+  if(!context || numericOrNull(context.position_52w_pct)===null) return '';
+  const p=Math.max(0,Math.min(100,Number(context.position_52w_pct)));
+  const change=numericOrNull(context.holder_change_pct);
+  const status=context.status === 'contextualized';
+  const desc=status ? (change>0?'增加 '+change+'%':change<0?'减少 '+Math.abs(change)+'%':'基本持平') : '数据缺失或过期';
+  const risk=context.holder_context === 'high_price_more_holders_watch';
+  const label=risk?'高位分散：待核验':context.holder_context==='low_price_more_holders_neutral'?'低位增户：不自动扣分':'暂无明确筹码方向';
+  let svg='<svg viewBox="0 0 590 132" width="100%" role="img" aria-label="52周价格位置及股东户数变化">';
+  svg+='<defs><linearGradient id="chip-location-gradient"><stop offset="0" stop-color="#18a086"/>'+
+    '<stop offset=".5" stop-color="#c6d1e4"/><stop offset="1" stop-color="#dd7776"/></linearGradient></defs>';
+  svg+='<rect x="24" y="30" width="540" height="18" rx="9" fill="url(#chip-location-gradient)"/>';
+  const px=24+540*p/100;
+  svg+='<path d="M'+px.toFixed(1)+' 25 l-7 -10 h14 Z" fill="#223354"/>';
+  svg+='<text x="24" y="67" font-size="11" fill="#60728c">52周低位</text>'+
+    '<text x="564" y="67" text-anchor="end" font-size="11" fill="#60728c">52周高位</text>';
+  svg+='<text x="24" y="92" font-size="15" font-weight="bold" fill="'+(risk?'#bd5264':'#365078')+'">'+
+    escapeHtml('位置 '+p.toFixed(1)+'% · '+label)+'</text>';
+  svg+='<text x="24" y="115" font-size="12" fill="#60728c">'+
+    escapeHtml('股东户数 '+desc+'；报告期 '+(context.holder_period || '未知'))+'</text></svg>';
+  return svg;
+}
+
 function renderDashboardCharts(report) {
   const quote=report.realtime_quote || {};
   const val=report.valuation || {};
@@ -2008,6 +2043,8 @@ function renderDashboardCharts(report) {
     renderSentimentMixChart(report.sentiment));
   html+=chartTile('行业上涨与下跌家数','同一交易时点的行业广度，不能独立当作投资结论',
     renderIndustryBreadthChart(report.industry_comparison));
+  html+=chartTile('股价位置 × 筹码分散','先看52周位置，再看股东户数增减；低位散户多不单独扣分',
+    renderChipPositionChart(report.chip_price_context));
   html+=chartTile('历史估值区间','PE(TTM)历史序列，失真区间将按原图分位裁剪',
     renderValuationHistoryChart((report.valuation_history || {}).history_monthly || []));
   html+='</div></section>';
