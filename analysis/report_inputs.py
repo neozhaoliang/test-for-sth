@@ -26,6 +26,7 @@ class AnalysisInputs:
     knowledge_excerpts: List[KnowledgeExcerpt] = field(default_factory=list)
     industry_comparison: Optional[Dict] = None
     shareholder_trend: Optional[Dict] = None
+    chip_price_context: Optional[Dict] = None  # joint price-position/holder-count context
     dividend_history: List[Dict] = field(default_factory=list)
     buyback_history: List[Dict] = field(default_factory=list)
     profitability_trend: Optional[Dict] = None
