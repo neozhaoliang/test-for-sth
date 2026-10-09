@@ -63,9 +63,19 @@ def estimate_valuation_scenarios(*, profitability_trend=None, fundamentals=None,
         ("中性", central, payout, 50, hurdle),
         ("乐观", min(35, max(observed) * 1.05), min(100, payout + 5), 65, max(6, hurdle - 1)),
     )
+    # Historical ROE median is a normalization anchor, not a perpetual forecast.
+    # This is deliberately independent of the exceptionally high latest ROE.
+    normalized = median(observed)
+    normalized_by_scenario = {
+        "悲观": max(1, normalized * 0.85),
+        "中性": normalized,
+        "乐观": min(35, normalized * 1.05),
+    }
     scenarios = [{
         "name": name,
         "sustainable_roe_pct": round(roe, 3),
+        "normalized_roe_pct": round(normalized_by_scenario[name], 3),
+        "terminal_growth_cap_pct": 2.0,  # documented default modelling cap
         "payout_pct": round(pay, 3),
         "retention_conversion_pct": efficiency,
         "required_return_pct": round(k, 3),
@@ -74,5 +84,6 @@ def estimate_valuation_scenarios(*, profitability_trend=None, fundamentals=None,
             "observation_years": years, "historical_roe_pct": observed,
             "policy": "bear=min_roe*0.85; base=median_roe; bull=max_roe*1.05; retention_conversion=25/50/65",
             "warnings": ["情景参数是规则化假设而非事实预测",
-                         "未核验再投资效率，估值必须做敏感性分析",
+                         "采用五年ROE回归与2%长期增长上限，非永续高ROE",
+                         "未核验再投资效率、未来终值派息率，估值必须做敏感性分析",
                          "周期股/银行/研发驱动企业仍须行业专用估值交叉核验"]}
