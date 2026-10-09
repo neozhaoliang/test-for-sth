@@ -122,3 +122,49 @@ def collect_declared_fiscal_payout_inputs(*, profitability_trend, dividend_histo
         matched.append({**dividend,"fiscal_year":yr,"source_url":url})
     return {"annual_eps":annual_eps,"fiscal_dividends":matched,
             "note":"EPS数值来自第三方历史指标，仅用年报披露日标记可用时间；尚未逐项与原始PDF核对，不应用于严格历史回测"}
+
+def annual_payout_from_cash_totals(*, annual_profits, dividend_totals, as_of):
+    """Preferred payout basis: actual implemented cash / attributable profit.
+
+    Both must explicitly name the same fiscal year and carry dated source links.
+    Includes all installments of the same fiscal year, but excludes proposed-only
+    amounts, buybacks, and dividend cash attributable to a different year.
+    """
+    cutoff=date.fromisoformat(str(as_of)[:10])
+    profits={}
+    for row in annual_profits or []:
+        yr=row.get("fiscal_year")
+        value=number(row.get("attributable_net_profit_yuan"))
+        published=str(row.get("published_at") or "")[:10]
+        if not isinstance(yr,int) or value is None or value<=0 or not row.get("source_url") or not published or published>cutoff.isoformat():
+            continue
+        if yr in profits and profits[yr]["profit"]!=value:
+            return {"status":"conflicting_profit","payout_pct":None,"observations":[]}
+        profits[yr]={"profit":value,"source_url":row["source_url"]}
+    dividends={}
+    for row in dividend_totals or []:
+        yr=row.get("fiscal_year")
+        cash=number(row.get("cash_dividend_yuan"))
+        published=str(row.get("implemented_at") or "")[:10]
+        progress=str(row.get("progress") or "").lower()
+        if not isinstance(yr,int) or cash is None or cash<=0 or not published or published>cutoff.isoformat() or not row.get("source_url"):
+            continue
+        if not any(term in progress for term in ("实施","completed","implemented","paid")):
+            continue
+        if any(term in progress for term in ("未实施","预案","待实施","not implemented","unpaid")):
+            continue
+        dividends.setdefault(yr,[]).append((cash,row["source_url"]))
+    observations=[]
+    for year in sorted(set(profits)&set(dividends)):
+        value=sum(v for v,_ in dividends[year])
+        ratio=100*value/profits[year]["profit"]
+        if 0<ratio<=100:
+            observations.append({"fiscal_year":year,"payout_pct":round(ratio,4),
+                  "cash_yuan":value,"profit_yuan":profits[year]["profit"],
+                  "profit_source":profits[year]["source_url"],
+                  "dividend_sources":[url for _,url in dividends[year]]})
+    if len(observations)<3:
+        return {"status":"insufficient_matched_fiscal_years","payout_pct":None,"observations":observations}
+    latest=observations[-5:]
+    return {"status":"verified","payout_pct":round(median(x["payout_pct"] for x in latest),3),
+            "observations":latest,"basis":"implemented_cash_total/attributable_net_profit"}
