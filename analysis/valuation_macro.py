@@ -190,6 +190,7 @@ def stress_valuation_with_verified_exposures(
     *, archetype: str, industry: str, model_inputs: Mapping[str, Any],
     shock: Mapping[str, float], exposures: Mapping[str, Any],
     market_price: Optional[float] = None,
+    as_of: Optional[str] = None,
 ) -> dict:
     """Apply a macro shock ONLY with independently documented linear sensitivities.
 
@@ -212,8 +213,16 @@ def stress_valuation_with_verified_exposures(
         return {"status": "invalid_shock", "reason": "non-finite shock"}
     if not exposures.get("source_url") or not _date(exposures.get("as_of")):
         return {"status": "unquantifiable", "reason": "公司敞口系数缺少来源和日期"}
+    cutoff = _date(as_of)
+    if cutoff and _date(exposures.get("as_of")) > cutoff:
+        return {"status": "unquantifiable", "reason": "公司敏感度校准日期晚于估值基准日"}
     if any(_valid(exposures.get(keys[k])) is None for k in shock):
         return {"status": "unquantifiable", "reason": "缺少冲击渠道的经过验证的敏感度系数"}
+    if "usdcny_change_pct" in shock and not (
+        "annual_cash_flow_per_share" in model_inputs or
+        "annual_dividends_per_share" in model_inputs
+    ):
+        return {"status": "unsupported", "reason": "非FCFE/股息模型的汇率影响应通过盈利和资本重新预测，而非乘现金流系数"}
     inp = dict(model_inputs)
     impact_factor = 1.0
     new_k = _valid(inp.get("required_return_pct"))
