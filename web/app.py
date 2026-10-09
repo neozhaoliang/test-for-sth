@@ -1995,6 +1995,140 @@ function renderDashboardCharts(report) {
   return html;
 }
 
+
+function pickValuationDefaults(report) {
+  const pt=(report.profitability_trend || {}).periods || [];
+  const val=report.valuation || {};
+  const asOf=String(report.as_of || new Date().toISOString().slice(0,10)).slice(0,10);
+  const annual=pt.filter(row => {
+    const period=String(row.period || '').slice(0,10);
+    return period.endsWith('-12-31') && period<=asOf &&
+      numericOrNull(row.roe_pct)!==null && numericOrNull(row.roe_pct)>0;
+  }).sort((a,b)=>String(b.period).localeCompare(String(a.period)));
+  // Annual ROE preferred; never annualize YTD quarter/half-year ratios.
+  const lastAnnual=annual.find(row=>{
+    const yr=Number(String(row.period).slice(0,4));
+    return Number(asOf.slice(0,4))-yr<=2;
+  });
+  let roe=12, roeSource='模型假设 12%；缺少近两年完整年度ROE';
+  if(lastAnnual) {
+    roe=Number(lastAnnual.roe_pct);
+    roeSource='公司 '+String(lastAnnual.period).slice(0,4)+' 年度 ROE';
+  }
+  const model=(report.valuation_model || {});
+  const assumptions=model.assumptions || {};
+  const observedPayout=numericOrNull(assumptions.payout_pct);
+  const configuredReturn=numericOrNull(assumptions.required_return_pct);
+  const payout=observedPayout!==null && observedPayout>=0 && observedPayout<=100 ? observedPayout : 50;
+  const discount=configuredReturn!==null && configuredReturn>=6 && configuredReturn<=20 ? configuredReturn : 10;
+  return {
+    roe:{value:Math.min(35,Math.max(1,roe)),source:roeSource},
+    payout:{value:payout,source:observedPayout===null?'模型假设 50%；未取得同财年现金派息率':'后端已核验派息率'},
+    efficiency:{value:50,source:'留存收益转化效率假设；暂非可直接观察指标'},
+    discount:{value:discount,source:configuredReturn===null?'投资者要求收益率假设 10%；非公司WACC':'已配置的投资者要求收益率'},
+    safety:{value:20,source:'用户自定买入安全边际，并非市场预测'},
+    nav:numericOrNull(val.nav_per_share) || numericOrNull(val.book_value_per_share),
+    navSource:val.valuation_as_of || '净资产数据日期未知',
+    marketPrice:numericOrNull((report.realtime_quote || {}).latest_price),
+  };
+}
+function labSlider(key,label,min,max,step,setting) {
+  return '<div class="slider-row"><div class="slider-top"><label for="lab-'+key+'">'+escapeHtml(label)+'</label>'+
+    '<output id="lab-'+key+'-value" for="lab-'+key+'">'+Number(setting.value).toFixed(1)+'%</output></div>'+
+    '<div class="slider-source">'+escapeHtml(setting.source)+'</div>'+
+    '<input type="range" id="lab-'+key+'" data-lab-param="'+key+'" min="'+min+'" max="'+max+
+    '" step="'+step+'" value="'+setting.value+'" aria-label="'+escapeHtml(label)+'"></div>';
+}
+function renderValuationLab(report) {
+  const p=pickValuationDefaults(report);
+  let html='<section class="valuation-lab" id="valuationLab">'+
+    '<span class="model-tag">交互式 · 稳态股息折现敏感性</span>'+
+    '<h3 style="margin-top:10px;">拖动参数，实时重算理论价值</h3>'+
+    '<p class="section-caption">模型 k = ROE × 留存率 × 转化效率 + 股息收益率。适用于可持续稳态情景，' +
+    '不等于有限期自由现金流 DCF，也不能代替实际资本开支与周期分析。默认值标明事实与假设。</p>'+
+    '<div class="lab-layout"><div class="lab-inputs">'+
+    labSlider('roe','可持续 ROE',1,35,.5,p.roe)+
+    labSlider('payout','现金分红率',0,100,1,p.payout)+
+    labSlider('efficiency','留存收益转化效率',0,100,5,p.efficiency)+
+    labSlider('discount','要求收益率 / 折现率',6,20,.25,p.discount)+
+    labSlider('safety','买入安全边际',0,50,5,p.safety)+
+    '<div class="lab-actions"><button type="button" id="lab-reset">恢复初始参数</button>'+
+    '<span class="section-caption" style="margin:0;">参数只在浏览器内变化，不会修改财报或后台快照。</span></div>'+
+    '</div><div class="lab-result" aria-live="polite">'+
+    '<h4>稳态模型隐含合理价格</h4><div class="lab-price" id="lab-fair-price">—</div>'+
+    '<div class="lab-stat-grid">'+
+    '<div><span>隐含合理 PB</span><b id="lab-pb">—</b></div>'+
+    '<div><span>安全边际后价格</span><b id="lab-buy">—</b></div>'+
+    '<div><span>假定盈利增长率</span><b id="lab-growth">—</b></div>'+
+    '<div><span>现价隐含稳态收益率</span><b id="lab-return">—</b></div></div>'+
+    '<div class="lab-foot" id="lab-note">正在核查可用财务数据。</div>'+
+    '<div class="lab-scenario-chart" id="lab-sensitivity"></div></div></div></section>';
+  return html;
+}
+function renderSensitivitySvg(roe,payout,efficiency,discount,nav) {
+  if(nav===null || nav<=0 || payout<=0) return '';
+  const rates=[discount-2,discount-1,discount,discount+1,discount+2];
+  const growth=roe*(1-payout/100)*efficiency/100;
+  const values=rates.map(rate=>rate>growth ?
+    (roe/100)*(payout/100)/((rate-growth)/100)*nav : null);
+  const valid=values.filter(x=>x!==null && Number.isFinite(x) && x>=0);
+  if(!valid.length) return '';
+  const max=Math.max(...valid,1);
+  let svg='<svg viewBox="0 0 420 166" width="100%" role="img" aria-label="折现率变化对应的模型合理价">';
+  svg+='<text x="8" y="15" fill="#cfdbff" font-size="12">折现率敏感性 · 元/股</text>';
+  values.forEach((v,i)=>{
+    const x=18+i*82;
+    const h=v===null?0:Math.max(2,v/max*95);
+    const fill=i===2?'#8fceff':'#7585c9';
+    svg+='<rect x="'+x+'" y="'+(126-h).toFixed(1)+'" width="60" height="'+h.toFixed(1)+'" rx="4" fill="'+fill+'"/>';
+    svg+='<text x="'+(x+30)+'" y="'+(119-h).toFixed(1)+'" text-anchor="middle" font-size="10" fill="#ffffff">'+
+      (v===null?'不适用':v.toFixed(1))+'</text>';
+    svg+='<text x="'+(x+30)+'" y="145" text-anchor="middle" font-size="10" fill="#dde6ff">'+rates[i].toFixed(1)+'%</text>';
+  });
+  return svg+'</svg>';
+}
+function activateValuationLab(report) {
+  const lab=document.getElementById('valuationLab');
+  if(!lab) return;
+  const defaults=pickValuationDefaults(report);
+  const params=['roe','payout','efficiency','discount','safety'];
+  const ranges=Object.fromEntries(params.map(k=>[k,document.getElementById('lab-'+k)]));
+  const set=id=>document.getElementById(id);
+  function redraw() {
+    const r=Number(ranges.roe.value),p=Number(ranges.payout.value),
+      c=Number(ranges.efficiency.value),k=Number(ranges.discount.value),
+      safety=Number(ranges.safety.value);
+    params.forEach(key => { set('lab-'+key+'-value').textContent=Number(ranges[key].value).toFixed(1)+'%'; });
+    const g=r*(1-p/100)*(c/100);
+    const denom=k-g;
+    const pb=p>0 && denom>0 ? (r/100)*(p/100)/(denom/100) : null;
+    const price=pb!==null && defaults.nav!==null && defaults.nav>0 ? pb*defaults.nav : null;
+    const reference=defaults.marketPrice;
+    const annualReturn=reference!==null && reference>0 && defaults.nav!==null && defaults.nav>0 ?
+      g+(r/100)*(p/100)*(defaults.nav/reference)*100 : null;
+    set('lab-fair-price').textContent=price===null?'暂无法定价':price.toFixed(2)+' 元';
+    set('lab-pb').textContent=pb===null?'不适用':pb.toFixed(2)+' 倍';
+    set('lab-buy').textContent=price===null?'暂缺':(price*(1-safety/100)).toFixed(2)+' 元';
+    set('lab-growth').textContent=g.toFixed(2)+'%';
+    set('lab-return').textContent=annualReturn===null?'暂缺':annualReturn.toFixed(2)+'%';
+    let warning='';
+    if(p===0) warning='分红率为0，本稳态股息定价公式不适用。';
+    else if(denom<=0) warning='增长假设不低于折现率，不能由永续模型推出无限高估值。';
+    else if(defaults.nav===null || defaults.nav<=0) warning='没有可靠的每股净资产数据，只能计算理论 PB，不能输出合理股价。';
+    else warning='净资产基准 '+defaults.nav.toFixed(2)+'元/股（'+defaults.navSource+'）；'+
+      (reference===null?'本次缺少参考价，无法计算当前赔率。':'本次参考价 '+reference.toFixed(2)+'元；')+
+      '未计入回购、增发、税费及估值终值变化。';
+    set('lab-note').textContent=warning;
+    set('lab-sensitivity').innerHTML=renderSensitivitySvg(r,p,c,k,defaults.nav);
+  }
+  params.forEach(key=>ranges[key].addEventListener('input',redraw));
+  set('lab-reset').addEventListener('click',()=>{
+    params.forEach(key=>{ranges[key].value=defaults[key].value;});
+    redraw();
+  });
+  redraw();
+}
+
 function renderResult(report) {
   const el = document.getElementById('result');
   let html = '<h2>' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
