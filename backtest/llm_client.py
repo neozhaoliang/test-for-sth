@@ -280,9 +280,9 @@ async def call_json_ex(
         return None, stop_reason
     if _is_model_refusal(raw_text):
         utils.logger.error(
-            "[llm_client.call_json_ex] 模型或兼容网关拒绝生成结构化输出 "
-            "(model=%s, stop_reason=%s, len=%d)；不将拒答送回JSON修复",
-            _MODEL, stop_reason, len(raw_text),
+            f"[llm_client.call_json_ex] 模型或兼容网关拒绝生成结构化输出 "
+            f"(model={_MODEL}, stop_reason={stop_reason}, len={len(raw_text)})；"
+            "不将拒答送回JSON修复",
         )
         return None, "refusal"
 
@@ -298,7 +298,7 @@ async def call_json_ex(
         raw_text, stop_reason = await _call_llm_raw_ex(prompt, _RETRY_MAX_TOKENS)
         if _is_model_refusal(raw_text):
             utils.logger.error(
-                "[llm_client.call_json_ex] 增长预算重试后收到模型拒答 (model=%s)", _MODEL
+                f"[llm_client.call_json_ex] 增长预算重试后收到模型拒答 (model={_MODEL})",
             )
             return None, "refusal"
         if raw_text is not None:
@@ -324,7 +324,7 @@ async def call_json_ex(
         )
         if _is_model_refusal(repair_raw):
             utils.logger.warning(
-                "[llm_client.call_json_ex] JSON修复请求遭到模型拒答 (model=%s)", _MODEL
+                f"[llm_client.call_json_ex] JSON修复请求遭到模型拒答 (model={_MODEL})",
             )
             return None, "refusal"
         if repair_raw:
@@ -387,6 +387,16 @@ async def call_analysis_with_tools(
         tool_uses = [b for b in response.content if getattr(b, "type", "") == "tool_use"]
 
         if not tool_uses:
+            non_tool_text = "".join(
+                getattr(b, "text", "") or ""
+                for b in response.content if getattr(b, "type", "") == "text"
+            )
+            if _is_model_refusal(non_tool_text):
+                utils.logger.error(
+                    f"[llm_client.call_analysis_with_tools] 模型/网关拒答 "
+                    f"(model={_MODEL}, 已分析维度={len(analyses)})，提前停止工具循环"
+                )
+                return analyses, submit_input, "refusal"
             missing = [t for t in required_tool_names if t not in analyses]
             if missing and stop_reason != "max_tokens":
                 messages.append({"role": "assistant", "content": response.content})
