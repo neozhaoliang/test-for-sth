@@ -102,4 +102,39 @@ ctx.renderResult(report);
 assert.ok(!nodes.result.innerHTML.includes('LEGACY_ESSAY_TOKEN'));
 keys.forEach(k=>assert.equal(
   nodes.result.innerHTML.split('UNIQUE_DETAIL_'+k.toUpperCase()+'_END').length-1,1));
+// No per-dimension content in old cached report? Do not mirror thesis in a
+// fake "研究分析" block immediately below the conclusion.
+report.summary.dimension_analyses={};
+report.summary.thesis_summary='ONE_CLEAR_VERDICT';
+ctx.renderResult(report);
+const older=nodes.result.innerHTML;
+assert.equal(older.split('ONE_CLEAR_VERDICT').length-1,1);
+assert.ok(!older.includes('<h3>研究分析</h3>'));
+
+// Reference price bands must be rendered from data; no FCFE is fabricated.
+report.valuation_model.investor_reference={
+  status:'indicative_reference',
+  dividend_basis:{years:[2021,2024,2025],observed_median_cash_dividend_per_share:.25,
+    median_implemented_dividend_yield_pct:4.70},
+  dividend_scenarios:[{name:'中性',annual_cash_dividend_per_share:.25,
+    assumed_cash_dividend_yield_pct:5.5,reference_price:4.55}],
+  historical_pb_anchor:{window_years:5,median_pb:1.15,
+    median_pb_reference_price:6.31},
+};
+report.valuation_model.style_context={
+  status:'observed',style_regime:'dividend_leading',style_window:'20 trading days',
+  dividend_minus_growth_ytd_pp:7.5,style_observed_as_of:'2026-10-09',
+  dated_market_events:[{date:'2026-10-09',
+    headline:'红利指数基金大额申购限制',source_url:'https://www.cls.cn/detail/2500609'}],
+  kol_style_hypotheses:[{author:'买股票的老木匠',published_at:'2026-10-09',
+    claim:'红利风格高低切是假设',source_url:'https://example.com/post'}],
+};
+ctx.renderResult(report);
+const newer=nodes.result.innerHTML;
+assert.ok(newer.includes('投资者参考估值'));
+assert.ok(newer.includes('4.55元'));
+assert.ok(newer.includes('近20个交易日'));
+assert.ok(newer.includes('红利指数基金大额申购限制'));
+assert.ok(newer.includes('买股票的老木匠'));
+assert.ok(!newer.includes('1366.03元'));
 console.log('Dashboard UI checks passed: 4 public sections, 12 unique dimensions, hidden internal reviews and industry no-price gate.');
