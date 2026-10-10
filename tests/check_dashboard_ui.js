@@ -61,13 +61,38 @@ const keys=['management','fundamentals','rd','chip_flow','price_position',
   'cycle_position','policy_geopolitics','retail_sentiment','shareholder_returns',
   'growth_elasticity','a_share_structure','risk_quality'];
 const analyses=Object.fromEntries(keys.map(k=>[k,'UNIQUE_DETAIL_'+k.toUpperCase()+'_END']));
-report.summary={dimension_analyses:analyses,dimension_scores:[],
-                thesis_summary:'DUPLICATE_OVERVIEW_TOKEN'};
+report.summary={
+  stance:'neutral',company_quality_stance:'bullish',current_odds_stance:'neutral',
+  lynch_category:'cyclical',confidence:.7,
+  dimension_analyses:analyses,dimension_scores:[],
+  thesis_summary:'DIRECT_CONCLUSION_ONCE',
+  core_counter_evidence:'INTERNAL_COUNTER_TOKEN',
+  invalidation_condition:'INTERNAL_INVALIDATION_TOKEN',
+  risk_notes:'INTERNAL_RISK_TOKEN',
+};
+report.research_quality={total_dimensions:12,coverage:.5,warnings:['INTERNAL_QUALITY_TOKEN']};
+report.validation={ok:true,warnings:[{message:'INTERNAL_CONTRACT_TOKEN'}]};
+report.review={duplicate_factors:[{message:'INTERNAL_REVIEW_TOKEN'}]};
+report.research_profile={archetype:'cyclical',industry:'煤炭',label:'CYCLE',readiness:.5};
+report.prompt_version='INTERNAL_PROMPT_TOKEN';
+report.evidence=[{label:'INTERNAL_LEDGER_TOKEN'}];
+report.candidates=[{user_nickname:'INTERNAL_CANDIDATE_TOKEN',wilson_score:0.5}];
 ctx.renderResult(report);
 const html=nodes.result.innerHTML;
-assert.equal(html.split('十二维度详细分析').length-1,1);
-assert.ok(!html.includes('DUPLICATE_OVERVIEW_TOKEN'));
+assert.equal(html.split('投资结论').length-1,1);
+assert.equal(html.split('DIRECT_CONCLUSION_ONCE').length-1,1);
+assert.equal(html.split('多维度分析').length-1,1);
 keys.forEach(k=>assert.equal(html.split('UNIQUE_DETAIL_'+k.toUpperCase()+'_END').length-1,1));
+for(const forbidden of [
+  '证据质量','报告合同校验通过','研究审查',
+  '与结论相悖的最强证据','如果这个判断错了，会是因为','风险提示',
+  'INTERNAL_COUNTER_TOKEN','INTERNAL_INVALIDATION_TOKEN','INTERNAL_RISK_TOKEN',
+  'INTERNAL_QUALITY_TOKEN','INTERNAL_CONTRACT_TOKEN','INTERNAL_REVIEW_TOKEN',
+  'INTERNAL_PROMPT_TOKEN','INTERNAL_LEDGER_TOKEN','INTERNAL_CANDIDATE_TOKEN',
+  '证据账本','重点证据准备度'
+]){
+  assert.ok(!html.includes(forbidden),'Private/internal field leaked to UI: '+forbidden);
+}
 assert.ok(html.includes('当前不输出目标价'));
 assert.ok(!html.includes('稳态模型隐含合理价格'));
-console.log('Dashboard UI checks passed: nonduplicated research, data charts and no fabricated universal ROE target.');
+console.log('Dashboard UI checks passed: 4 public sections, 12 unique dimensions, hidden internal reviews and industry no-price gate.');
