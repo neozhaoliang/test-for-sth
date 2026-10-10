@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
+from copy import deepcopy
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -28,6 +30,9 @@ _DISCLOSURE_RE = re.compile(
 _MAX_QA = 12
 _MAX_DISCLOSURES = 16
 _MAX_PDF = 3
+_CACHE_TTL_SECONDS = 6 * 3600
+_issuer_cache: dict = {}
+_issuer_inflight: dict = {}
 
 
 def _date(value: Any) -> Optional[date]:
@@ -251,7 +256,7 @@ async def _fetch_exchange_answers(code6: str, *, as_of: date) -> List[dict]:
     ) if v]
 
 
-async def get_issuer_business_context(
+async def _get_issuer_business_context_uncached(
     stock_code: str, *, as_of: Optional[date] = None,
     filing_calendar: Optional[List[dict]] = None,
     historical: bool = False,
@@ -312,6 +317,47 @@ async def get_issuer_business_context(
                 "互动问答为公司对投资者的回复，未来计划不等于签约订单、建设完成或业绩实现。",
                 "PDF上下文仅用于定位原文页码，尚未形成审计级别的结构化CAPEX/订单数据。",
             ]}
+
+
+async def get_issuer_business_context(
+    stock_code: str, *, as_of: Optional[date] = None,
+    filing_calendar: Optional[List[dict]] = None,
+    historical: bool = False,
+) -> dict:
+    """Share issuer downloads by stock/date across concurrent in-process tasks.
+
+    Six-hour TTL only protects the current FastAPI worker. Production deployments
+    still need a distributed queue and persistent published snapshot store.
+    """
+    if historical:
+        return await _get_issuer_business_context_uncached(
+            stock_code, as_of=as_of, filing_calendar=filing_calendar,
+            historical=True,
+        )
+    code6 = re.sub(r"\\D", "", stock_code)[-6:]
+    cutoff = as_of or date.today()
+    key = (code6, cutoff.isoformat())
+    now = time.monotonic()
+    cached = _issuer_cache.get(key)
+    if cached is not None and now - cached[0] < _CACHE_TTL_SECONDS:
+        return deepcopy(cached[1])
+    task = _issuer_inflight.get(key)
+    if task is None:
+        task = asyncio.create_task(_get_issuer_business_context_uncached(
+            stock_code, as_of=cutoff, filing_calendar=filing_calendar,
+            historical=False,
+        ))
+        _issuer_inflight[key] = task
+    try:
+        value = await asyncio.shield(task)
+        if not task.cancelled() and task.exception() is None:
+            _issuer_cache[key] = (time.monotonic(), deepcopy(value))
+            while len(_issuer_cache) > 100:
+                _issuer_cache.pop(next(iter(_issuer_cache)))
+        return deepcopy(value)
+    finally:
+        if task.done() and _issuer_inflight.get(key) is task:
+            _issuer_inflight.pop(key, None)
 
 
 def issuer_business_prompt_block(context: Optional[Mapping[str, Any]]) -> str:
