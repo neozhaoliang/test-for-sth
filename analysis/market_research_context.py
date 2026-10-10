@@ -90,51 +90,87 @@ def select_recent_style_excerpts(excerpts: Iterable, *, as_of=None, limit=8) -> 
     return [x[2] for x in ranked[:max(0, limit)]]
 
 
-def _recent_knowledge(excerpts: Iterable, cutoff: date, *, limit: int = 8) -> list:
-    candidates = []
+# Investment principles are the *only* output of KOL retrieval. The user-facing
+# report must never contain original excerpts, examples, account identities or links.
+# An extracted principle is tested against the issuer and market data; it is
+# not treated as proof that a buy/sell signal has fired.
+_PRINCIPLE_RULES = (
+    (
+        "dividend_sustainability",
+        re.compile(r"高股息|红利|股息|分红|派息", re.I),
+        "先确认派息由可持续现金流覆盖，股价上涨使当前股息率下降时要重新衡量赔率。",
+        "核验本公司历年已实施现金分红、维持性资本开支与现金流覆盖",
+    ),
+    (
+        "style_and_crowding",
+        re.compile(r"高低切|风格切换|风格迁移|红利.{0,12}(资金|ETF|限购)|ETF.{0,12}红利|公募.{0,12}(调仓|抱团)|科技.{0,15}(退潮|红利|调仓)", re.I),
+        "价格上涨可能来自市场资金偏好转移而非盈利改善；区分风格驱动与公司价值。",
+        "核验红利与成长指数最近20个交易日相对收益及公司股价是否跟涨",
+    ),
+    (
+        "position_and_trading",
+        re.compile(r"波段|高位|拥挤|回撤|阶段涨幅|逢高减仓|过热", re.I),
+        "短期涨幅较大时关注交易拥挤与回撤，不把个别股票的涨跌阈值照搬到其他公司。",
+        "核验公司当前52周股价位置、近期涨幅、成交和机构持仓变化",
+    ),
+    (
+        "valuation_discipline",
+        re.compile(r"估值|高估|低估|收益率|股息率|长期回报|成长股", re.I),
+        "长期回报取决于买入价格与可持续盈利/分红，而不是热门叙事或过去涨幅。",
+        "核验公司中周期收益、当前PB/PE和分红收益率",
+    ),
+)
+
+
+def _synthesized_principles(excerpts: Iterable, cutoff: date, *,
+                            archetype: str, industry: str, limit: int = 4) -> list:
+    """Extract topic-level reusable checks, NOT excerpts or ticker examples.
+
+    Knowledge is a source of analytical *questions*, never investor-facing
+    quotes, identities, original titles, URLs, or unsupported conclusions.
+    """
+    applicable = archetype == "stable_yield" or any(
+        x in str(industry) for x in ("电力", "水务", "煤炭", "银行", "燃气", "公用事业")
+    )
+    matched = set()
     for item in excerpts or []:
-        text = str(getattr(item, "title", "") or "") + " " + str(
-            getattr(item, "distilled", "") or ""
-        )
-        if not _STYLE_WORDS.search(text):
-            continue
         dt = _day(getattr(item, "published_at", None))
-        if dt is None or dt > cutoff:
+        if dt is None or dt > cutoff or (cutoff - dt).days > 120:
             continue
-        age = (cutoff - dt).days
-        if age > 120:
+        content = str(getattr(item, "title", "") or "") + " " + str(
+            getattr(item, "distilled", "") or "")
+        if not _STYLE_WORDS.search(content):
             continue
-        source = getattr(item, "source", "")
-        author = getattr(item, "author", "") or source
-        trusted_subject = any(
-            k in (str(author) + str(source))
-            for k in ("老木匠", "军师祭咖啡", "双木林叔", "chensir", "陈chensir")
-        )
-        score = (3 if trusted_subject else 0) + (3 if age <= 14 else 2 if age <= 45 else 0)
-        if re.search(r"红利|股息|低波|高低切", text):
-            score += 3
-        candidates.append((score, -age, {
-            "author": author,
-            "published_at": dt.isoformat(),
-            "title": getattr(item, "title", ""),
-            "claim": str(getattr(item, "distilled", "") or "")[:480],
-            "source_url": getattr(item, "source_url", "") or "",
-            "age_days": age,
-        }))
-    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    return [x[2] for x in candidates[:limit]]
+        for key, pattern, _mechanism, _verification in _PRINCIPLE_RULES:
+            if pattern.search(content):
+                matched.add(key)
+    if not applicable:
+        matched.discard("dividend_sustainability")
+    return [
+        {"id": key, "principle": mechanism, "company_check": verification}
+        for key, _pattern, mechanism, verification in _PRINCIPLE_RULES
+        if key in matched
+    ][:limit]
 
 
 def build_style_investment_context(
     *, as_of: Optional[str], archetype: str, industry: str,
     macro_context: Optional[Mapping] = None, knowledge_excerpts=None,
+    market_context: Optional[Mapping] = None,
 ) -> dict:
     cutoff = _day(as_of) or date.today()
     macro = macro_context or {}
     style = macro.get("a_share_style") or {}
     regime = style.get("regime") if style.get("status") == "observed" else "unknown"
     evidence = _events(cutoff)
-    kol = _recent_knowledge(knowledge_excerpts or [], cutoff)
+    principles = _synthesized_principles(
+        knowledge_excerpts or [], cutoff, archetype=archetype, industry=industry
+    )
+    stock = (market_context or {}).get("stock") or {}
+    stock_date = _day(stock.get("latest_date"))
+    stock_20d = stock.get("d20_pct") if stock_date and (
+        0 <= (cutoff - stock_date).days <= 7
+    ) else None
     belongs = archetype == "stable_yield" or any(
         term in str(industry or "") for term in
         ("电力", "水务", "煤炭", "高速", "运营商", "公用事业")
@@ -147,10 +183,10 @@ def build_style_investment_context(
     warnings = [
         "红利指数跑赢反映风格相对收益，不直接证明本公司的经营改善或现金分红可持续。",
         "基金限购不能直接推断市场见顶，需结合申赎、成交和价格相对位置验证拥挤度。",
-        "KOL摘录是当时观点而非客观市场流量；缺少同日可核实的持仓变化时不得声称机构增仓某个股票。",
+        "来源于历史讨论的投资原则只是分析问题，必须用当前个股数据交叉检查。",
     ]
     return {
-        "status": "observed" if regime != "unknown" or evidence or kol else "insufficient_data",
+        "status": "observed" if regime != "unknown" or evidence or principles else "insufficient_data",
         "as_of": cutoff.isoformat(),
         "dividend_exposure_relevant": belongs,
         "style_regime": regime,
@@ -161,7 +197,9 @@ def build_style_investment_context(
         "style_observed_as_of": style.get("as_of"),
         "style_label": tone,
         "dated_market_events": evidence,
-        "kol_style_hypotheses": kol,
+        "investment_principles": principles,
+        "stock_20d_pct": stock_20d,
+        "stock_20d_as_of": stock_date.isoformat() if stock_20d is not None else None,
         "interpretation": (
             "红利行情对本股的边际资金吸引力可能有帮助，但必须与派息能力、"
             "煤价/电价、公司相对涨幅及股价位置同时看；风格资金驱动与企业内在价值分开。"
@@ -176,7 +214,7 @@ def style_investment_prompt_block(ctx: Optional[Mapping]) -> str:
     if not ctx:
         return "市场风格和知识库尚未获得可核对的日期数据，不可编造近期资金动向。"
     events = ctx.get("dated_market_events") or []
-    kol = ctx.get("kol_style_hypotheses") or []
+    principles = ctx.get("investment_principles") or []
     rows = [
         "当前市场风格与投资者研究框架（这是投资判断的必要输入，不可略写为宏观资料缺失）：",
         f"截至 {ctx.get('as_of')}，风格={ctx.get('style_regime')}，"
@@ -193,14 +231,24 @@ def style_investment_prompt_block(ctx: Optional[Mapping]) -> str:
             f"  {e['date']}：{e['headline']}；统计={e['facts']}；"
             f"来源={e['source_url']}；解读={e['interpretation']}"
         )
-    rows.append("相关投资者帖子（作者观点，不是已核实事实）：")
-    if not kol:
-        rows.append("  本次没有检索到日期匹配的相关帖子，须明确说暂缺；不要假装查过老木匠最近的内容。")
-    for e in kol:
+    rows.append("从已整理的投资经验中提炼出的分析原则（不含作者、原文或跨公司案例）：")
+    if not principles:
+        rows.append("  没有适用于本次公司与时间范围的额外原则；只依据当前资料分析。")
+    for item in principles:
         rows.append(
-            f"  [{e['author']} {e['published_at']}] {e['claim']} "
-            f"（原文={e['source_url'] or '暂无链接'}）"
+            f"  判断框架：{item['principle']}；"
+            f"本公司验证：{item['company_check']}"
         )
+    rows.append(
+        f"本公司近20个交易日涨跌幅={ctx.get('stock_20d_pct')}%；"
+        f"价格观测截至={ctx.get('stock_20d_as_of')}。"
+    )
+    rows.append(
+        "严格保密：公开摘要与任何维度分析都不得透露知识库作者、昵称、"
+        "原帖标题、原文、URL、与当前公司无竞争/业务关系的其他股票或个案，"
+        "也不得写'某投资者认为'等知识来源引述。"
+        "仅用当前公司的可核对数据回应上述检查，并以自己的话给出判断。"
+    )
     rows.extend([
         "必须在'市场情绪'、'A股资金结构'和'股价位置'三方面说明："
         "当期究竟是盈利改善、股息可持续性，还是资金高低切/估值扩张驱动？"
