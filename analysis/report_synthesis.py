@@ -150,6 +150,10 @@ async def _generate_summary(
     evidence: List[EvidenceItem],
 ) -> tuple[StructuredSummary, ResearchReview]:
     prompt = _build_prompt(inputs, candidates)
+    from analysis.issuer_business import issuer_business_prompt_block
+    prompt += "\n\n" + issuer_business_prompt_block(
+        getattr(inputs, "issuer_business", None)
+    )
     # Valuation is a method layer, never counted as primary factual evidence.
     # Load the locally versioned framework on every run (including fallback path).
     method_file = Path(__file__).resolve().parents[1] / "docs" / "valuation_shuangmulin_chensir_knowledge.md"
