@@ -2044,6 +2044,7 @@ function renderDashboardCharts(report) {
   const cashRatio=numericOrNull(facts.cash_to_profit_ratio);
   let html='<section class="dashboard-charts"><h3>数据概览与维度图谱</h3>'+
     '<p class="section-caption">图表仅展示当前报告真实返回的数据，不对缺失年份插值，也不自动将半年ROE年化。</p>';
+  html+=renderInvestmentStyleStrip(report.valuation_model);
   html+='<div class="metric-strip">'+
     metricCard('参考股价',price===null?'暂缺':price.toFixed(2)+' 元',quote.quote_time || report.as_of || '报价时点未知')+
     metricCard('市净率 PB',pb===null?'暂缺':pb.toFixed(2)+' 倍',val.valuation_as_of || 'F10时点未知')+
@@ -2231,11 +2232,15 @@ function renderInvestmentStyleStrip(model) {
   const events=style.dated_market_events || [];
   const opinions=style.kol_style_hypotheses || [];
   const label=style.style_regime==='dividend_leading'?'红利资产相对走强':
-    style.style_regime==='growth_leading'?'成长资产相对走强':'风格相对收益不明显';
+    style.style_regime==='growth_leading'?'成长资产相对走强':
+    style.style_regime==='mixed'?'风格相对收益不明显':'指数数据不足，关注最新市场事件';
   let html='<div class="style-insight"><h4>当前市场在交易什么？</h4><p><b>'+
     escapeHtml(label)+'</b>';
-  if(Number.isFinite(Number(style.dividend_minus_growth_ytd_pp)))
-    html+=' · 红利相对成长年内差'+
+  if(style.dividend_minus_growth_ytd_pp!==null &&
+     style.dividend_minus_growth_ytd_pp!==undefined &&
+     Number.isFinite(Number(style.dividend_minus_growth_ytd_pp)))
+    html+=' · 红利相对成长'+
+      (style.style_window==='20 trading days'?'近20个交易日':'年内')+'涨跌差'+
       escapeHtml(String(style.dividend_minus_growth_ytd_pp))+'个百分点';
   html+=' <span class="section-caption">'+escapeHtml(style.style_observed_as_of||'')+'</span></p>';
   events.slice(0,2).forEach(e=>{
@@ -2331,14 +2336,13 @@ function renderIndustryValuationLab(report) {
       )+'</li>').join('')+
       '</ul></div>';
   }
-  html+=renderInvestmentStyleStrip(model);
   const observed=(macro.observations || []).filter(x=>x.usable && x.value!==null);
   html+='<div class="chart-grid" style="margin-top:16px;">'+
-    chartTile('宏观观察值（含数据时点）','仅显示有明确日期、未过期的指标',
+    chartTile('近期利率与汇率数据','仅显示有明确日期、未过期的指标',
       observed.length?'<div class="evidence-block">'+observed.map(x=>
         '<div><b>'+escapeHtml(x.metric)+':</b> '+escapeHtml(String(x.value))+
         ' <small>('+escapeHtml(x.as_of)+')</small></div>').join('')+'</div>':'')+
-    chartTile('外围与国内市场传导','不自动根据风格叙事调整合理股价',
+    chartTile('国际市场与中国利率','不自动根据风格叙事调整合理股价',
       '<div class="evidence-block">'+
       '美元兑人民币：'+escapeHtml(macro.rmb_direction || '资料不足')+
       '；海外营收占比：'+escapeHtml(macro.overseas_revenue_pct===null||macro.overseas_revenue_pct===undefined?
@@ -2353,6 +2357,7 @@ function renderIndustryValuationLab(report) {
     html+='<p class="section-caption" style="margin-top:12px;">A股观察：'+
       escapeHtml(styleLabel)+'；上证红利相对科创50/创业板指年内差'+
       escapeHtml(String(style.dividend_minus_growth_ytd_pp))+'个百分点（'+
+      (style.style_window==='20 trading days'?'近20个交易日；':'年内；')+
       escapeHtml(style.as_of || '未知日期')+
       '）。这是风格相对收益，不直接改变内在价值。</p>';
   }
