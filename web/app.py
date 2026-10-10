@@ -2228,7 +2228,6 @@ function renderInvestmentStyleStrip(model) {
   const style=(model||{}).style_context || {};
   if(style.status!=='observed')return '';
   const events=style.dated_market_events || [];
-  const opinions=style.kol_style_hypotheses || [];
   const label=style.style_regime==='dividend_leading'?'红利资产相对走强':
     style.style_regime==='growth_leading'?'成长资产相对走强':
     style.style_regime==='mixed'?'风格相对收益不明显':'指数数据不足，关注最新市场事件';
@@ -2267,10 +2266,12 @@ function renderInvestmentStyleStrip(model) {
       (e.source_url?' <span>'+safeExternalLink(e.source_url,'报道来源')+'</span>':'')+
       '。限购可能意味着关注度升温，但不能直接据此判断顶部。</p>';
   });
-  if(opinions.length) {
-    html+='<p><b>投资者观察：</b>'+opinions.slice(0,2).map(e=>
-      escapeHtml((e.author||'投资者')+' '+(e.published_at||'')+'：'+(e.claim||'').slice(0,180))+
-      (e.source_url?' '+safeExternalLink(e.source_url,'原帖'):'')).join('；')+'</p>';
+  if(style.stock_20d_pct!==null && style.stock_20d_pct!==undefined &&
+     Number.isFinite(Number(style.stock_20d_pct))) {
+    const pct=Number(style.stock_20d_pct);
+    html+='<p><b>本股近20个交易日：</b>'+
+      (pct>0?'+':'')+pct.toFixed(2)+'%（'+
+      escapeHtml(style.stock_20d_as_of||'日期不明')+'），可对照上图判断是否已跟随红利风格上涨。</p>';
   }
   html+='<p class="section-caption">市场资金偏好与公司的长期盈利价值是两回事；'
      +'判断个股需同时看价格位置、实际派息、经营利润和指数相对走势。</p></div>';
