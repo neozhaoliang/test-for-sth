@@ -10,6 +10,7 @@ unrelated sections.
 from __future__ import annotations
 
 import re
+import math
 from typing import Any, Dict, List, Optional
 
 from analysis.evidence import ResearchQuality
@@ -356,24 +357,39 @@ def _build_dividend_chart(
     quote: Optional[Dict],
 ) -> Optional[List[Dict]]:
     """
-    按年度聚合分红与回购 (回购按总股本折算成"元/10股", 与分红同口径相加),
-    并计算按现价折算的股息率, 供柱状图展示。
+    按公告公历年聚合已实施分红与回购，排除待实施方案和重复公告。
+    本年未完结，按现价折算仅是已实施股息的历史比例，不能冒充未来收益率。
     """
     total_shares = (valuation or {}).get("total_shares")
     latest_price = (quote or {}).get("latest_price")
     by_year: Dict[str, Dict] = {}
+    seen_dividends = set()
     for d in dividend_history or []:
-        y = str(d.get("announce_date", ""))[:4]
-        if not y.isdigit():
+        day = str(d.get("announce_date") or "")[:10]
+        y = day[:4]
+        if not y.isdigit() or len(day) != 10:
             continue
         try:
             amount = float(d.get("dividend_per_10_shares"))
         except (TypeError, ValueError):
-            # Unknown is not zero. Historical announcement metadata frequently proves a
-            # dividend happened without carrying the per-10-share amount in the title.
             continue
-        if amount != amount:
+        if not math.isfinite(amount) or amount <= 0:
             continue
+        progress = str(d.get("progress") or "").strip().lower()
+        if any(x in progress for x in (
+            "预案", "未实施", "待实施", "不分配", "取消",
+            "pending", "proposal", "unpaid",
+        )):
+            continue
+        # Unknown implementation state is NOT proof of cash paid.
+        if not any(x in progress for x in (
+            "实施", "完成", "除权除息", "已派", "paid", "completed", "implemented",
+        )):
+            continue
+        event_key = (day, round(amount, 6))
+        if event_key in seen_dividends:
+            continue
+        seen_dividends.add(event_key)
         g = by_year.setdefault(
             y,
             {"year": y, "div_per_10": 0.0, "buyback_per_10": 0.0},
