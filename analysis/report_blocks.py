@@ -35,23 +35,19 @@ _KB_FUND_FLOW_RE = re.compile(
 
 
 def _build_kb_fund_flow_block(knowledge_excerpts: List[KnowledgeExcerpt]) -> str:
-    """
-    从知识库 (老木匠/军师祭咖啡等的专栏与发帖摘要) 中抽出资金面/筹码/风格/
-    政策相关的真实记录, 单独成块——解释股价与户数联动、板块涨跌时模型必须
-    先引用这里, 而不是套"户数增加=派发"模板。
-    """
+    """Abstract market/crowding mechanisms; never copy posts or identities."""
     hits = [e for e in knowledge_excerpts if _KB_FUND_FLOW_RE.search(e.distilled)]
     if not hits:
-        return "(知识库中无相关的资金/风格/筹码记录)"
-    lines = [
-        "知识库中的资金与风格假设 (专栏/发帖摘要，含来源与日期；仅作为待核验机制，"
-        "必须与持股数量、主动/被动资金、股东户数、融资余额和指数风格交叉验证):"
-    ]
-    for e in hits[:10]:
-        who = e.author or e.source
-        lines.append(f"  · [{who} {e.title[:50]}] {e.distilled[:400]}")
-    return "\n".join(lines)
-
+        return "暂无额外资金面机制线索；仅依据公司和市场数据分析。"
+    return (
+        "资金面研判原则（已去除原帖、作者、无关股票案例）："
+        "股价走势需先对照公司52周位置和20日涨幅；"
+        "股东户数上升在股价低位未必是利空，高位则结合换手与机构持仓关注拥挤；"
+        "红利/成长资金高低切只能从有日期的指数和基金数据中确认，"
+        "不能把基金限购直接解释为顶部；"
+        "阶段性涨幅较大要重新核对股息率和回撤承受力，"
+        "不可照搬别的个股波段收益率阈值。"
+    )
 
 
 def _build_knowledge_hypotheses_block(inputs: Any) -> str:
@@ -68,7 +64,25 @@ def _build_knowledge_hypotheses_block(inputs: Any) -> str:
         fundamentals=fundamentals,
         limit=24,
     )
-    return format_knowledge_hypotheses(hypotheses)
+    # Every hypothesis is reduced to a *company-specific question*.
+    # Do not transmit investor identities, raw claims, foreign tickers or URLs
+    # to the prose generator: it must reason from this company's data instead.
+    unique = []
+    seen = set()
+    for item in hypotheses:
+        for question in item.get("verification_questions") or []:
+            if question not in seen:
+                unique.append(question)
+                seen.add(question)
+            if len(unique) >= 18:
+                break
+        if len(unique) >= 18:
+            break
+    return (
+        "可复用的投资研究问题（不含原帖、账号或案例）：\n"
+        + ("\n".join("· " + q for q in unique) if unique
+           else "暂无额外的特定问题，依据公司的财务与市场数据判断。")
+    )
 
 def _build_margin_block(
     margin_signal: Optional[Dict], valuation: Optional[Dict], quote: Optional[Dict]
@@ -1040,15 +1054,12 @@ def _build_candidates_block(candidates: List[CandidateOpinion]) -> str:
 
 
 def _build_knowledge_block(knowledge_excerpts: List[KnowledgeExcerpt]) -> str:
-    lines = []
-    for k in knowledge_excerpts:
-        link = f" | {k.source_url}" if k.source_url else ""
-        who = k.author or k.source
-        lines.append(f"- 《{k.title}》 ({who}; {k.source}){link}")
-        lines.append(f"    {k.distilled}")
-    if not lines:
-        lines.append("(暂无背景资料)")
-    return "\n".join(lines)
+    """Knowledge already informs the anonymous mechanism/checklist blocks.
+
+    Feeding complete post summaries here used to cause the LLM to repeat other
+    issuers and private source identities in the user's company report.
+    """
+    return "已按相关主题提炼为研究原则；不得在报告中引用原帖、作者或其他股票案例。"
 
 
 def _build_valuation_history_block(data: Optional[Dict]) -> str:
