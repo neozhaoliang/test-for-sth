@@ -68,7 +68,25 @@ class BilibiliLogin(AbstractLogin):
         """
         cookies = await self.browser_context.cookies()
         _, cookie_dict = utils.convert_cookies(cookies)
-        return bool(cookie_dict.get("SESSDATA"))
+        if not cookie_dict.get("SESSDATA"):
+            return False
+        try:
+            response = await self.browser_context.request.get(
+                "https://api.bilibili.com/x/web-interface/nav",
+                headers={"Referer": "https://www.bilibili.com/"},
+                timeout=10000,
+            )
+            if not response.ok:
+                return False
+            result = await response.json()
+            return bool(
+                result.get("code") == 0
+                and (result.get("data") or {}).get("isLogin") is True
+            )
+        except Exception:
+            # A cookie can outlive the actual login; never mistake it for
+            # a verified session if the account endpoint rejects it.
+            return False
 
     async def _wait_for_login(self, timeout_seconds: int = 180) -> None:
         deadline = asyncio.get_running_loop().time() + timeout_seconds
@@ -222,9 +240,6 @@ class BilibiliLogin(AbstractLogin):
     async def login_by_qrcode(self) -> None:
         """Log in without assuming a particular Bilibili homepage layout."""
         utils.logger.info("[BilibiliLogin.login_by_qrcode] Begin Bilibili QR login...")
-        if await self.check_login_state():
-            utils.logger.info("[BilibiliLogin] Existing browser session detected.")
-            return
         try:
             await self._login_by_qrcode_api()
         except Exception as exc:
