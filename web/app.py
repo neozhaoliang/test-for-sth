@@ -44,6 +44,7 @@ from analysis.knowledge_base import (
 )
 from analysis.realtime_price import resolve_stock_code
 from analysis.report import generate_report
+from analysis.public_report import public_stock_report
 from analysis.research_context import (
     ResearchRequest,
     assert_request_supported,
@@ -91,7 +92,7 @@ async def _run_analysis(
     try:
         report = await generate_report(stock_code, request=research_request)
         _tasks[task_id]["status"] = "done"
-        _tasks[task_id]["result"] = report.model_dump()
+        _tasks[task_id]["result"] = public_stock_report(report.model_dump())
     except Exception as e:
         utils.logger.error(f"[web.app] 分析任务 {task_id} ({stock_code}) 失败: {e}")
         _tasks[task_id]["status"] = "failed"
@@ -162,7 +163,12 @@ async def get_task(task_id: str) -> Dict:
     task = _tasks.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="task_id 不存在")
-    return {"status": task["status"], "result": task["result"], "error": task["error"]}
+    result = task["result"]
+    if isinstance(result, dict):
+        # A second projection protects responses from reports cached before
+        # the privacy change, even when the HTML does not display the data.
+        result = public_stock_report(result)
+    return {"status": task["status"], "result": result, "error": task["error"]}
 
 
 class CrawlXueqiuRequest(BaseModel):
