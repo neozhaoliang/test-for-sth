@@ -25,7 +25,6 @@
 
 import asyncio
 import base64
-from io import BytesIO
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -84,12 +83,22 @@ class BilibiliLogin(AbstractLogin):
 
     async def _display_qrcode(self, login_url: str) -> Page:
         """Show the Bilibili-issued QR URL in our existing Chrome context."""
-        # qrcode is a declared project dependency; no third-party QR service is used.
-        import qrcode
+        # OpenCV is already a project dependency, so no QR package or
+        # third-party image service is needed. Verify the output with a
+        # QRCodeDetector in tests to guard against invalid/undersized codes.
+        import cv2
 
-        buffer = BytesIO()
-        qrcode.make(login_url).save(buffer, format="PNG")
-        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        qr = cv2.QRCodeEncoder_create().encode(login_url)
+        qr = cv2.copyMakeBorder(
+            qr, 4, 4, 4, 4, cv2.BORDER_CONSTANT, value=255
+        )
+        qr = cv2.resize(
+            qr, None, fx=8, fy=8, interpolation=cv2.INTER_NEAREST
+        )
+        encoded_ok, png = cv2.imencode(".png", qr)
+        if not encoded_ok:
+            raise RuntimeError("OpenCV failed to render the Bilibili QR image")
+        encoded = base64.b64encode(png.tobytes()).decode("ascii")
         page = await self.browser_context.new_page()
         await page.set_content(
             "<html><head><meta charset='utf-8'><title>Bilibili QR Login</title>"
