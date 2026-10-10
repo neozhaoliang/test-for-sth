@@ -93,7 +93,7 @@ for(const forbidden of [
 ]){
   assert.ok(!html.includes(forbidden),'Private/internal field leaked to UI: '+forbidden);
 }
-assert.ok(html.includes('当前不输出目标价'));
+assert.ok(html.includes('当前可用估值数据较少'));
 assert.ok(!html.includes('稳态模型隐含合理价格'));
 // Older report versions stored twelve duplicated paragraphs in thesis_summary;
 // do not repeat them when detailed analyses are present.
