@@ -156,8 +156,18 @@ async def _generate_summary(
     # Prevent point-in-time backtests from seeing rules distilled after their as-of date.
     as_of = str(getattr(inputs, "as_of", "") or "")[:10]
     if method_file.is_file() and (not as_of or as_of >= "2026-10-08"):
-        prompt += ("\n\n## 估值方法知识库（待以本次数据验证，不构成事实证据）\n"
-                   + method_file.read_text(encoding="utf-8"))
+        # Keep formulas and reasoning rules, never source identities or the
+        # original-discussion bibliography in the company analysis prompt.
+        method = method_file.read_text(encoding="utf-8")
+        method = method.split("## 5. 可追溯原始讨论", 1)[0]
+        method = method[method.find("## 1. "):] if "## 1. " in method else method
+        for author in ("陈chensir", "双木林叔", "买股票的老木匠", "军师祭咖啡"):
+            method = method.replace(author, "投资方法")
+        prompt += (
+            "\n\n## 可复用估值方法（不得暴露来源身份或其他公司案例）\n"
+            + method
+            + "\n请仅使用本公司当期数据独立判断，禁止复述案例、作者、原文。"
+        )
     elif not method_file.is_file():
         utils.logger.warning("[analysis.report] 估值方法知识库文件缺失，无法注入长期收益率模型")
 
