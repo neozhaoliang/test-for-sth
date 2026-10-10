@@ -2241,6 +2241,26 @@ function renderInvestmentStyleStrip(model) {
       (style.style_window==='20 trading days'?'近20个交易日':'年内')+'涨跌差'+
       escapeHtml(String(style.dividend_minus_growth_ytd_pp))+'个百分点';
   html+=' <span class="section-caption">'+escapeHtml(style.style_observed_as_of||'')+'</span></p>';
+  const red=Number(style.dividend_index_return_pct), growth=Number(style.growth_index_mean_return_pct);
+  if(style.dividend_index_return_pct!==null && style.dividend_index_return_pct!==undefined &&
+     style.growth_index_mean_return_pct!==null && style.growth_index_mean_return_pct!==undefined &&
+     Number.isFinite(red) && Number.isFinite(growth)) {
+    const zero=240, span=180;
+    const max=Math.max(5,Math.abs(red),Math.abs(growth));
+    let bars='<svg viewBox="0 0 540 90" width="100%" role="img" aria-label="红利指数与科技成长指数的相对表现">';
+    bars+='<line x1="'+zero+'" y1="8" x2="'+zero+'" y2="70" stroke="#899bb5" stroke-width="1"/>';
+    [[red,21,'上证红利','#d65c67'],[growth,53,'科创50/创业板平均','#607fbd']].forEach(row=>{
+      const [v,y,title,color]=row, w=span*Math.abs(v)/max;
+      const x=v>=0?zero:zero-w;
+      bars+='<text x="2" y="'+(y+10)+'" fill="#53627c" font-size="12">'+title+'</text>';
+      bars+='<rect x="'+x.toFixed(1)+'" y="'+y+'" width="'+w.toFixed(1)+
+        '" height="12" rx="3" fill="'+color+'"/>';
+      bars+='<text x="'+(v>=0?x+w+5:x-5).toFixed(1)+'" y="'+(y+10)+
+        '" text-anchor="'+(v>=0?'start':'end')+'" font-size="11" fill="#334b70">'+
+        (v>0?'+':'')+v.toFixed(2)+'%</text>';
+    });
+    html+=bars+'</svg>';
+  }
   events.slice(0,2).forEach(e=>{
     html+='<p><b>市场事件：</b>'+escapeHtml(e.headline||'')+
       '（'+escapeHtml(e.date||'')+'）'+
@@ -2310,7 +2330,7 @@ function renderIndustryValuationLab(report) {
   }
   if(calc.status==='calculated')html+=renderInvestorReference(model);
   const independent=model.cross_checks || [];
-  if(independent.length) {
+  if(independent.some(x=>x.status==='calculated')) {
     html+='<div class="evidence-block" style="margin-top:16px;"><b>独立模型交叉检验</b><ul>'+
       independent.map(x=>'<li>'+escapeHtml(industryModelName(x.model))+'：'+
         (x.status==='calculated'?
@@ -2335,14 +2355,22 @@ function renderIndustryValuationLab(report) {
       '</ul></div>';
   }
   const observed=(macro.observations || []).filter(x=>x.usable && x.value!==null);
+  const names={
+    usdcny_midpoint_cny_per_usd:'美元兑人民币中间价',
+    usdcny_change_30obs_pct:'近30个报价日美元兑人民币涨跌幅',
+    us_10y_yield_pct:'美国10年国债收益率',
+    us_10y_change_90d_pp:'美国10年国债90日变化（百分点）',
+    china_lpr_5y_pct:'中国5年期LPR',
+    stock_ytd_return_pct:'个股今年以来涨幅',
+  };
   html+='<div class="chart-grid" style="margin-top:16px;">'+
     chartTile('近期利率与汇率数据','仅显示有明确日期、未过期的指标',
       observed.length?'<div class="evidence-block">'+observed.map(x=>
-        '<div><b>'+escapeHtml(x.metric)+':</b> '+escapeHtml(String(x.value))+
+        '<div><b>'+escapeHtml(names[x.metric]||x.metric)+':</b> '+escapeHtml(String(x.value))+
         ' <small>('+escapeHtml(x.as_of)+')</small></div>').join('')+'</div>':'')+
     chartTile('国际市场与中国利率','不自动根据风格叙事调整合理股价',
       '<div class="evidence-block">'+
-      '美元兑人民币：'+escapeHtml(macro.rmb_direction || '资料不足')+
+      '人民币汇率趋势：'+escapeHtml({appreciating:'人民币升值',depreciating:'人民币贬值',stable:'基本稳定'}[macro.rmb_direction]||'资料不足')+
       '；海外营收占比：'+escapeHtml(macro.overseas_revenue_pct===null||macro.overseas_revenue_pct===undefined?
         '资料不足':String(macro.overseas_revenue_pct)+'%')+
       '<p>未审计套保/美元债及汇率敏感度前，禁止给出固定估值调整。</p></div>')+'</div>';
@@ -2359,10 +2387,8 @@ function renderIndustryValuationLab(report) {
       escapeHtml(style.as_of || '未知日期')+
       '）。这是风格相对收益，不直接改变内在价值。</p>';
   }
-  const routes=(macro.transmission_paths || []);
-  html+='<details class="evidence-block" style="margin-top:16px;"><summary>查阅中国政策、A股风格与外围市场风险传导依据</summary>'+
-    '<ul>'+routes.map(x=>'<li><b>'+escapeHtml(x.factor)+':</b> '+
-      escapeHtml(x.route)+'；'+escapeHtml(x.evidence)+'</li>').join('')+'</ul></details>';
+  // Generic macro transmission templates remain in the backend but are not
+  // repeatedly presented as a dense six-item list to end users.
   return html+'</section>';
 }
 function activateIndustryValuationLab(report) {
