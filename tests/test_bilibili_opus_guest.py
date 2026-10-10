@@ -48,3 +48,38 @@ async def test_authenticated_api_failure_does_not_start_endless_login():
 
     fetch.assert_awaited_once()
     crawler._login_and_refresh_client.assert_not_awaited()
+
+
+
+@pytest.mark.asyncio
+async def test_opus_start_does_not_block_on_login_when_public_first(monkeypatch):
+    import media_platform.bilibili.core as module
+
+    class FakePlaywright:
+        async def __aenter__(self):
+            return SimpleNamespace()
+
+        async def __aexit__(self, *args):
+            return False
+
+    page = SimpleNamespace(goto=AsyncMock())
+    context = SimpleNamespace(new_page=AsyncMock(return_value=page))
+    crawler = BilibiliCrawler()
+    crawler.launch_browser_with_cdp = AsyncMock(return_value=context)
+    crawler.create_bilibili_client = AsyncMock(return_value=SimpleNamespace(
+        pong=AsyncMock(return_value=False),
+    ))
+    crawler._login_and_refresh_client = AsyncMock()
+    crawler.get_opus = AsyncMock()
+
+    monkeypatch.setattr(module, "async_playwright", FakePlaywright)
+    monkeypatch.setattr(module.config, "ENABLE_CDP_MODE", True)
+    monkeypatch.setattr(module.config, "CRAWLER_TYPE", "opus")
+    monkeypatch.setattr(module.config, "BILI_OPUS_PUBLIC_FIRST", True)
+    monkeypatch.setattr(module.config, "ENABLE_IP_PROXY", False)
+    monkeypatch.setattr(module.config, "BILI_CREATOR_ID_LIST", ["20813884"])
+
+    await crawler.start()
+
+    crawler._login_and_refresh_client.assert_not_awaited()
+    crawler.get_opus.assert_awaited_once_with(20813884)
