@@ -47,9 +47,14 @@ async def test_qrcode_poll_success_reuses_browser_session():
         async def json(self):
             return self.body
 
+    state = {"confirmed": False, "poll_count": 0}
+
     async def api_get(url, **kwargs):
         if url.endswith("/x/web-interface/nav"):
-            return Response({"code": 0, "data": {"isLogin": True}})
+            return Response({
+                "code": 0,
+                "data": {"isLogin": state["confirmed"]},
+            })
         if url.endswith("/generate"):
             return Response({"code": 0, "data": {
                 "url": "https://passport.bilibili.com/h5-app/passport/login/scan?test=1",
@@ -57,6 +62,12 @@ async def test_qrcode_poll_success_reuses_browser_session():
             }})
         assert url.endswith("/poll")
         assert kwargs["params"]["qrcode_key"] == "abcdef"
+        state["poll_count"] += 1
+        if state["poll_count"] == 1:
+            return Response({"code": 0, "data": {"code": 86101}})
+        if state["poll_count"] == 2:
+            return Response({"code": 0, "data": {"code": 86090}})
+        state["confirmed"] = True
         return Response({"code": 0, "data": {"code": 0, "url": ""}})
 
     page = SimpleNamespace(
@@ -65,15 +76,28 @@ async def test_qrcode_poll_success_reuses_browser_session():
     )
     context = SimpleNamespace(
         request=SimpleNamespace(get=api_get),
-        cookies=AsyncMock(return_value=[
-            {"name": "SESSDATA", "value": "session-cookie"},
-        ]),
+        cookies=AsyncMock(side_effect=lambda: [
+            {"name": "SESSDATA", "value": "session-cookie"}
+        ] if state["confirmed"] else []),
     )
     login = BilibiliLogin("qrcode", context, page)
     login._display_qrcode = AsyncMock(return_value=page)
-    await login._login_by_qrcode_api()
-    page.close.assert_awaited_once()
+    login._show_qrcode_status = AsyncMock()
+    from media_platform.bilibili import login as login_module
+    original_sleep = login_module.asyncio.sleep
 
+    async def instant_sleep(_):
+        return None
+
+    login_module.asyncio.sleep = instant_sleep
+    try:
+        await login._login_by_qrcode_api()
+    finally:
+        login_module.asyncio.sleep = original_sleep
+    assert state["poll_count"] == 3
+    assert login._show_qrcode_status.await_count == 3
+    assert "已扫码" in login._show_qrcode_status.await_args_list[1].args[1]
+    page.close.assert_awaited_once()
 
 @pytest.mark.asyncio
 async def test_qrcode_api_failure_falls_back_to_manual_login():
@@ -112,3 +136,74 @@ async def test_stale_session_cookie_is_not_treated_as_logged_in():
     )
     login = BilibiliLogin("qrcode", context, SimpleNamespace())
     assert await login.check_login_state() is False
+
+
+
+@pytest.mark.asyncio
+async def test_expired_qr_is_refreshed_instead_of_waiting_for_manual_login(monkeypatch):
+    import media_platform.bilibili.login as login_module
+
+    class Response:
+        ok = True
+        status = 200
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        async def json(self):
+            return self.payload
+
+    state = {"generated": 0, "confirmed": False}
+
+    async def api_get(url, **kwargs):
+        if url.endswith("/x/web-interface/nav"):
+            return Response({"code": 0, "data": {"isLogin": state["confirmed"]}})
+        if url.endswith("/generate"):
+            state["generated"] += 1
+            return Response({"code": 0, "data": {
+                "url": "https://passport.bilibili.com/h5-app/passport/login/scan?test=1",
+                "qrcode_key": f"qr{state['generated']}",
+            }})
+        assert url.endswith("/poll")
+        if kwargs["params"]["qrcode_key"] == "qr1":
+            return Response({"code": 0, "data": {"code": 86038}})
+        state["confirmed"] = True
+        return Response({"code": 0, "data": {"code": 0, "url": ""}})
+
+    async def instant_sleep(_):
+        return None
+
+    monkeypatch.setattr(login_module.asyncio, "sleep", instant_sleep)
+    monkeypatch.setattr(login_module.config, "BILI_QR_MAX_ATTEMPTS", 2)
+    pages = [
+        SimpleNamespace(is_closed=lambda: False, close=AsyncMock())
+        for _ in range(2)
+    ]
+    context = SimpleNamespace(
+        request=SimpleNamespace(get=api_get),
+        cookies=AsyncMock(side_effect=lambda: [
+            {"name": "SESSDATA", "value": "valid"}
+        ] if state["confirmed"] else []),
+    )
+    login = BilibiliLogin("qrcode", context, pages[0])
+    login._display_qrcode = AsyncMock(side_effect=pages)
+    login._show_qrcode_status = AsyncMock()
+
+    await login._login_by_qrcode_api()
+
+    assert state["generated"] == 2
+    for page in pages:
+        page.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_qrcode_callback_rejects_foreign_domain():
+    login = BilibiliLogin(
+        "qrcode",
+        SimpleNamespace(request=SimpleNamespace(get=AsyncMock())),
+        SimpleNamespace(),
+    )
+    with pytest.raises(RuntimeError, match="unexpected QR callback host"):
+        await login._finalize_qrcode_login(
+            {"url": "https://bilibili.com.example.net/steal"}
+        )
