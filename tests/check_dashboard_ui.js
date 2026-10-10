@@ -95,4 +95,11 @@ for(const forbidden of [
 }
 assert.ok(html.includes('当前不输出目标价'));
 assert.ok(!html.includes('稳态模型隐含合理价格'));
+// Older report versions stored twelve duplicated paragraphs in thesis_summary;
+// do not repeat them when detailed analyses are present.
+report.summary.thesis_summary='LEGACY_ESSAY_TOKEN ' + '长篇概述。'.repeat(130);
+ctx.renderResult(report);
+assert.ok(!nodes.result.innerHTML.includes('LEGACY_ESSAY_TOKEN'));
+keys.forEach(k=>assert.equal(
+  nodes.result.innerHTML.split('UNIQUE_DETAIL_'+k.toUpperCase()+'_END').length-1,1));
 console.log('Dashboard UI checks passed: 4 public sections, 12 unique dimensions, hidden internal reviews and industry no-price gate.');
