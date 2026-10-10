@@ -73,23 +73,40 @@ def build_macro_valuation_context(
         "note": "短期风格相对收益不是企业盈利预测，不能自动加减合理价值",
     }
     if red and growth:
-        returns = [_valid(red.get("ytd_pct"))]+[_valid(row.get("ytd_pct")) for row in growth]
-        dates = [_date(red.get("latest_date"))]+[_date(row.get("latest_date")) for row in growth]
-        if all(v is not None for v in returns) and all(d is not None for d in dates):
-            if (max(dates)-min(dates)).days <= 7 and (
-                request_day is None or 0 <= (request_day-max(dates)).days <= 7
-            ):
+        dates = [_date(red.get("latest_date"))] + [
+            _date(row.get("latest_date")) for row in growth
+        ]
+        if all(d is not None for d in dates) and (
+            max(dates) - min(dates)
+        ).days <= 7 and (
+            request_day is None or 0 <= (request_day - max(dates)).days <= 7
+        ):
+            # Last 20 trading days take precedence over YTD. Do NOT call a
+            # whole-year spread a current style migration.
+            window = "20 trading days"
+            returns = [_valid(red.get("d20_pct"))] + [
+                _valid(row.get("d20_pct")) for row in growth
+            ]
+            if any(v is None for v in returns):
+                window = "year to date"
+                returns = [_valid(red.get("ytd_pct"))] + [
+                    _valid(row.get("ytd_pct")) for row in growth
+                ]
+            if all(v is not None for v in returns):
                 spread = returns[0] - sum(returns[1:]) / len(growth)
-                regime = "dividend_leading" if spread >= 8 else (
-                    "growth_leading" if spread <= -8 else "mixed"
+                # 20-day outperformance has a smaller threshold than YTD.
+                threshold = 3.0 if window == "20 trading days" else 8.0
+                regime = "dividend_leading" if spread >= threshold else (
+                    "growth_leading" if spread <= -threshold else "mixed"
                 )
                 style_context = {
                     "status": "observed",
                     "regime": regime,
                     "dividend_minus_growth_ytd_pp": round(spread, 2),
+                    "style_window": window,
                     "as_of": max(dates).isoformat(),
-                    "policy_threshold_pp": 8,
-                    "note": "使用上证红利相对科创50/创业板指年内收益；8pp为情景标签阈值，非经验定价beta",
+                    "policy_threshold_pp": threshold,
+                    "note": "上证红利相对科创50/创业板指涨跌幅差；阈值只用于情景分类，非估值beta",
                 }
 
     observations = [
