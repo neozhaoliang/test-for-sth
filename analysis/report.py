@@ -41,6 +41,7 @@ from analysis.macro_rates import get_macro_rate_context
 from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.primary_sources import get_cninfo_primary_evidence
+from analysis.issuer_business import get_issuer_business_context
 from analysis.point_in_time_financials import (
     get_point_in_time_financials,
     to_historical_fundamentals,
@@ -365,6 +366,13 @@ async def generate_report(
         as_of=str(request.as_of) if historical_mode else None,
     )
 
+    # Issuer-authored source facts: unlike investor discussion this can support
+    # dated capex, order and production claims, with Q&A ranked BELOW filings.
+    issuer_business = await get_issuer_business_context(
+        stock_code, as_of=request.as_of, filing_calendar=filing_calendar,
+        historical=historical_mode,
+    )
+
     inputs = AnalysisInputs(
         stock_code=stock_code,
         stock_name=stock_name,
@@ -395,6 +403,7 @@ async def generate_report(
         freight_signal=freight_signal,
         margin_signal=margin_signal,
         primary_evidence=primary_evidence,
+        issuer_business=issuer_business,
         a_share_structure=a_share_structure,
         management_capital=management_capital,
         filing_calendar=filing_calendar,
