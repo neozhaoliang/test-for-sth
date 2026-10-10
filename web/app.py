@@ -2089,11 +2089,9 @@ function renderDimensionAnalysisSection(summary) {
   const valid = order.filter(([key]) =>
     typeof analyses[key] === 'string' && analyses[key].trim());
   if (!valid.length) {
-    const fallback = String((summary || {}).thesis_summary || '').trim();
-    return fallback
-      ? '<section class="research-panel"><h3>研究分析</h3><p style="white-space:pre-wrap;">' +
-        escapeHtml(fallback) + '</p></section>'
-      : '<section class="research-panel"><h3>研究分析</h3><p class="section-caption">本次暂无可展示的详细分析。</p></section>';
+    // Older cached reports do not contain tool-generated per-dimension detail.
+    // Never repeat the top-line thesis under a second fake research heading.
+    return '';
   }
   let html = '<section class="research-panel research-narrative">' +
     '<h3>多维度分析</h3>' +
