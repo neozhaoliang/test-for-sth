@@ -23,6 +23,7 @@ from analysis.knowledge_base import (
     load_cached_entries,
 )
 from analysis.knowledge_context import prefilter_knowledge_by_context
+from analysis.market_research_context import select_recent_style_excerpts
 from backtest.score import load_records
 from model.m_analysis import CandidateOpinion, KnowledgeExcerpt
 
@@ -267,7 +268,14 @@ async def filter_relevant_knowledge(
         logger.warning(
             f"[analysis.report_social] 知识库相关性筛选失败，回退为因果主题预筛选 ({stock_code})"
         )
-        return prefetched
+        selected = list(prefetched)
+        known = {(e.source, e.title, e.published_at) for e in selected}
+        for entry in select_recent_style_excerpts(knowledge_excerpts, limit=8):
+            key = (entry.source, entry.title, entry.published_at)
+            if key not in known:
+                selected.append(entry)
+                known.add(key)
+        return selected
 
     kept = {
         i for i in parsed
@@ -278,7 +286,18 @@ async def filter_relevant_knowledge(
             f"[analysis.report_social] 知识库相关性筛选返回空结果，回退为因果主题预筛选 ({stock_code})"
         )
         return prefetched
-    return [e for i, e in enumerate(prefetched) if i in kept]
+    selected = [e for i, e in enumerate(prefetched) if i in kept]
+    # Recall safeguard: a ranking-model opinion about relevance must not erase
+    # contemporaneous KOL discussion of sector funds/style. These are clearly
+    # tagged as hypotheses downstream and checked against objective indexes.
+    style = select_recent_style_excerpts(knowledge_excerpts, limit=8)
+    seen = {(e.source, e.title, e.published_at) for e in selected}
+    for entry in style:
+        key = (entry.source, entry.title, entry.published_at)
+        if key not in seen:
+            selected.append(entry)
+            seen.add(key)
+    return selected
 
 
 async def collect_live_social_context(
