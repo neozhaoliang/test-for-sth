@@ -60,6 +60,36 @@ def _events(cutoff: date) -> list:
     return out[:12]
 
 
+def select_recent_style_excerpts(excerpts: Iterable, *, as_of=None, limit=8) -> list:
+    """Protect recent style/KOL source records from an LLM relevance false negative.
+
+    This returns original KnowledgeExcerpt objects, retaining real author/date/URL.
+    It does not endorse their interpretation or infer an issuer-level trade.
+    """
+    cutoff = _day(as_of) or date.today()
+    ranked = []
+    for item in excerpts or []:
+        text = str(getattr(item, "title", "") or "") + " " + str(
+            getattr(item, "distilled", "") or ""
+        )
+        when = _day(getattr(item, "published_at", None))
+        if not when or when > cutoff or (cutoff - when).days > 120:
+            continue
+        if not _STYLE_WORDS.search(text):
+            continue
+        source = str(getattr(item, "source", "") or "")
+        author = str(getattr(item, "author", "") or "")
+        preferred = any(n in (source + author) for n in (
+            "老木匠", "双木林叔", "军师祭咖啡", "陈chensir", "chensir"
+        ))
+        score = (3 if preferred else 0) + (
+            3 if "红利" in text or "高低切" in text else 0
+        )
+        ranked.append((score, when.toordinal(), item))
+    ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return [x[2] for x in ranked[:max(0, limit)]]
+
+
 def _recent_knowledge(excerpts: Iterable, cutoff: date, *, limit: int = 8) -> list:
     candidates = []
     for item in excerpts or []:
