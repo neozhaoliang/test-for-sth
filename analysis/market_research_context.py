@@ -1,0 +1,176 @@
+"""Join dated A-share style observations, news events and KOL mechanisms.
+
+Never equate a commentator's claim with a price tick; never infer that a
+subscription limit is proof of a top or an issuer-level fund inflow.
+"""
+from __future__ import annotations
+
+import json
+import re
+from datetime import date
+from pathlib import Path
+from typing import Any, Iterable, Mapping, Optional
+
+
+_DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "market_events"
+_STYLE_WORDS = re.compile(
+    r"红利|高股息|高低切|风格切换|风格迁移|科技.{0,12}红利|"
+    r"公募.{0,12}(调仓|蓝筹|红利)|(抱团|科技).{0,15}估值|蓝筹.{0,12}资金|"
+    r"股息率|低波|ETF.{0,12}(资金|净流)|险资|避险资金",
+    re.I,
+)
+
+
+def _day(raw):
+    try:
+        return date.fromisoformat(str(raw or "")[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _events(cutoff: date) -> list:
+    out = []
+    for path in sorted(_DATA_DIR.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            rows = payload.get("events") if isinstance(payload, dict) else []
+        except (OSError, UnicodeError, ValueError):
+            continue
+        for e in rows or []:
+            if not isinstance(e, dict):
+                continue
+            dt = _day(e.get("published_at"))
+            if not dt or dt > cutoff or not e.get("source_url"):
+                continue
+            if not e["source_url"].startswith(("https://", "http://")):
+                continue
+            max_age = min(90, max(1, int(e.get("max_age_days") or 21)))
+            if (cutoff - dt).days > max_age:
+                continue
+            out.append({
+                "id": e.get("id"),
+                "date": dt.isoformat(),
+                "headline": e.get("headline"),
+                "facts": e.get("facts") or {},
+                "source_title": e.get("source_title"),
+                "source_url": e.get("source_url"),
+                "interpretation": e.get("interpretation"),
+                "event_type": e.get("event_type"),
+            })
+    return out[:12]
+
+
+def _recent_knowledge(excerpts: Iterable, cutoff: date, *, limit: int = 8) -> list:
+    candidates = []
+    for item in excerpts or []:
+        text = str(getattr(item, "title", "") or "") + " " + str(
+            getattr(item, "distilled", "") or ""
+        )
+        if not _STYLE_WORDS.search(text):
+            continue
+        dt = _day(getattr(item, "published_at", None))
+        if dt is None or dt > cutoff:
+            continue
+        age = (cutoff - dt).days
+        if age > 120:
+            continue
+        source = getattr(item, "source", "")
+        author = getattr(item, "author", "") or source
+        trusted_subject = any(
+            k in (str(author) + str(source))
+            for k in ("老木匠", "军师祭咖啡", "双木林叔", "chensir", "陈chensir")
+        )
+        score = (3 if trusted_subject else 0) + (3 if age <= 14 else 2 if age <= 45 else 0)
+        if re.search(r"红利|股息|低波|高低切", text):
+            score += 3
+        candidates.append((score, -age, {
+            "author": author,
+            "published_at": dt.isoformat(),
+            "title": getattr(item, "title", ""),
+            "claim": str(getattr(item, "distilled", "") or "")[:480],
+            "source_url": getattr(item, "source_url", "") or "",
+            "age_days": age,
+        }))
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return [x[2] for x in candidates[:limit]]
+
+
+def build_style_investment_context(
+    *, as_of: Optional[str], archetype: str, industry: str,
+    macro_context: Optional[Mapping] = None, knowledge_excerpts=None,
+) -> dict:
+    cutoff = _day(as_of) or date.today()
+    macro = macro_context or {}
+    style = macro.get("a_share_style") or {}
+    regime = style.get("regime") if style.get("status") == "observed" else "unknown"
+    evidence = _events(cutoff)
+    kol = _recent_knowledge(knowledge_excerpts or [], cutoff)
+    belongs = archetype == "stable_yield" or any(
+        term in str(industry or "") for term in
+        ("电力", "水务", "煤炭", "高速", "运营商", "公用事业")
+    )
+    tone = "unknown"
+    if regime == "dividend_leading":
+        tone = "relative_dividend_strength"
+    elif regime == "growth_leading":
+        tone = "relative_growth_strength"
+    warnings = [
+        "红利指数跑赢反映风格相对收益，不直接证明本公司的经营改善或现金分红可持续。",
+        "基金限购不能直接推断市场见顶，需结合申赎、成交和价格相对位置验证拥挤度。",
+        "KOL摘录是当时观点而非客观市场流量；缺少同日可核实的持仓变化时不得声称机构增仓某个股票。",
+    ]
+    return {
+        "status": "observed" if regime != "unknown" or evidence or kol else "insufficient_data",
+        "as_of": cutoff.isoformat(),
+        "dividend_exposure_relevant": belongs,
+        "style_regime": regime,
+        "dividend_minus_growth_ytd_pp": style.get("dividend_minus_growth_ytd_pp"),
+        "style_observed_as_of": style.get("as_of"),
+        "style_label": tone,
+        "dated_market_events": evidence,
+        "kol_style_hypotheses": kol,
+        "interpretation": (
+            "红利行情对本股的边际资金吸引力可能有帮助，但必须与派息能力、"
+            "煤价/电价、公司相对涨幅及股价位置同时看；风格资金驱动与企业内在价值分开。"
+            if belongs else
+            "风格轮动会影响估值赔率，但应按该公司的实际风格暴露和价格趋势判断。"
+        ),
+        "warnings": warnings,
+    }
+
+
+def style_investment_prompt_block(ctx: Optional[Mapping]) -> str:
+    if not ctx:
+        return "市场风格和知识库尚未获得可核对的日期数据，不可编造近期资金动向。"
+    events = ctx.get("dated_market_events") or []
+    kol = ctx.get("kol_style_hypotheses") or []
+    rows = [
+        "当前市场风格与投资者研究框架（这是投资判断的必要输入，不可略写为宏观资料缺失）：",
+        f"截至 {ctx.get('as_of')}，风格={ctx.get('style_regime')}，"
+        f"红利相对成长年内收益差={ctx.get('dividend_minus_growth_ytd_pp')}个百分点；"
+        f"指标日期={ctx.get('style_observed_as_of')}。",
+        f"公司是否与红利风格相关={ctx.get('dividend_exposure_relevant')}。",
+        "近期已经公开的市场事件："
+    ]
+    if not events:
+        rows.append("  暂无带日期且仍在有效期内的事件记录；不能据此声称没有资金轮动。")
+    for e in events:
+        rows.append(
+            f"  {e['date']}：{e['headline']}；统计={e['facts']}；"
+            f"来源={e['source_url']}；解读={e['interpretation']}"
+        )
+    rows.append("相关投资者帖子（作者观点，不是已核实事实）：")
+    if not kol:
+        rows.append("  本次没有检索到日期匹配的相关帖子，须明确说暂缺；不要假装查过老木匠最近的内容。")
+    for e in kol:
+        rows.append(
+            f"  [{e['author']} {e['published_at']}] {e['claim']} "
+            f"（原文={e['source_url'] or '暂无链接'}）"
+        )
+    rows.extend([
+        "必须在'市场情绪'、'A股资金结构'和'股价位置'三方面说明："
+        "当期究竟是盈利改善、股息可持续性，还是资金高低切/估值扩张驱动？"
+        "哪些已经有数据支持，哪些只是知识库作者提出的机制？",
+        "禁止因为红利限购直接喊见顶；也禁止完全不讨论已核验的近期限购和风格切换。"
+    ])
+    return "\n".join(rows)
