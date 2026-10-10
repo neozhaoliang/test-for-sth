@@ -1,0 +1,30 @@
+name: Bilibili QR and Opus smoke
+
+on:
+  pull_request:
+    paths:
+      - "media_platform/bilibili/**"
+      - "config/bilibili_config.py"
+      - "tests/test_bilibili_qr_standalone.py"
+      - ".github/workflows/bilibili-smoke.yml"
+  push:
+    branches: [main]
+    paths:
+      - "media_platform/bilibili/**"
+      - "config/bilibili_config.py"
+      - "tests/test_bilibili_qr_standalone.py"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Syntax-check modified Python files
+        run: |
+          python -m py_compile media_platform/bilibili/login.py media_platform/bilibili/core.py
+          python -m py_compile tests/test_bilibili_login_qrcode.py tests/test_bilibili_opus_guest.py tests/test_bilibili_qr_standalone.py
+      - name: Run standalone Bilibili QR tests
+        run: python tests/test_bilibili_qr_standalone.py -v
