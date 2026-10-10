@@ -126,8 +126,12 @@ report.valuation_model.style_context={
   dividend_minus_growth_ytd_pp:7.5,style_observed_as_of:'2026-10-09',
   dated_market_events:[{date:'2026-10-09',
     headline:'红利指数基金大额申购限制',source_url:'https://www.cls.cn/detail/2500609'}],
-  kol_style_hypotheses:[{author:'买股票的老木匠',published_at:'2026-10-09',
-    claim:'红利风格高低切是假设',source_url:'https://example.com/post'}],
+  // A legacy report must not surface this unredacted field even in UI.
+  kol_style_hypotheses:[{author:'军师祭咖啡',published_at:'2026-09-22',
+    claim:'齐鲁银行(SH601665)和腾讯的跨公司例子',
+    source_url:'https://xueqiu.com/4780688814/410221558'}],
+  investment_principles:[{id:'position_and_trading',principle:'高位关注回撤'}],
+  stock_20d_pct:4.3,stock_20d_as_of:'2026-10-09',
 };
 ctx.renderResult(report);
 const newer=nodes.result.innerHTML;
@@ -135,6 +139,10 @@ assert.ok(newer.includes('投资者参考估值'));
 assert.ok(newer.includes('4.55元'));
 assert.ok(newer.includes('近20个交易日'));
 assert.ok(newer.includes('红利指数基金大额申购限制'));
-assert.ok(newer.includes('买股票的老木匠'));
+for(const forbidden of ['军师祭咖啡','齐鲁银行','腾讯','601665',
+  'xueqiu.com/4780688814','跨公司例子']){
+  assert.ok(!newer.includes(forbidden),'Raw KOL contents leaked: '+forbidden);
+}
+assert.ok(newer.includes('本股近20个交易日'));
 assert.ok(!newer.includes('1366.03元'));
 console.log('Dashboard UI checks passed: 4 public sections, 12 unique dimensions, hidden internal reviews and industry no-price gate.');
