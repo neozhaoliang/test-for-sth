@@ -551,6 +551,11 @@ _INDEX_HTML = """<!DOCTYPE html>
   .live-banner,.historical-banner { margin:0; border-radius:10px; }
   .quote { display:inline-flex; gap:12px; align-items:center; }
   .result-summary h3 { margin:0 0 10px; font-size:20px; }
+  .investor-reference,.style-insight {border:1px solid var(--line);border-radius:14px;background:#f8faff;padding:16px 18px;margin:14px 0;}
+  .investor-reference h4,.style-insight h4 {font-size:17px;margin:0 0 8px;color:var(--ink);}
+  .investor-band-table {width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;}
+  .investor-band-table th,.investor-band-table td {text-align:left;padding:10px 13px;border-bottom:1px solid #dfe6f3;}
+  .investor-band-table th {font-size:12px;color:#54627b;}
   .verdict-line { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding:4px 0 0; }
   .verdict-item { color:#4d607b; font-size:14px; }
   .verdict-item b { color:var(--ink); font-size:15px; }
@@ -2039,6 +2044,7 @@ function renderDashboardCharts(report) {
   const cashRatio=numericOrNull(facts.cash_to_profit_ratio);
   let html='<section class="dashboard-charts"><h3>数据概览与维度图谱</h3>'+
     '<p class="section-caption">图表仅展示当前报告真实返回的数据，不对缺失年份插值，也不自动将半年ROE年化。</p>';
+  html+=renderInvestmentStyleStrip(report.valuation_model);
   html+='<div class="metric-strip">'+
     metricCard('参考股价',price===null?'暂缺':price.toFixed(2)+' 元',quote.quote_time || report.as_of || '报价时点未知')+
     metricCard('市净率 PB',pb===null?'暂缺':pb.toFixed(2)+' 倍',val.valuation_as_of || 'F10时点未知')+
@@ -2083,11 +2089,9 @@ function renderDimensionAnalysisSection(summary) {
   const valid = order.filter(([key]) =>
     typeof analyses[key] === 'string' && analyses[key].trim());
   if (!valid.length) {
-    const fallback = String((summary || {}).thesis_summary || '').trim();
-    return fallback
-      ? '<section class="research-panel"><h3>研究分析</h3><p style="white-space:pre-wrap;">' +
-        escapeHtml(fallback) + '</p></section>'
-      : '<section class="research-panel"><h3>研究分析</h3><p class="section-caption">本次暂无可展示的详细分析。</p></section>';
+    // Older cached reports do not contain tool-generated per-dimension detail.
+    // Never repeat the top-line thesis under a second fake research heading.
+    return '';
   }
   let html = '<section class="research-panel research-narrative">' +
     '<h3>多维度分析</h3>' +
@@ -2184,6 +2188,95 @@ function industryModelCompute(route, src, hurdlePct, growthPct, stressPct, polic
   if(!Number.isFinite(value)||value<=0)return null;
   return {price:value,terminalShare,components};
 }
+function renderInvestorReference(model) {
+  const ref=(model||{}).investor_reference || {};
+  const scenarios=ref.dividend_scenarios || [];
+  const dividend=ref.dividend_basis || {};
+  const pb=ref.historical_pb_anchor || {};
+  const norm=ref.normalized_earnings || {};
+  const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(2):'暂缺';
+  if(!scenarios.length&&!pb.median_pb&&!norm.annual_roe_years)return '';
+  let html='<div class="investor-reference" style="margin-top:16px;">'+
+    '<h4>投资者参考估值</h4>'+
+    '<p class="section-caption">用历史分红、PB和跨周期盈利判断当前股价。表内是明确假设下的参考价格，不是保证能兑现的内在价值。</p>';
+  if(scenarios.length) {
+    html+='<div class="metric-strip">'+
+      metricCard('已派息年份分红中位',''+fmt(dividend.observed_median_cash_dividend_per_share)+'元/股',
+                 (dividend.years||[]).join('、')+'年实施记录')+
+      metricCard('参考价对应分红收益率',fmt(dividend.median_implemented_dividend_yield_pct)+'%',
+                 '用已实施派息年份中位数÷当前价格')+
+      '</div><div style="overflow-x:auto;"><table class="investor-band-table">'+
+      '<thead><tr><th>情景</th><th>假设年派息</th><th>要求股息率</th><th>对应参考价</th></tr></thead><tbody>'+
+      scenarios.map(x=>'<tr><td>'+escapeHtml(x.name)+'</td><td>'+
+        fmt(x.annual_cash_dividend_per_share)+'元</td><td>'+
+        fmt(x.assumed_cash_dividend_yield_pct)+'%</td><td><b>'+
+        fmt(x.reference_price)+'元</b></td></tr>').join('')+
+      '</tbody></table></div>';
+  }
+  if(pb.median_pb)html+='<p><b>历史PB：</b>近'+escapeHtml(String(pb.window_years))+
+    '年中位'+fmt(Number(pb.median_pb))+'倍，对应'+
+    fmt(pb.median_pb_reference_price)+'元；它反映历史市场定价，不意味着一定回归。</p>';
+  if(norm.annual_roe_years)html+='<p><b>跨周期盈利：</b>完整年度ROE中位'+
+    fmt(norm.median_roe_pct)+'%，按当前账面权益折算的盈利收益率约'+
+    fmt(norm.indicative_normalized_earnings_yield_pct)+'%；不能直接当现金股息率。</p>';
+  html+='<p class="section-caption">特别提醒：尚未分红的年份可能不在实施样本内；'
+    +'不能将不同年度公告、实施和中期分红重复计入。'
+    +'分红恢复能力、煤价、电价及资本开支决定参考区间是否有意义。</p></div>';
+  return html;
+}
+function renderInvestmentStyleStrip(model) {
+  const style=(model||{}).style_context || {};
+  if(style.status!=='observed')return '';
+  const events=style.dated_market_events || [];
+  const opinions=style.kol_style_hypotheses || [];
+  const label=style.style_regime==='dividend_leading'?'红利资产相对走强':
+    style.style_regime==='growth_leading'?'成长资产相对走强':
+    style.style_regime==='mixed'?'风格相对收益不明显':'指数数据不足，关注最新市场事件';
+  let html='<div class="style-insight"><h4>当前市场在交易什么？</h4><p><b>'+
+    escapeHtml(label)+'</b>';
+  if(style.dividend_minus_growth_ytd_pp!==null &&
+     style.dividend_minus_growth_ytd_pp!==undefined &&
+     Number.isFinite(Number(style.dividend_minus_growth_ytd_pp)))
+    html+=' · 红利相对成长'+
+      (style.style_window==='20 trading days'?'近20个交易日':'年内')+'涨跌差'+
+      escapeHtml(String(style.dividend_minus_growth_ytd_pp))+'个百分点';
+  html+=' <span class="section-caption">'+escapeHtml(style.style_observed_as_of||'')+'</span></p>';
+  const red=Number(style.dividend_index_return_pct), growth=Number(style.growth_index_mean_return_pct);
+  if(style.dividend_index_return_pct!==null && style.dividend_index_return_pct!==undefined &&
+     style.growth_index_mean_return_pct!==null && style.growth_index_mean_return_pct!==undefined &&
+     Number.isFinite(red) && Number.isFinite(growth)) {
+    const zero=240, span=180;
+    const max=Math.max(5,Math.abs(red),Math.abs(growth));
+    let bars='<svg viewBox="0 0 540 90" width="100%" role="img" aria-label="红利指数与科技成长指数的相对表现">';
+    bars+='<line x1="'+zero+'" y1="8" x2="'+zero+'" y2="70" stroke="#899bb5" stroke-width="1"/>';
+    [[red,21,'上证红利','#d65c67'],[growth,53,'科创50/创业板平均','#607fbd']].forEach(row=>{
+      const [v,y,title,color]=row, w=span*Math.abs(v)/max;
+      const x=v>=0?zero:zero-w;
+      bars+='<text x="2" y="'+(y+10)+'" fill="#53627c" font-size="12">'+title+'</text>';
+      bars+='<rect x="'+x.toFixed(1)+'" y="'+y+'" width="'+w.toFixed(1)+
+        '" height="12" rx="3" fill="'+color+'"/>';
+      bars+='<text x="'+(v>=0?x+w+5:x-5).toFixed(1)+'" y="'+(y+10)+
+        '" text-anchor="'+(v>=0?'start':'end')+'" font-size="11" fill="#334b70">'+
+        (v>0?'+':'')+v.toFixed(2)+'%</text>';
+    });
+    html+=bars+'</svg>';
+  }
+  events.slice(0,2).forEach(e=>{
+    html+='<p><b>市场事件：</b>'+escapeHtml(e.headline||'')+
+      '（'+escapeHtml(e.date||'')+'）'+
+      (e.source_url?' <span>'+safeExternalLink(e.source_url,'报道来源')+'</span>':'')+
+      '。限购可能意味着关注度升温，但不能直接据此判断顶部。</p>';
+  });
+  if(opinions.length) {
+    html+='<p><b>投资者观察：</b>'+opinions.slice(0,2).map(e=>
+      escapeHtml((e.author||'投资者')+' '+(e.published_at||'')+'：'+(e.claim||'').slice(0,180))+
+      (e.source_url?' '+safeExternalLink(e.source_url,'原帖'):'')).join('；')+'</p>';
+  }
+  html+='<p class="section-caption">市场资金偏好与公司的长期盈利价值是两回事；'
+     +'判断个股需同时看价格位置、实际派息、经营利润和指数相对走势。</p></div>';
+  return html;
+}
+
 function renderIndustryValuationLab(report) {
   const model=report.valuation_model || {};
   const route=model.route || {};
@@ -2197,13 +2290,14 @@ function renderIndustryValuationLab(report) {
   if(!route.primary) {
     html+='<div class="chart-empty">旧版报告尚未包含行业估值结果。请用更新后的Agent重新分析。</div>';
   } else if(calc.status!=='calculated'||!model.interactive_inputs) {
-    const missing=(model.evidence_gate || {}).missing || calc.missing || [];
-    const invalid=(model.evidence_gate || {}).invalid || [];
-    html+='<div class="evidence-block missing"><b>当前不输出目标价</b>'+
-      '<p>缺少计算合理价格所需的未来现金流、资本或资产数据，暂时无法给出可靠估值。</p>'+
-      '<p><b>需要补充：</b>'+escapeHtml(missing.length?missing.map(industryInputLabel).join('、'):'公司相关数据')+'</p>'+
-      (invalid.length?'<p><b>输入错误：</b>'+escapeHtml(invalid.join('；'))+'</p>':'')+
-      '<p class="section-caption">必要的数据尚不充分，不用单一年份ROE或通用倍数强行推导目标价。</p></div>';
+    const ref=model.investor_reference || {};
+    const haveReference=(ref.dividend_scenarios||[]).length ||
+      (ref.historical_pb_anchor||{}).median_pb;
+    html+=renderInvestorReference(model);
+    html+='<div class="evidence-block missing">'+
+      '<b>'+(haveReference?'完整现金流估值仍待完善':'当前可用估值数据较少')+'</b>'+
+      '<p>完整的股权现金流、未来分红覆盖和资本开支预测尚不充分；'
+      +'以上参考情景不等同于公司目标价格。</p></div>';
   } else {
     const initial=Number(model.interactive_inputs.required_return_pct || 10);
     const initialG=Number(model.interactive_inputs.terminal_growth_pct || 0);
@@ -2234,8 +2328,9 @@ function renderIndustryValuationLab(report) {
       '<div class="lab-foot" id="sector-note">计算中</div>'+
       '<div id="sector-sensitivity"></div></div></div>';
   }
+  if(calc.status==='calculated')html+=renderInvestorReference(model);
   const independent=model.cross_checks || [];
-  if(independent.length) {
+  if(independent.some(x=>x.status==='calculated')) {
     html+='<div class="evidence-block" style="margin-top:16px;"><b>独立模型交叉检验</b><ul>'+
       independent.map(x=>'<li>'+escapeHtml(industryModelName(x.model))+'：'+
         (x.status==='calculated'?
@@ -2260,14 +2355,22 @@ function renderIndustryValuationLab(report) {
       '</ul></div>';
   }
   const observed=(macro.observations || []).filter(x=>x.usable && x.value!==null);
+  const names={
+    usdcny_midpoint_cny_per_usd:'美元兑人民币中间价',
+    usdcny_change_30obs_pct:'近30个报价日美元兑人民币涨跌幅',
+    us_10y_yield_pct:'美国10年国债收益率',
+    us_10y_change_90d_pp:'美国10年国债90日变化（百分点）',
+    china_lpr_5y_pct:'中国5年期LPR',
+    stock_ytd_return_pct:'个股今年以来涨幅',
+  };
   html+='<div class="chart-grid" style="margin-top:16px;">'+
-    chartTile('宏观观察值（含数据时点）','仅显示有明确日期、未过期的指标',
+    chartTile('近期利率与汇率数据','仅显示有明确日期、未过期的指标',
       observed.length?'<div class="evidence-block">'+observed.map(x=>
-        '<div><b>'+escapeHtml(x.metric)+':</b> '+escapeHtml(String(x.value))+
+        '<div><b>'+escapeHtml(names[x.metric]||x.metric)+':</b> '+escapeHtml(String(x.value))+
         ' <small>('+escapeHtml(x.as_of)+')</small></div>').join('')+'</div>':'')+
-    chartTile('外围与国内市场传导','不自动根据风格叙事调整合理股价',
+    chartTile('国际市场与中国利率','不自动根据风格叙事调整合理股价',
       '<div class="evidence-block">'+
-      '美元兑人民币：'+escapeHtml(macro.rmb_direction || '资料不足')+
+      '人民币汇率趋势：'+escapeHtml({appreciating:'人民币升值',depreciating:'人民币贬值',stable:'基本稳定'}[macro.rmb_direction]||'资料不足')+
       '；海外营收占比：'+escapeHtml(macro.overseas_revenue_pct===null||macro.overseas_revenue_pct===undefined?
         '资料不足':String(macro.overseas_revenue_pct)+'%')+
       '<p>未审计套保/美元债及汇率敏感度前，禁止给出固定估值调整。</p></div>')+'</div>';
@@ -2280,13 +2383,12 @@ function renderIndustryValuationLab(report) {
     html+='<p class="section-caption" style="margin-top:12px;">A股观察：'+
       escapeHtml(styleLabel)+'；上证红利相对科创50/创业板指年内差'+
       escapeHtml(String(style.dividend_minus_growth_ytd_pp))+'个百分点（'+
+      (style.style_window==='20 trading days'?'近20个交易日；':'年内；')+
       escapeHtml(style.as_of || '未知日期')+
       '）。这是风格相对收益，不直接改变内在价值。</p>';
   }
-  const routes=(macro.transmission_paths || []);
-  html+='<details class="evidence-block" style="margin-top:16px;"><summary>查阅中国政策、A股风格与外围市场风险传导依据</summary>'+
-    '<ul>'+routes.map(x=>'<li><b>'+escapeHtml(x.factor)+':</b> '+
-      escapeHtml(x.route)+'；'+escapeHtml(x.evidence)+'</li>').join('')+'</ul></details>';
+  // Generic macro transmission templates remain in the backend but are not
+  // repeatedly presented as a dense six-item list to end users.
   return html+'</section>';
 }
 function activateIndustryValuationLab(report) {

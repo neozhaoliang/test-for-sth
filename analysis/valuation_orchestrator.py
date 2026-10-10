@@ -12,6 +12,10 @@ from analysis.valuation_macro import (build_macro_valuation_context,
                                       stress_valuation_with_verified_exposures)
 from analysis.valuation_models import (calculate_industry_valuation, select_models,
                                        dividend_discount, adjusted_nav)
+from analysis.investor_valuation import investor_reference_valuation
+from analysis.market_research_context import (
+    build_style_investment_context, style_investment_prompt_block,
+)
 
 
 _EVIDENCE_RULES = {
@@ -144,6 +148,21 @@ def build_industry_valuation_report(inputs: Any) -> dict:
         freight_signal=getattr(inputs, "freight_signal", None),
     )
     route = select_models(archetype, industry)
+    reference = investor_reference_valuation(
+        archetype=archetype,
+        dividend_history=getattr(inputs, "dividend_history", None),
+        valuation=getattr(inputs, "valuation", None),
+        profitability_trend=getattr(inputs, "profitability_trend", None),
+        valuation_history=getattr(inputs, "valuation_history", None),
+        quote=getattr(inputs, "quote", None),
+        as_of=getattr(inputs, "as_of", None),
+    )
+    style_context = build_style_investment_context(
+        as_of=getattr(inputs, "as_of", None),
+        archetype=archetype, industry=industry,
+        macro_context=macro,
+        knowledge_excerpts=getattr(inputs, "knowledge_excerpts", None),
+    )
     context = getattr(inputs, "valuation_assumption_context", None) or {}
     payload = context.get("industry_valuation_inputs") or {}
     source_manifest = context.get("industry_valuation_provenance") or {}
@@ -249,6 +268,7 @@ def build_industry_valuation_report(inputs: Any) -> dict:
         "assumption_status": "user_documented_not_independently_audited",
         "status": val["status"], "route": route,
         "valuation": val, "cross_checks": cross_checks,
+        "investor_reference": reference, "style_context": style_context,
         "evidence_gate": checked, "macro_context": macro,
         "assumptions": {
             "required_return_pct": payload.get("required_return_pct"),
@@ -283,9 +303,20 @@ def industry_model_prompt_block(model: dict) -> str:
         )
     else:
         lines.append(
-            f"不能计算合理价格。缺口={calculation.get('missing')}；"
-            f"原因={calculation.get('reason')}"
+            f"完整现金流/行业模型缺少预测数据；缺口={calculation.get('missing')}。"
+            "这不代表估值完全缺失，须继续使用下列投资者参考估值框架。"
         )
+    reference = model.get("investor_reference") or {}
+    lines.append(
+        "投资者参考估值（非内在价值，不是保证买点）："
+        f"状态={reference.get('status')}；"
+        f"历史已实施分红锚={reference.get('dividend_basis')}；"
+        f"现金股息收益率参考情景={reference.get('dividend_scenarios')}；"
+        f"历史PB中枢={reference.get('historical_pb_anchor')}；"
+        f"跨周期ROE/盈利收益率={reference.get('normalized_earnings')}；"
+        f"明确的假设={reference.get('key_assumptions')}。"
+    )
+    lines.append(style_investment_prompt_block(model.get("style_context")))
     lines.extend([
         f"宏观环境观测={macro.get('observations')}",
         f"美元兑人民币定性趋势={macro.get('rmb_direction')}，数值可用={macro.get('rmb_is_dated')}",
@@ -295,7 +326,8 @@ def industry_model_prompt_block(model: dict) -> str:
         f"经校准的宏观压力情景={model.get('macro_stress_scenarios')}",
         f"独立第二种模型交叉检验={model.get('cross_checks')}",
         "严禁用海外收入占比直接推美元净敞口，不得将美债利率或A股红利风格自动加成固定PE。",
-        "若模型状态不为calculated，不得给出Python核验过的合理目标价；"
-        "可讨论价格、历史估值分位和风险情景，但必须区分事实、假设及未知。",
+        "若完整模型状态不为calculated，严禁把参考收益率价格说成内在价值或精准目标价；"
+        "但必须说明可用的股息率参考价、历史PB位置及当前隐含收益率，"
+        "不能仅以缺少完整FCFE为由放弃估值。",
     ])
     return "\n".join(lines)

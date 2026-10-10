@@ -1,0 +1,20 @@
+{
+  "events": [
+    {
+      "id": "2026-10-09-dividend-fund-limits",
+      "published_at": "2026-10-09",
+      "event_type": "dividend_fund_subscription_limits",
+      "topic": "A_share_dividend_style",
+      "headline": "国庆后红利系列指数基金出现集中大额申购限制",
+      "facts": {
+        "all_fund_restriction_announcements_oct_8_9": 25,
+        "dividend_index_funds": 9,
+        "dividend_index_ytd_or_quarter_return_note": "中证红利指数三季度以来累计上涨11.53%（截至2026-10-09），属当时市场截面"
+      },
+      "source_title": "财联社：红利基金热到密集限购，红利风格能走多远？",
+      "source_url": "https://www.cls.cn/detail/2500609",
+      "interpretation": "限购可能与基金规模管理、申购压力或保护既有份额有关；仅作拥挤度和增量资金变化的线索，不等于红利见顶，也不是具体股票资金流入的证明。",
+      "max_age_days": 21
+    }
+  ]
+}

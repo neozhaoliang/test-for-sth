@@ -94,12 +94,20 @@ def _summary(series: pd.Series) -> Dict:
     ytd = _period_ret(series, f"{series.index[-1].year - 1}-12-31", str(series.index[-1].date()))
     h1 = _period_ret(series, f"{series.index[-1].year - 1}-12-31", f"{series.index[-1].year}-06-30")
     h2 = _period_ret(series, f"{series.index[-1].year}-06-30", str(series.index[-1].date()))
+    # Twenty/sixty trading-day returns distinguish a *recent* sector rotation
+    # from cumulative YTD leadership; no filling missing history.
+    d20 = ((last / float(series.iloc[-21]) - 1) * 100
+           if len(series) >= 21 and float(series.iloc[-21]) > 0 else None)
+    d60 = ((last / float(series.iloc[-61]) - 1) * 100
+           if len(series) >= 61 and float(series.iloc[-61]) > 0 else None)
     return {
         "latest": round(last, 2),
         "latest_date": str(series.index[-1].date()),
         "ytd_pct": round(ytd, 1) if ytd is not None else None,
         "h1_pct": round(h1, 1) if h1 is not None else None,
         "h2_pct": round(h2, 1) if h2 is not None else None,
+        "d20_pct": round(d20, 2) if d20 is not None else None,
+        "d60_pct": round(d60, 2) if d60 is not None else None,
     }
 
 

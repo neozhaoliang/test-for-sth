@@ -43,9 +43,9 @@ const denied=ctx.renderIndustryValuationLab({
     'annual_cash_flow_per_share','terminal_cash_flow_per_share']},interactive_inputs:null,
     evidence_gate:{missing:['annual_cash_flow_per_share']}},
 });
-assert.ok(denied.includes('当前不输出目标价'));
+assert.ok(denied.includes('当前可用估值数据较少'));
 assert.ok(!denied.includes('sector-price'));
-assert.ok(denied.includes('未来逐年股权自由现金流'));
+assert.ok(denied.includes('完整的股权现金流'));
 
 const model={status:'calculated',route,
   valuation:{status:'calculated',intrinsic_per_share:expected},
