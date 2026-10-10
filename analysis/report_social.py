@@ -283,9 +283,9 @@ async def filter_relevant_knowledge(
     }
     if not kept:
         logger.warning(
-            f"[analysis.report_social] 知识库相关性筛选返回空结果，回退为因果主题预筛选 ({stock_code})"
+            f"[analysis.report_social] 知识库相关性筛选返回空结果，保留因果主题和近期市场风格线索 ({stock_code})"
         )
-        return prefetched
+        kept = set(range(len(prefetched)))
     selected = [e for i, e in enumerate(prefetched) if i in kept]
     # Recall safeguard: a ranking-model opinion about relevance must not erase
     # contemporaneous KOL discussion of sector funds/style. These are clearly
