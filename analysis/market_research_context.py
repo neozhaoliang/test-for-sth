@@ -155,6 +155,8 @@ def build_style_investment_context(
         "dividend_exposure_relevant": belongs,
         "style_regime": regime,
         "dividend_minus_growth_ytd_pp": style.get("dividend_minus_growth_ytd_pp"),
+        "dividend_index_return_pct": style.get("dividend_index_return_pct"),
+        "growth_index_mean_return_pct": style.get("growth_index_mean_return_pct"),
         "style_window": style.get("style_window") or "year to date",
         "style_observed_as_of": style.get("as_of"),
         "style_label": tone,
