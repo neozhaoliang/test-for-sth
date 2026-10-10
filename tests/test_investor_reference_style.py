@@ -82,12 +82,16 @@ def test_dated_fund_limit_event_and_expiry_and_no_future_peeking():
         as_of="2026-10-08",archetype="stable_yield",industry="电力",
         knowledge_excerpts=knowledge)
     assert before["dated_market_events"] == []
-    assert len(before["kol_style_hypotheses"]) == 1
+    assert before["investment_principles"]
+    assert "kol_style_hypotheses" not in before
+    assert "买股票的老木匠" not in str(before)
     live=build_style_investment_context(
         as_of="2026-10-10",archetype="stable_yield",industry="电力",
         knowledge_excerpts=knowledge)
     assert any("dividend_fund" in e["event_type"] for e in live["dated_market_events"])
-    assert len(live["kol_style_hypotheses"]) == 1
+    assert live["investment_principles"]
+    assert "kol_style_hypotheses" not in live
+    assert "买股票的老木匠" not in str(live)
     long_after=build_style_investment_context(
         as_of="2026-11-08",archetype="stable_yield",industry="电力")
     assert long_after["dated_market_events"] == []
@@ -120,3 +124,35 @@ def test_latest_20day_style_beats_old_ytd_labels():
     assert macro["a_share_style"]["style_window"]=="20 trading days"
     assert macro["a_share_style"]["regime"]=="dividend_leading"
     assert macro["a_share_style"]["dividend_minus_growth_ytd_pp"]==7.5
+
+
+def test_knowledge_is_abstracted_without_other_stock_examples():
+    posts=[
+        SimpleNamespace(
+            source="xueqiu_4780688814", author="军师祭咖啡",
+            title="齐鲁银行(SH601665)交易思考",
+            distilled="红利股阶段涨幅大时要谨慎，短线回撤可能侵蚀收益。"
+                      "齐鲁银行(SH601665)的例子不能直接迁移。",
+            published_at="2026-09-22", source_url="https://xueqiu.com/example",
+        ),
+        SimpleNamespace(
+            source="xueqiu_4780688814", author="军师祭咖啡",
+            title="银行和科技估值", distilled="腾讯的成长回报未必胜过低估值高股息银行，"
+                    "买入价格及长期回报要同时衡量。",
+            published_at="2026-09-14", source_url="https://xueqiu.com/example2",
+        ),
+    ]
+    result=build_style_investment_context(
+        as_of="2026-10-10",archetype="stable_yield",industry="电力",
+        knowledge_excerpts=posts,
+        market_context={"stock":{"latest_date":"2026-10-09","d20_pct":4.7}},
+    )
+    assert result["stock_20d_pct"] == 4.7
+    assert result["investment_principles"]
+    for prohibited in ("军师祭咖啡", "齐鲁银行", "腾讯", "601665",
+                       "xueqiu.com", "author", "claim", "kol_style_hypotheses"):
+        assert prohibited not in str(result)
+    from analysis.market_research_context import style_investment_prompt_block
+    prompt=style_investment_prompt_block(result)
+    for prohibited in ("军师祭咖啡", "齐鲁银行", "腾讯", "601665"):
+        assert prohibited not in prompt
