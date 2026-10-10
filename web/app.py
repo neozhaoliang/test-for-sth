@@ -551,6 +551,12 @@ _INDEX_HTML = """<!DOCTYPE html>
   .live-banner,.historical-banner { margin:0; border-radius:10px; }
   .quote { display:inline-flex; gap:12px; align-items:center; }
   .result-summary h3 { margin:0 0 10px; font-size:20px; }
+  .verdict-line { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; padding:4px 0 0; }
+  .verdict-item { color:#4d607b; font-size:14px; }
+  .verdict-item b { color:var(--ink); font-size:15px; }
+  .verdict-industry { color:var(--muted); font-size:13px; }
+  .verdict-summary { margin:16px 0 0; color:#344762; line-height:1.85; font-size:15px; white-space:pre-wrap; overflow-wrap:anywhere; }
+
   .dashboard-charts h3, .valuation-lab h3 { margin:0 0 5px; font-size:21px; }
   .section-caption { font-size:12px; color:var(--muted); margin:0 0 16px; }
   .metric-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:0; }
@@ -2033,11 +2039,6 @@ function renderDashboardCharts(report) {
   const cashRatio=numericOrNull(facts.cash_to_profit_ratio);
   let html='<section class="dashboard-charts"><h3>数据概览与维度图谱</h3>'+
     '<p class="section-caption">图表仅展示当前报告真实返回的数据，不对缺失年份插值，也不自动将半年ROE年化。</p>';
-  if (!scores.length) {
-    html += '<div class="evidence-block" role="status"><b>十二维度评分图暂不可用</b>：'+
-      '模型接口没有返回可用的评分JSON；这是非核心图表服务异常，已完成的文字研究照常展示，'+
-      '不会自动补造12个零分。</div>';
-  }
   html+='<div class="metric-strip">'+
     metricCard('参考股价',price===null?'暂缺':price.toFixed(2)+' 元',quote.quote_time || report.as_of || '报价时点未知')+
     metricCard('市净率 PB',pb===null?'暂缺':pb.toFixed(2)+' 倍',val.valuation_as_of || 'F10时点未知')+
@@ -2047,7 +2048,7 @@ function renderDashboardCharts(report) {
   html+='<div class="chart-grid" style="margin-top:16px;">';
   html+=chartTile('盈利质量的变化','ROE、毛利率与净利率；季报ROE为报告期间累计数，不跨期年化',
     renderProfitabilityTrendChart(report.profitability_trend));
-  html+=chartTile('十二维度的多空力度','模型评分 -10 至 +10；依据仍以证据账本为准',
+  html+=chartTile('十二方面的多空力度','分数从 -10 到 +10，数值越高表示观点越积极',
     scores.length>=6?renderDimensionBars(scores):'');
   html+=chartTile('历年分红与回购','金额和回购分开理解，原图含历史金额及备注',
     (report.dividend_chart || []).length?renderDividendChart(report.dividend_chart):'');
@@ -2089,8 +2090,8 @@ function renderDimensionAnalysisSection(summary) {
       : '<section class="research-panel"><h3>研究分析</h3><p class="section-caption">本次暂无可展示的详细分析。</p></section>';
   }
   let html = '<section class="research-panel research-narrative">' +
-    '<h3>十二维度详细分析</h3>' +
-    '<p class="section-caption">完整分析直接展示，不重复逐项概述；判断依据请结合后文原始证据核对。</p>';
+    '<h3>多维度分析</h3>' +
+    '<p class="section-caption">从公司经营、股价、资金和行业环境等方面逐项判断。</p>';
   order.forEach(([key, label], idx) => {
     const detail = String(analyses[key] || '').trim();
     html += '<article class="analysis-entry">' +
@@ -2371,164 +2372,34 @@ function renderResult(report) {
   const summary = report.summary || {};
   const stanceClass = 'stance-' + (summary.stance || 'neutral');
   html += '<section class="result-summary"><h3>投资结论</h3>';
-  html += '<p><span class="stance-badge ' + stanceClass + '">' + stanceLabel(summary.stance) + '</span>';
-  if (summary.company_quality_stance || summary.current_odds_stance) {
-    html += '<span style="margin-left:12px;">企业长期质量: <b>' +
-      stanceLabel(summary.company_quality_stance) + '</b> ｜ 当前股票赔率: <b>' +
+  html += '<div class="verdict-line"><span class="stance-badge ' + stanceClass + '">' +
+    stanceLabel(summary.stance) + '</span>';
+  if (summary.company_quality_stance) {
+    html += '<span class="verdict-item">公司质量 <b>' +
+      stanceLabel(summary.company_quality_stance) + '</b></span>';
+  }
+  if (summary.current_odds_stance) {
+    html += '<span class="verdict-item">当前价格 <b>' +
       stanceLabel(summary.current_odds_stance) + '</b></span>';
   }
-  if (summary.confidence !== undefined && summary.confidence !== null) {
-    html += '<span style="margin-left:12px;">置信度 ' + Math.round(summary.confidence * 100) + '%</span>';
-  }
   if (summary.lynch_category && lynchCategoryLabel(summary.lynch_category)) {
-    html += '<span class="lynch-category">' + escapeHtml(lynchCategoryLabel(summary.lynch_category)) + '</span>';
+    html += '<span class="lynch-category">' +
+      escapeHtml(lynchCategoryLabel(summary.lynch_category)) + '</span>';
   }
-  if (report.prompt_version) {
-    html += ' <span class="prompt-version">(prompt ' + escapeHtml(report.prompt_version) + ')</span>';
-  }
-  html += '</p>';
   const profile = report.research_profile || {};
-  if (profile.archetype) {
-    html += '<div class="evidence-block"><b>公司研究画像:</b> ' +
-      escapeHtml(profile.label || profile.archetype) +
-      (profile.industry ? ' ｜ 申万行业 ' + escapeHtml(profile.industry) : '') +
-      ' ｜ 重点证据准备度 ' + Math.round((profile.readiness || 0) * 100) + '%';
-    if (profile.priority_dimensions && profile.priority_dimensions.length) {
-      html += '<br><b>优先研究:</b> ' + profile.priority_dimensions.map(escapeHtml).join('、');
-    }
-    if (profile.missing_priority_evidence && profile.missing_priority_evidence.length) {
-      html += '<br><b>重点证据缺口:</b> ' +
-        profile.missing_priority_evidence.map(escapeHtml).join('、');
-    }
-    if (profile.rationale && profile.rationale.length) {
-      html += '<br><span class="credibility-note">' +
-        profile.rationale.map(escapeHtml).join('；') + '</span>';
-    }
-    html += '</div>';
+  if (profile.industry) {
+    html += '<span class="verdict-industry">' + escapeHtml(profile.industry) + '</span>';
   }
-
-  const rq = report.research_quality || {};
-  if (rq.total_dimensions) {
-    html += '<div class="evidence-block"><b>证据质量:</b> 覆盖 ' +
-      Math.round((rq.coverage || 0) * 100) + '% (' +
-      (rq.covered_dimensions || 0) + '/' + rq.total_dimensions + ' 个研究方向)，' +
-      '非社交事实/推导来源占比 ' + Math.round((rq.high_grade_ratio || 0) * 100) + '%';
-    if (rq.missing_dimensions && rq.missing_dimensions.length) {
-      html += '<br><b>尚缺:</b> ' + rq.missing_dimensions.map(escapeHtml).join('、');
-    }
-    if (rq.stale_evidence && rq.stale_evidence.length) {
-      html += '<br><b>已过新鲜度阈值:</b><ul>' +
-        rq.stale_evidence.map(x =>
-          '<li>' + escapeHtml(x.label || x.category || '') +
-          '：截止 ' + escapeHtml(x.as_of || '') +
-          '，距今 ' + escapeHtml(String(x.age_days)) +
-          ' 天（阈值 ' + escapeHtml(String(x.max_age_days)) + ' 天）</li>'
-        ).join('') + '</ul>';
-    }
-    if (rq.warnings && rq.warnings.length) {
-      html += '<br><b>质量提示:</b><br>' + rq.warnings.map(x => '· ' + escapeHtml(x)).join('<br>');
-    }
-    html += '</div>';
+  html += '</div>';
+  if (summary.thesis_summary) {
+    // One brief conclusion, not a second twelve-part outline.
+    html += '<p class="verdict-summary">' + escapeHtml(summary.thesis_summary) + '</p>';
   }
-
-  const validation = report.validation || {};
-  if (validation.ok === true) {
-    const vWarnings = validation.warnings || [];
-    html += '<details class="evidence-block"><summary style="cursor:pointer;"><b>报告合同校验通过</b>' +
-      (vWarnings.length ? '，' + vWarnings.length + ' 条非致命提示' : '') +
-      '</summary>';
-    if (vWarnings.length) {
-      html += '<ul>' + vWarnings.map(x =>
-        '<li>' + escapeHtml(x.message || '') + '</li>'
-      ).join('') + '</ul>';
-    } else {
-      html += '<div class="credibility-note">12维完整、三层立场合法、反方证据/失效条件齐全、置信度未越过证据上限。</div>';
-    }
-    html += '</details>';
-  }
-
-  const review = report.review || {};
-  const dup = review.duplicate_factors || [];
-  const conflicts = review.possible_conflicts || [];
-  const weak = review.weak_links || [];
-  if (dup.length || conflicts.length || weak.length) {
-    html += '<details class="evidence-block"><summary style="cursor:pointer;"><b>研究审查</b>：' +
-      '重复因子 ' + dup.length + '，潜在冲突 ' + conflicts.length +
-      '，弱证据 ' + weak.length +
-      (review.confidence_penalty ? '，置信度扣减 ' + Math.round(review.confidence_penalty * 100) + ' 个百分点' : '') +
-      '</summary>';
-    const groups = [
-      ['重复计分提示', dup],
-      ['潜在冲突', conflicts],
-      ['弱证据链', weak],
-    ];
-    groups.forEach(([title, rows]) => {
-      if (!rows.length) return;
-      html += '<div style="margin-top:8px;"><b>' + title + '</b><ul>' +
-        rows.map(x => '<li>' + escapeHtml(x.message || '') +
-          (x.dimensions && x.dimensions.length ? ' <span class="credibility-note">[' +
-            x.dimensions.map(escapeHtml).join(' / ') + ']</span>' : '') +
-          '</li>').join('') + '</ul></div>';
-    });
-    html += '</details>';
-  }
-
-  // The full twelve-dimension narrative is rendered exactly once below.
-  // thesis_summary is kept in the API for backward compatibility, but is not
-  // shown as a second per-dimension overview when detailed content exists.
-  if (summary.core_counter_evidence) {
-    html += '<div class="counter-evidence-block"><b>与结论相悖的最强证据:</b> ' +
-      escapeHtml(summary.core_counter_evidence) + '</div>';
-  }
-  if (summary.invalidation_condition) {
-    html += '<div class="invalidation-block"><b>如果这个判断错了，会是因为:</b> ' + escapeHtml(summary.invalidation_condition) + '</div>';
-  }
-  if (summary.risk_notes) {
-    html += '<div class="risk-block"><b>风险提示:</b> ' + escapeHtml(summary.risk_notes) + '</div>';
-  }
-
   html += '</section>';
+
   html += renderDashboardCharts(report);
-  html += renderIndustryValuationLab(report);
-
   html += renderDimensionAnalysisSection(summary);
-
-  if (summary.dimension_scores && summary.dimension_scores.length >= 6) {
-    html += '<details class="research-panel"><summary style="cursor:pointer;font-weight:700;">展开十二维度雷达视图</summary>' +
-      renderDimensionRadar(summary.dimension_scores) + '</details>';
-  }
-
-  html += renderEvidenceSection(report);
-
-  if (report.evidence && report.evidence.length) {
-    html += '<details class="evidence-block"><summary style="cursor:pointer;">证据账本 (' +
-      report.evidence.length + ' 条，展开)</summary><table style="width:100%;margin-top:8px;border-collapse:collapse;">' +
-      '<tr><th style="text-align:left">证据</th><th>等级</th><th>类型</th><th>数据时点</th><th style="text-align:left">来源</th></tr>';
-    report.evidence.forEach(e => {
-      html += '<tr><td>' + escapeHtml(e.label || e.category) + '</td><td style="text-align:center">' +
-        escapeHtml(e.source_tier || '') + '</td><td style="text-align:center">' +
-        escapeHtml(e.kind || '') + '</td><td style="text-align:center">' +
-        escapeHtml(e.as_of || '未标注') + '</td><td>' +
-        (e.url ? safeExternalLink(e.url, e.source || '来源') : escapeHtml(e.source || '')) +
-        '</td></tr>';
-    });
-    html += '</table></details>';
-  }
-
-  html += '<h3>候选用户 (' + report.candidates.length + ')</h3>';
-  for (const c of report.candidates) {
-    html += '<div class="candidate">';
-    html += '<b>' + escapeHtml(c.user_nickname) + '</b> <span class="credibility-note">(' + escapeHtml(c.credibility_note) + ', Wilson分 ' + c.wilson_score.toFixed(3) + ')</span>';
-    if (c.historical_thesis && c.historical_thesis.length) {
-      html += '<p>历史观点: ' + c.historical_thesis.map(escapeHtml).join(' | ') + '</p>';
-    }
-    if (c.latest_posts && c.latest_posts.length) {
-      html += '<p>最新发言: ' + c.latest_posts.map(escapeHtml).join(' | ') + '</p>';
-    } else {
-      html += '<p>(未能获取到最新发言)</p>';
-    }
-    html += '</div>';
-  }
+  html += renderIndustryValuationLab(report);
 
   el.innerHTML = html;
   activateIndustryValuationLab(report);
