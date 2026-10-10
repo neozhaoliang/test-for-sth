@@ -79,7 +79,7 @@ report.evidence=[{label:'INTERNAL_LEDGER_TOKEN'}];
 report.candidates=[{user_nickname:'INTERNAL_CANDIDATE_TOKEN',wilson_score:0.5}];
 ctx.renderResult(report);
 const html=nodes.result.innerHTML;
-assert.equal(html.split('投资结论').length-1,1);
+assert.equal(html.split('<h3>投资结论</h3>').length-1,1);
 assert.equal(html.split('DIRECT_CONCLUSION_ONCE').length-1,1);
 assert.equal(html.split('多维度分析').length-1,1);
 keys.forEach(k=>assert.equal(html.split('UNIQUE_DETAIL_'+k.toUpperCase()+'_END').length-1,1));
