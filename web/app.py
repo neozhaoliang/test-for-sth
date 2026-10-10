@@ -2191,19 +2191,19 @@ function renderIndustryValuationLab(report) {
   const macro=model.macro_context || {};
   const primary=route.primary || '';
   let html='<section class="valuation-lab" id="industryValuationLab">'+
-    '<span class="model-tag">行业匹配 · 宏观约束 · 证据校验</span>'+
-    '<h3 style="margin-top:10px;">'+escapeHtml(industryModelName(primary))+' · 估值研究</h3>'+
-    '<p class="section-caption">行业与商业模式决定估值模型；A股风格、美元汇率、美债利率和政策变化先核实传导渠道，不再无依据地修改公司内在价值。</p>';
+    '<span class="model-tag">按行业估值 · 市场环境</span>'+
+    '<h3 style="margin-top:10px;">'+escapeHtml(industryModelName(primary))+' · 估值</h3>'+
+    '<p class="section-caption">不同公司采用不同估值方式；汇率、利率和A股风格会影响股价，但不能直接当作公司盈利。</p>';
   if(!route.primary) {
     html+='<div class="chart-empty">旧版报告尚未包含行业估值结果。请用更新后的Agent重新分析。</div>';
   } else if(calc.status!=='calculated'||!model.interactive_inputs) {
     const missing=(model.evidence_gate || {}).missing || calc.missing || [];
     const invalid=(model.evidence_gate || {}).invalid || [];
     html+='<div class="evidence-block missing"><b>当前不输出目标价</b>'+
-      '<p>模型已选定，但缺少可审计的逐年预测、资本/资产数据或对应来源。</p>'+
-      '<p><b>尚缺：</b>'+escapeHtml(missing.length?missing.map(industryInputLabel).join('、'):'模型适用性或来源校验')+'</p>'+
+      '<p>缺少计算合理价格所需的未来现金流、资本或资产数据，暂时无法给出可靠估值。</p>'+
+      '<p><b>需要补充：</b>'+escapeHtml(missing.length?missing.map(industryInputLabel).join('、'):'公司相关数据')+'</p>'+
       (invalid.length?'<p><b>输入错误：</b>'+escapeHtml(invalid.join('；'))+'</p>':'')+
-      '<p class="section-caption">可在本地 config/valuation_cases.local.json 填入按公司与时点标注的预测和来源；缺失时宁可不定价。</p></div>';
+      '<p class="section-caption">必要的数据尚不充分，不用单一年份ROE或通用倍数强行推导目标价。</p></div>';
   } else {
     const initial=Number(model.interactive_inputs.required_return_pct || 10);
     const initialG=Number(model.interactive_inputs.terminal_growth_pct || 0);
@@ -2391,9 +2391,12 @@ function renderResult(report) {
     html += '<span class="verdict-industry">' + escapeHtml(profile.industry) + '</span>';
   }
   html += '</div>';
-  if (summary.thesis_summary) {
-    // One brief conclusion, not a second twelve-part outline.
-    html += '<p class="verdict-summary">' + escapeHtml(summary.thesis_summary) + '</p>';
+  const conciseThesis=String(summary.thesis_summary || '').trim();
+  const hasDetailedAnalysis=Object.keys(summary.dimension_analyses || {}).length >= 6;
+  // Historical cached reports sometimes put the entire 12-dimension essay in
+  // thesis_summary. Do not repeat it before the actual 12 perspectives.
+  if (conciseThesis && (!hasDetailedAnalysis || conciseThesis.length <= 400)) {
+    html += '<p class="verdict-summary">' + escapeHtml(conciseThesis) + '</p>';
   }
   html += '</section>';
 
