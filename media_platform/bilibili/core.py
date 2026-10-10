@@ -66,6 +66,7 @@ class BilibiliCrawler(AbstractCrawler):
         self.user_agent = utils.get_user_agent()
         self.cdp_manager = None
         self.ip_proxy_pool = None  # Proxy IP pool for automatic proxy refresh
+        self._opus_guest_mode = False
 
     async def start(self):
         playwright_proxy_format, httpx_proxy_format = None, None
@@ -98,20 +99,22 @@ class BilibiliCrawler(AbstractCrawler):
             # Create a client to interact with the xiaohongshu website.
             self.bili_client = await self.create_bilibili_client(httpx_proxy_format)
             if not await self.bili_client.pong():
-                login_obj = BilibiliLogin(
-                    login_type=config.LOGIN_TYPE,
-                    login_phone="",  # your phone number
-                    browser_context=self.browser_context,
-                    context_page=self.context_page,
-                    cookie_str=config.COOKIES,
+                # Public Opus feeds may be readable without a Bilibili account.
+                # Try the guest path first instead of blocking every crawl on QR login.
+                self._opus_guest_mode = (
+                    config.CRAWLER_TYPE == "opus"
+                    and getattr(config, "BILI_OPUS_PUBLIC_FIRST", True)
                 )
-                await login_obj.begin()
-                await self.bili_client.update_cookies(
-                    browser_context=self.browser_context,
-                    urls=self.cookie_urls,
-                )
+                if self._opus_guest_mode:
+                    utils.logger.warning(
+                        "[BilibiliCrawler] Not logged in. Trying public Opus data "
+                        "first. If Bilibili rejects guest access, login will start."
+                    )
+                else:
+                    await self._login_and_refresh_client()
 
             crawler_type_var.set(config.CRAWLER_TYPE)
+
             if config.CRAWLER_TYPE == "search":
                 await self.search()
             elif config.CRAWLER_TYPE == "detail":
@@ -141,6 +144,27 @@ class BilibiliCrawler(AbstractCrawler):
             else:
                 pass
             utils.logger.info("[BilibiliCrawler.start] Bilibili Crawler finished ...")
+
+    async def _login_and_refresh_client(self) -> None:
+        """Authenticate once and copy the real browser cookies to the HTTP client."""
+        login = BilibiliLogin(
+            login_type=config.LOGIN_TYPE,
+            login_phone="",
+            browser_context=self.browser_context,
+            context_page=self.context_page,
+            cookie_str=config.COOKIES,
+        )
+        await login.begin()
+        await self.bili_client.update_cookies(
+            browser_context=self.browser_context,
+            urls=self.cookie_urls,
+        )
+        if not await self.bili_client.pong():
+            raise RuntimeError(
+                "[BilibiliCrawler] Bilibili still reports not logged in after "
+                "authentication. Check the Chrome account state and try again."
+            )
+        self._opus_guest_mode = False
 
     async def search(self):
         """
@@ -902,8 +926,28 @@ class BilibiliCrawler(AbstractCrawler):
                 max_count=config.CRAWLER_MAX_OPUS_COUNT_SINGLENOTES,
             )
         except DataFetchError as ex:
-            utils.logger.error(f"[BilibiliCrawler.get_opus] get creator_id: {creator_id} opus list error: {ex}")
-            return
+            if not self._opus_guest_mode:
+                utils.logger.error(
+                    f"[BilibiliCrawler.get_opus] creator_id={creator_id} opus list error: {ex}"
+                )
+                return
+            utils.logger.warning(
+                f"[BilibiliCrawler.get_opus] Public Opus request rejected: {ex}. "
+                "Trying authenticated request once."
+            )
+            await self._login_and_refresh_client()
+            try:
+                opus_list = await self.bili_client.get_creator_all_opus(
+                    creator_info=creator_info,
+                    crawl_interval=config.CRAWLER_MAX_SLEEP_SEC,
+                    max_count=config.CRAWLER_MAX_OPUS_COUNT_SINGLENOTES,
+                )
+            except DataFetchError as retry_ex:
+                utils.logger.error(
+                    f"[BilibiliCrawler.get_opus] Authenticated Opus request "
+                    f"failed: {retry_ex}"
+                )
+                return
         except Exception as e:
             utils.logger.error(f"[BilibiliCrawler.get_opus] may be been blocked, err:{e}")
             return
