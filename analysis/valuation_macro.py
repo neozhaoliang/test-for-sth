@@ -103,6 +103,10 @@ def build_macro_valuation_context(
                     "status": "observed",
                     "regime": regime,
                     "dividend_minus_growth_ytd_pp": round(spread, 2),
+                    "dividend_index_return_pct": round(returns[0], 2),
+                    "growth_index_mean_return_pct": round(
+                        sum(returns[1:]) / len(growth), 2
+                    ),
                     "style_window": window,
                     "as_of": max(dates).isoformat(),
                     "policy_threshold_pp": threshold,
