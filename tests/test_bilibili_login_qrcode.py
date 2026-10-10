@@ -48,6 +48,8 @@ async def test_qrcode_poll_success_reuses_browser_session():
             return self.body
 
     async def api_get(url, **kwargs):
+        if url.endswith("/x/web-interface/nav"):
+            return Response({"code": 0, "data": {"isLogin": True}})
         if url.endswith("/generate"):
             return Response({"code": 0, "data": {
                 "url": "https://passport.bilibili.com/h5-app/passport/login/scan?test=1",
