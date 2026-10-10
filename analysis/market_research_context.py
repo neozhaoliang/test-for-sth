@@ -155,6 +155,7 @@ def build_style_investment_context(
         "dividend_exposure_relevant": belongs,
         "style_regime": regime,
         "dividend_minus_growth_ytd_pp": style.get("dividend_minus_growth_ytd_pp"),
+        "style_window": style.get("style_window") or "year to date",
         "style_observed_as_of": style.get("as_of"),
         "style_label": tone,
         "dated_market_events": evidence,
@@ -177,7 +178,8 @@ def style_investment_prompt_block(ctx: Optional[Mapping]) -> str:
     rows = [
         "当前市场风格与投资者研究框架（这是投资判断的必要输入，不可略写为宏观资料缺失）：",
         f"截至 {ctx.get('as_of')}，风格={ctx.get('style_regime')}，"
-        f"红利相对成长年内收益差={ctx.get('dividend_minus_growth_ytd_pp')}个百分点；"
+        f"红利相对成长在{ctx.get('style_window')}内的涨跌差="
+        f"{ctx.get('dividend_minus_growth_ytd_pp')}个百分点；"
         f"指标日期={ctx.get('style_observed_as_of')}。",
         f"公司是否与红利风格相关={ctx.get('dividend_exposure_relevant')}。",
         "近期已经公开的市场事件："
