@@ -162,6 +162,7 @@ def build_industry_valuation_report(inputs: Any) -> dict:
         archetype=archetype, industry=industry,
         macro_context=macro,
         knowledge_excerpts=getattr(inputs, "knowledge_excerpts", None),
+        market_context=getattr(inputs, "market_context", None),
     )
     context = getattr(inputs, "valuation_assumption_context", None) or {}
     payload = context.get("industry_valuation_inputs") or {}
