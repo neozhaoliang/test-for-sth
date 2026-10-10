@@ -48,7 +48,12 @@ def _date(value: Any) -> Optional[date]:
 def _field(row: Mapping[str, Any], *names: str) -> str:
     for name in names:
         val = row.get(name)
-        if val is None or val != val:
+        if val is None:
+            continue
+        try:
+            if val != val:
+                continue
+        except (TypeError, ValueError):
             continue
         clean = re.sub(r"\s+", " ", str(val)).strip()
         if clean and clean.lower() not in ("nan", "none", "nat"):
@@ -205,6 +210,10 @@ async def _fetch_exchange_answers(code6: str, *, as_of: date) -> List[dict]:
         except Exception as exc:
             logger.warning("[issuer_business] SSE Q&A %s: %s", code6, str(exc)[:120])
             return []
+    if code6[0] not in ("0", "3"):
+        # BSE investor relations requires a separate source adapter; never
+        # route its stock code through SZSE as if it were a Shenzhen issuer.
+        return []
     # Shenzhen answers are exposed by separate question ID.
     try:
         df = await asyncio.wait_for(
