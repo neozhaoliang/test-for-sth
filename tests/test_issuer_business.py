@@ -89,3 +89,28 @@ def test_prompt_labels_filing_title_and_qa_properly():
     assert "未经公告审计" in text
     assert "不能把提问者问题当公司事实" in text
     assert "订单签订/生效/交付/收入确认/回款" in text
+
+
+@pytest.mark.asyncio
+async def test_concurrent_issuer_queries_share_one_download(monkeypatch):
+    import asyncio
+    import analysis.issuer_business as mod
+    mod._issuer_cache.clear()
+    mod._issuer_inflight.clear()
+    calls=[]
+    async def stub(*args, **kwargs):
+        calls.append(args[0])
+        await asyncio.sleep(.01)
+        return {"status":"available","official_operating_filings":[],
+                "investor_qa":[],"pdf_context":[]}
+    monkeypatch.setattr(mod,"_get_issuer_business_context_uncached",stub)
+    a,b=await asyncio.gather(
+        mod.get_issuer_business_context("SH600023",as_of=date(2026,10,10)),
+        mod.get_issuer_business_context("600023",as_of=date(2026,10,10)),
+    )
+    assert len(calls)==1
+    assert a==b
+    a["status"]="modified"
+    c=await mod.get_issuer_business_context("600023",as_of=date(2026,10,10))
+    assert c["status"]=="available"
+    assert len(calls)==1
