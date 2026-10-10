@@ -94,3 +94,21 @@ async def test_check_login_state_rejects_only_user_id_cookie():
     )
     login = BilibiliLogin("qrcode", context, SimpleNamespace())
     assert await login.check_login_state() is False
+
+
+@pytest.mark.asyncio
+async def test_stale_session_cookie_is_not_treated_as_logged_in():
+    class Response:
+        ok = True
+
+        async def json(self):
+            return {"code": 0, "data": {"isLogin": False}}
+
+    context = SimpleNamespace(
+        cookies=AsyncMock(return_value=[
+            {"name": "SESSDATA", "value": "expired-cookie"},
+        ]),
+        request=SimpleNamespace(get=AsyncMock(return_value=Response())),
+    )
+    login = BilibiliLogin("qrcode", context, SimpleNamespace())
+    assert await login.check_login_state() is False
