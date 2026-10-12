@@ -37,7 +37,7 @@ from analysis.report_contract import (
 )
 from analysis.reviewer import ResearchReview, review_dimension_analyses
 from backtest.llm_client import call_analysis_with_tools, call_json_ex
-from model.m_analysis import CandidateOpinion, StructuredSummary
+from model.m_analysis import CandidateOpinion, StructuredSummary, KnowledgeExcerpt
 from tools.utils import utils
 from analysis.position_risk import position_risk_prompt_block, position_risk_context
 from analysis.company_valuation_knowledge import (
@@ -274,6 +274,21 @@ async def _generate_summary(
             stock_code=str(getattr(inputs, "stock_code", "") or ""),
             as_of=str(getattr(inputs, "as_of", "") or ""),
         )
+    # Preserve the anonymous raw-derived excerpts in the PRIVATE report
+    # container so the public projection can detect and remove any near-verbatim
+    # phrases accidentally copied by the synthesis model.
+    if direct_views:
+        original_entries = getattr(inputs, "knowledge_excerpts", None)
+        if isinstance(original_entries, list):
+            original_entries.extend(
+                KnowledgeExcerpt(
+                    source="private_company_valuation_view",
+                    title="公司历史估值假设",
+                    distilled=item["hypothesis"],
+                    published_at=item["published_at"],
+                )
+                for item in direct_views
+            )
     model = getattr(inputs, "valuation_model_result", None)
     if isinstance(model, dict):
         model["company_view_coverage"] = {
