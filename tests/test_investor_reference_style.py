@@ -47,7 +47,9 @@ def test_reference_values_reproducible_and_never_called_intrinsic_price():
     assert got["dividend_basis"]["observed_median_cash_dividend_per_share"] == .25
     assert got["dividend_basis"]["last_implemented_dividend_per_share"] == .34
     assert got["dividend_basis"]["latest_implemented_dividend_yield_pct"] == 6.39
-    assert [v["reference_price"] for v in got["dividend_scenarios"]] == [2.5,4.55,6.39]
+    assert got["dividend_scenarios"] == []  # no arbitrary 7/5.5/4.5% target bands
+    assert got["return_decomposition"]["status"] == "insufficient_evidence"
+    assert "三个同财年" in "；".join(got["return_decomposition"]["missing_requirements"])
     assert got["historical_pb_anchor"]["median_pb_reference_price"] == 6.31
     assert got["normalized_earnings"]["median_roe_pct"] == 6.5
 
