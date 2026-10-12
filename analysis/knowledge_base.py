@@ -316,7 +316,7 @@ async def _distill_one(raw: Dict) -> str:
             f"[knowledge_base] {raw.get('entry_id')} 原文剔除疑似注入文本 {dropped} 行: {raw.get('title', '')[:40]}"
         )
     prompt = _DISTILL_PROMPT.format(title=raw["title"], content=content)
-    result = await call_text(prompt, max_tokens=768)
+    result = await call_text(prompt, max_tokens=8192)
     distilled = _strip_self_intro((result or "").strip())
     if len(distilled) < len((result or "").strip()):
         logger.warning(
@@ -332,7 +332,8 @@ async def _distill_missing(raws: List[Dict], cache: Dict[str, Dict]) -> Dict[str
         key = _cache_key(raw["source"], raw["entry_id"])
         content_hash = _content_hash(raw["content"])
         cached = cache.get(key)
-        if cached and cached.get("content_hash") == content_hash:
+        if (cached and cached.get("content_hash") == content_hash
+                and (cached.get("distilled") or "").strip()):
             continue
         to_distill.append({**raw, "cache_key": key, "content_hash": content_hash})
 
@@ -375,6 +376,10 @@ async def _distill_missing(raws: List[Dict], cache: Dict[str, Dict]) -> Dict[str
     results = await asyncio.gather(*(_run(raw) for raw in to_distill))
     updated = dict(cache)
     for rec in results:
+        if not (rec.get("distilled") or "").strip():
+            logger.warning("[knowledge_base] article distillation returned empty; "
+                           "not caching and will retry on future runs")
+            continue
         updated[rec["cache_key"]] = rec
         _append_distill_cache(rec)
     return updated
