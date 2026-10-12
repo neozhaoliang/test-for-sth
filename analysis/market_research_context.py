@@ -144,13 +144,18 @@ def _synthesized_principles(excerpts: Iterable, cutoff: date, *,
     matched = set()
     for item in excerpts or []:
         dt = _day(getattr(item, "published_at", None))
-        if dt is None or dt > cutoff or (cutoff - dt).days > 120:
+        if dt is None or dt > cutoff:
             continue
+        age = (cutoff - dt).days
         content = str(getattr(item, "title", "") or "") + " " + str(
             getattr(item, "distilled", "") or "")
-        if not _STYLE_WORDS.search(content) and not (
-            tech and _TECH_FINANCING_RE.search(content)
-        ):
+        evergreen_tech = bool(tech and _TECH_FINANCING_RE.search(content))
+        # A market observation expires quickly, but an investor's capital
+        # allocation method should survive past the last 120 days. General
+        # methods may be referenced for ten years, NEVER as current facts.
+        if age > 120 and (not evergreen_tech or age > 3650):
+            continue
+        if not _STYLE_WORDS.search(content) and not evergreen_tech:
             continue
         if tech and _TECH_FINANCING_RE.search(content):
             matched.add("tech_capital_discipline")
