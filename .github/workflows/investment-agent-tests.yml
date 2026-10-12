@@ -33,6 +33,12 @@ jobs:
       - name: Verify uv lock is in sync
         run: uv lock --locked
 
+      - name: Parse frozen uv lock for runtime install and export
+        run: |
+          uv --version
+          uv export --frozen --offline --no-emit-project --output-file /tmp/locked-requirements.txt
+          uv sync --frozen --dry-run --offline
+
       - name: Compile investment-agent modules
         run: |
           python -m compileall -q \
