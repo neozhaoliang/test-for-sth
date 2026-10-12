@@ -14,7 +14,7 @@ from typing import Any, Mapping
 _PUBLIC_FIELDS = frozenset((
     "stock_code", "stock_name", "research_mode", "as_of", "realtime_quote",
     "industry_comparison", "shareholder_trend", "chip_price_context",
-    "position_risk", "dividend_history", "buyback_history", "dividend_chart",
+    "position_risk", "issuer_capital_context", "dividend_history", "buyback_history", "dividend_chart",
     "commodity_signal", "freight_signal", "margin_signal", "market_context",
     "rmb_signal", "macro_rates", "policy_events", "profitability_trend",
     "fundamentals", "valuation", "valuation_model", "valuation_history",
