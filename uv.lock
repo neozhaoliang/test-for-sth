@@ -750,7 +750,7 @@ wheels = [
 
 [package.optional-dependencies]
 socks = [
-    { name = "socksio" },
+    { name = "socksio", version = "1.0.0", source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" } },
 ]
 
 [[package]]
