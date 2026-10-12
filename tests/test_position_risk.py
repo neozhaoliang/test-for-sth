@@ -86,8 +86,9 @@ def test_policy_event_available_only_after_publication():
     assert _issuer_events("SH600023",date(2026,10,12))==[]
 
 
-def test_same_negative_returns_without_verified_policy_do_not_force_bear():
+def test_three_downside_families_without_verified_policy_stay_risk_watch():
     x=Inputs(stock_code="SZ000001")
+    x.valuation_model_result={"macro_context":{}}
     ctx=position_risk_context(x)
     assert not ctx["risk_asymmetry_triggered"]
     assert ctx["regime"]=="risk_watch"
@@ -143,7 +144,6 @@ def test_low_position_only_no_automatic_bullish_recommendation():
     result=position_risk_context(x)
     assert result["regime"]=="low_price_recovery_watch"
     assert not result["risk_asymmetry_triggered"]
-    assert "尚未证实" not in result["interpretation"] or True
 
 
 def test_distinct_margin_and_trend_not_double_counted():
