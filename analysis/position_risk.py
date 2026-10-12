@@ -187,6 +187,33 @@ def position_risk_context(inputs: Any) -> dict:
                    f"官方发布：{e['headline']}。海外营收占比约{external:.1f}%；"
                    "该名单不等同全面商业禁售，公司公告表示当时订单、生产和供应链未受实质影响；后续仍须核验。",
                    severity="material")
+    # Verified inside sales + new equity issuance is a distinct capital
+    # allocation/recovery question, not an automatic claim of shareholder loss.
+    # It does not duplicate market margin financing or the price trend.
+    issuer = getattr(inputs, "issuer_capital_context", None) or {}
+    confirmed = issuer.get("source_verified_events") or []
+    if archetype == "technology" and issuer.get("status") == "source_verified_events":
+        recent_sales = [
+            e for e in confirmed if e.get("status") == "completed"
+            and e.get("event_type") == "insider_sale"
+            and _dt(e.get("disclosed_at"))
+            and 0 <= (cutoff - _dt(e["disclosed_at"])).days <= 365
+        ]
+        funded = [
+            e for e in confirmed if e.get("status") == "completed"
+            and e.get("event_type") == "equity_issuance"
+            and _dt(e.get("disclosed_at"))
+            and _dt(e["disclosed_at"]) <= cutoff
+        ]
+        if price_ok and recent_sales and funded:
+            signal(
+                "capital_allocation", "内部人已减持且公司完成新增股权融资",
+                len(recent_sales),
+                max(recent_sales[0]["disclosed_at"], funded[0]["disclosed_at"]),
+                "官方公告确认个人/控股股东已减持、公司另行发行新股募集资金；"
+                "两者不能混记为公司分红或回购。现有股东承担估值与每股稀释风险，"
+                "新增资金能否获得足够回报仍需看项目兑现，而不能推断违法套现。",
+            )
     if margin and _fresh(margin.get("latest_date"), cutoff, 10):
         balance = _n(margin.get("latest_balance_yi"))
         change = _n(margin.get("change_pct"))
@@ -284,6 +311,8 @@ def enforce_asymmetric_odds(summary, ctx: dict):
         key_points.append(f"红利相对成长领先{risks['market_style']['value']:.2f}个百分点")
     if "price_trend" in risks:
         key_points.append(f"距52周高点回撤{risks['price_trend']['value']:.1f}%且趋势偏弱")
+    if "capital_allocation" in risks:
+        key_points.append("官方披露内部人减持与新增股权融资，资本配置及每股回报有待兑现")
     summary.thesis_summary = (
         "当前股票赔率看空：" + "；".join(key_points[:5])
         + "。企业真实增长并不能自动抵消估值和政策风险，需跟踪订单、回款与市场风格变化。"
