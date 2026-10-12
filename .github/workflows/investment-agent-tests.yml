@@ -56,6 +56,7 @@ jobs:
             analysis/valuation_assumptions.py \
             analysis/valuation_payout.py \
             analysis/chip_position.py \
+            analysis/position_risk.py \
             analysis/rd_team.py \
             analysis/primary_sources.py \
             analysis/policy_context.py \
@@ -153,6 +154,7 @@ jobs:
             tests/test_valuation_filing_join.py \
             tests/test_valuation_real_filings_2025.py \
             tests/test_chip_position.py \
+            tests/test_position_risk.py \
             tests/test_market_context_asof.py \
             tests/test_realtime_price_asof.py \
             tests/test_margin_asof.py \
