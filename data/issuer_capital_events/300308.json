@@ -75,5 +75,18 @@
       "source_url": "https://static.cninfo.com.cn/finalpage/2026-09-01/1225538120.PDF",
       "interpretation": "40亿至80亿元为回购预算方案，非已经回购支出；拟用于激励/员工持股，不是注销式减少流通股的现金股东回报。"
     }
+  ],
+  "reconciliation": [
+    {
+      "id": "2026-07-30-ownership-overlap",
+      "disclosed_at": "2026-07-30",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2026-07-30/1225449716.PDF",
+      "reported_group_sales_shares": 6208552,
+      "component_event_ids": [
+        "300308-2025-11-25-executive",
+        "300308-2026-01-16-controlling-holder"
+      ],
+      "interpretation": "6208552=5500000+708552；2026-07-30持股比例变动公告汇总了已经披露的两笔交易，不能再作为第三笔出售累加。H股发行及股权激励新增股本也使持股比例降低，不能将所有比例下降视作减持。"
+    }
   ]
 }
