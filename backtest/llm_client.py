@@ -437,5 +437,27 @@ async def call_analysis_with_tools(
 
 
 async def call_text(prompt: str, max_tokens: int = 2048) -> Optional[str]:
-    """调用 LLM 生成自由格式文本 (不解析 JSON)，调用异常时返回 None。"""
-    return await _call_llm_raw(prompt, max_tokens)
+    """Generate free-form text; retry once when reasoning exhausts output budget.
+
+    Both reasoning and final prose consume Anthropic-compatible max_tokens.
+    This path is used by article distillation and must not silently cache an
+    empty result when DeepSeek spends the entire cap on thinking.
+    """
+    raw_text, stop_reason = await _call_llm_raw_ex(prompt, max_tokens)
+    if stop_reason == "max_tokens":
+        retry_limit = max(16384, max_tokens * 2)
+        utils.logger.warning(
+            "[llm_client.call_text] generation truncated at max_tokens=%d "
+            "(text_chars=%d); retrying once with max_tokens=%d",
+            max_tokens, len(raw_text or ""), retry_limit,
+        )
+        retried, retry_reason = await _call_llm_raw_ex(prompt, retry_limit)
+        if retried and retry_reason != "max_tokens":
+            return retried
+        utils.logger.warning(
+            "[llm_client.call_text] retry did not yield a complete response "
+            "(stop_reason=%s); leaving item unprocessed",
+            retry_reason,
+        )
+        return None
+    return raw_text or None
