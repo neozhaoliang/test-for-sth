@@ -185,7 +185,7 @@ def position_risk_context(inputs: Any) -> dict:
             signal("foreign_policy", "已发生的海外政策事件与高海外业务敞口",
                    external, e["published_at"],
                    f"官方发布：{e['headline']}。海外营收占比约{external:.1f}%；"
-                   "该名单不等同全面商业禁售，后续采购和合规影响仍须核验。",
+                   "该名单不等同全面商业禁售，公司公告表示当时订单、生产和供应链未受实质影响；后续仍须核验。",
                    severity="material")
     if margin and _fresh(margin.get("latest_date"), cutoff, 10):
         balance = _n(margin.get("latest_balance_yi"))
@@ -272,15 +272,20 @@ def enforce_asymmetric_odds(summary, ctx: dict):
     summary.stance = "bearish"
     # Preserve business-quality assessment: bearish equity odds is NOT a
     # conclusion that the product or company has no technology or customers.
-    top = [s["reason"] for s in ctx.get("risk_signals") or []
-           if s["family"] in ("foreign_policy", "valuation", "cash_conversion",
-                              "market_style", "price_trend")]
-    # This summary replaces a neutral or optimistic draft whose direction is
-    # now contradicted by verified risk concurrence, using only seen facts.
+    risks = {s["family"]: s for s in ctx.get("risk_signals") or []}
+    key_points = []
+    if "foreign_policy" in risks:
+        key_points.append("已发生的海外政策列名与高海外收入暴露同时存在（不等于全面禁售）")
+    if "valuation" in risks:
+        key_points.append(f"PB在历史{risks['valuation']['value']:.1f}%分位")
+    if "cash_conversion" in risks:
+        key_points.append(f"经营现金流/利润约{risks['cash_conversion']['value']:.2f}")
+    if "market_style" in risks:
+        key_points.append(f"红利相对成长领先{risks['market_style']['value']:.2f}个百分点")
+    if "price_trend" in risks:
+        key_points.append(f"距52周高点回撤{risks['price_trend']['value']:.1f}%且趋势偏弱")
     summary.thesis_summary = (
-        "当前股票赔率偏空："
-        + "；".join(top[:3])
-        + "。尽管公司可能仍有真实的经营增长，这些风险在当前估值下难以忽略；"
-          "下行并非必然，后续需关注现金回款、海外客户和市场风格的实际变化。"
-    )[:330]
+        "当前股票赔率看空：" + "；".join(key_points[:5])
+        + "。企业真实增长并不能自动抵消估值和政策风险，需跟踪订单、回款与市场风格变化。"
+    )
     return summary
