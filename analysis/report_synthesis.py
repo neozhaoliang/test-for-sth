@@ -38,7 +38,9 @@ from analysis.reviewer import ResearchReview, review_dimension_analyses
 from backtest.llm_client import call_analysis_with_tools, call_json_ex
 from model.m_analysis import CandidateOpinion, StructuredSummary
 from tools.utils import utils
-from analysis.position_risk import position_risk_prompt_block, enforce_asymmetric_odds
+from analysis.position_risk import (
+    position_risk_prompt_block, position_risk_context, enforce_asymmetric_odds
+)
 
 
 _PROCESS_TERM_RE = re.compile(r"六查|第[一二三四五六七八九十\d]+步|检查项\d*")
@@ -194,6 +196,19 @@ async def _generate_summary(
         inputs.valuation_model_result = build_industry_valuation_report(inputs)
         prompt += ("\\n\\n## 行业专用估值与A股宏观传导（不可虚构价值）\\n"
                    + industry_model_prompt_block(inputs.valuation_model_result))
+
+    if (getattr(inputs, "research_mode", "") == "historical"
+            and as_of and as_of < "2026-10-09"):
+        # A post-hoc research methodology must not be backported into earlier
+        # snapshots; actual historical issuer events remain in source archives.
+        inputs.position_risk = {
+            "status": "historical_method_not_available",
+            "regime": "not_assessed",
+            "risk_signals": [],
+            "risk_asymmetry_triggered": False,
+        }
+    else:
+        inputs.position_risk = position_risk_context(inputs)
 
     # The deterministic overlay is injected after macro/valuation: when an
     # extreme valuation and confirmed independent risks converge, the LLM
