@@ -38,6 +38,7 @@ from analysis.reviewer import ResearchReview, review_dimension_analyses
 from backtest.llm_client import call_analysis_with_tools, call_json_ex
 from model.m_analysis import CandidateOpinion, StructuredSummary
 from tools.utils import utils
+from analysis.position_risk import position_risk_prompt_block, enforce_asymmetric_odds
 
 
 _PROCESS_TERM_RE = re.compile(r"六查|第[一二三四五六七八九十\d]+步|检查项\d*")
@@ -194,6 +195,13 @@ async def _generate_summary(
         prompt += ("\\n\\n## 行业专用估值与A股宏观传导（不可虚构价值）\\n"
                    + industry_model_prompt_block(inputs.valuation_model_result))
 
+    # The deterministic overlay is injected after macro/valuation: when an
+    # extreme valuation and confirmed independent risks converge, the LLM
+    # must explain rather than average positive and negative bullet counts.
+    context = getattr(inputs, "position_risk", None)
+    if context:
+        prompt += "\n\n" + position_risk_prompt_block(context)
+
     # 工具调用路径: 强制十二维度逐一分析后提交
     analyses, submit_input, tool_reason = await call_analysis_with_tools(
         prompt,
@@ -268,6 +276,8 @@ async def _generate_summary(
         dimension_scores=dimension_scores,
         dimension_analyses=analyses or None,
     )
+    if context:
+        summary = enforce_asymmetric_odds(summary, context)
     return summary, review
 
 
