@@ -139,6 +139,49 @@ def _sanitize_narrative(payload: Any, names: set[str], cases: set[str],
     return payload
 
 
+def _capital_alignment_summary(private: Any) -> dict | None:
+    """Return independent, typed issuer capital facts, not research-source posts."""
+    if not isinstance(private, dict):
+        return None
+    events = private.get("source_verified_events") or []
+    actual = []
+    issued = []
+    plans = []
+    for r in events:
+        if not isinstance(r, dict) or r.get("source_tier") != "official_filing":
+            continue
+        base = {
+            "disclosed_at": r.get("disclosed_at"),
+            "source_url": r.get("source_url"),
+            "actor": r.get("actor") or ("上市公司" if r.get("actor_type") == "issuer" else ""),
+            "shares": r.get("shares"),
+        }
+        if r.get("event_type") in ("insider_sale", "holder_sale") and r.get("status") == "completed":
+            actual.append({**base, "average_sale_price_yuan": r.get("price_yuan"),
+                           "category": r.get("event_type"), "trade_start": r.get("trade_start"),
+                           "trade_end": r.get("trade_end")})
+        elif r.get("event_type") == "equity_issuance" and r.get("status") == "completed":
+            issued.append({**base, "category": "equity_issuance",
+                           "issue_price_hkd": r.get("issue_price_hkd")})
+        elif r.get("event_type") == "corporate_buyback":
+            plans.append({**base, "category": "corporate_buyback",
+                          "status": r.get("status"), "planned_use": r.get("planned_use")})
+    if not actual and not issued and not plans:
+        return None
+    return {
+        "completed_holder_sales": actual[:10],
+        "equity_issuances": issued[:5],
+        "corporate_buybacks": plans[:5],
+        "reconciled_ownership_not_additional_sales": [
+            {"disclosed_at": r.get("disclosed_at"), "reported_group_sales_shares":
+             r.get("reported_group_sales_shares"), "fully_reconciled":
+             r.get("fully_reconciled")}
+            for r in (private.get("reconciled_ownership_not_additional_sales") or [])[:5]
+        ],
+        "basis": "仅根据正式实施公告。减持所得属于卖方，股权融资进入公司，回购方案不代表已执行。",
+    }
+
+
 def public_stock_report(raw: Mapping[str, Any]) -> dict:
     """Safe copy for REST/UI; private source data is never serialized."""
     names, cases, excerpts = _private_cues(raw)
@@ -148,6 +191,9 @@ def public_stock_report(raw: Mapping[str, Any]) -> dict:
         for key, value in raw.items()
         if key in _PUBLIC_FIELDS
     }
+    derived_capital = _capital_alignment_summary(raw.get("issuer_capital_context"))
+    if derived_capital:
+        out["shareholder_capital_summary"] = derived_capital
     model = out.get("valuation_model")
     if isinstance(model, dict):
         out["valuation_model"] = {
