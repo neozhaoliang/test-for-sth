@@ -171,11 +171,12 @@ def public_stock_report(raw: Mapping[str, Any]) -> dict:
             for key, item in analyses.items():
                 if isinstance(item, str):
                     analyses[key] = _safe_prose(item, names, cases, excerpts, target)
-    # Not all useful fields are prose. This final pass protects old auxiliary
-    # free-text fields while preserving their numeric observations.
-    for field in ("position_risk", "policy_events", "research_profile"):
-        if field in out:
-            out[field] = _sanitize_narrative(
-                out[field], names, cases, excerpts, target
-            )
+    # A provider may add a free-text field anywhere in a future result. Scan
+    # the entire allow-listed response, not only today's visible UI sections.
+    # The target issuer's own name/code are exempt from unrelated-case checks.
+    protected_identity = {
+        key: out.pop(key) for key in ("stock_code", "stock_name") if key in out
+    }
+    out = _sanitize_narrative(out, names, cases, excerpts, target)
+    out.update(protected_identity)
     return out
