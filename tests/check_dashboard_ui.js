@@ -116,8 +116,13 @@ report.valuation_model.investor_reference={
   status:'indicative_reference',
   dividend_basis:{years:[2021,2024,2025],observed_median_cash_dividend_per_share:.25,
     median_implemented_dividend_yield_pct:4.70},
-  dividend_scenarios:[{name:'中性',annual_cash_dividend_per_share:.25,
-    assumed_cash_dividend_yield_pct:5.5,reference_price:4.55}],
+  return_decomposition:{status:'illustrative_scenarios',holding_years:5,
+    terminal_pb_basis:'基于历史PB的终点假设',
+    scenarios:[{name:'中性',sustainable_roe_pct:8,payout_pct:50,
+      retention_conversion_pct:50,growth_contribution_pct:2,
+      cash_dividend_yield_pct:3,valuation_change_annualized_pct:1.5,
+      illustrative_total_return_pct:6.5,required_return_pct:10,
+      conditional_reference_price:5.12}]},
   historical_pb_anchor:{window_years:5,median_pb:1.15,
     median_pb_reference_price:6.31},
 };
@@ -136,7 +141,9 @@ report.valuation_model.style_context={
 ctx.renderResult(report);
 const newer=nodes.result.innerHTML;
 assert.ok(newer.includes('投资者参考估值'));
-assert.ok(newer.includes('4.55元'));
+assert.ok(newer.includes('5.12元'));
+assert.ok(newer.includes('留存转化'));
+assert.ok(!newer.includes('要求股息率'));
 assert.ok(newer.includes('近20个交易日'));
 assert.ok(newer.includes('红利指数基金大额申购限制'));
 for(const forbidden of ['军师祭咖啡','齐鲁银行','腾讯','601665',
