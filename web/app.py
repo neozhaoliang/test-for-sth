@@ -2093,6 +2093,55 @@ function renderDashboardCharts(report) {
 
 // Render precisely one full research narrative. Never duplicate it as a
 // per-dimension thesis overview, and never hide the detailed analysis in <details>.
+function renderIssuerCapitalSection(report) {
+  const context=report.issuer_capital_context || {};
+  const verified=context.source_verified_events || [];
+  const clues=context.title_only_clues || [];
+  if(!verified.length && !clues.length)return '';
+  const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('zh-CN'):'未核实';
+  const kind={
+    insider_sale:'大股东/董监高减持',
+    holder_sale:'其他股东减持',
+    equity_issuance:'公司发行新股融资',
+    corporate_buyback:'公司回购'
+  };
+  let html='<section class="research-panel capital-flow-section">'+
+    '<h3>资本流向：减持、融资与回购</h3>'+
+    '<p class="section-caption">区分卖股股东个人获得现金、公司发行新股获得资金，以及公司使用资金回购。'
+    +'仅统计有明确披露的案例，不代表全部历史交易。</p>';
+  html+='<div style="overflow-x:auto"><table class="investor-band-table">'+
+    '<thead><tr><th>公告日期</th><th>交易性质</th><th>实际规模或预算</th><th>状态 / 官方文件</th></tr></thead><tbody>';
+  verified.slice(0,9).forEach(e=>{
+    let magnitude='';
+    if(e.event_type==='corporate_buyback'){
+      magnitude=(e.min_budget_yuan!==undefined&&e.max_budget_yuan!==undefined)
+        ?(fmt(e.min_budget_yuan/1e8)+'—'+fmt(e.max_budget_yuan/1e8)+'亿元预算（非已执行金额）'):'预算暂缺';
+      if(e.planned_use==='equity_incentive_or_employee_share_plan')
+        magnitude+='，用于激励/员工持股';
+    }else if(e.event_type==='equity_issuance'){
+      magnitude=(typeof e.shares==='number'?fmt(e.shares)+'股新股':'股数未核')+
+        (typeof e.estimated_net_proceeds_hkd==='number'
+        ?'，预计融资净额'+fmt(e.estimated_net_proceeds_hkd/1e8)+'亿港元':'');
+    }else{
+      magnitude=(typeof e.shares==='number'?fmt(e.shares)+'股':'数量未核')+
+        (typeof e.price_yuan==='number'?'，公告均价'+fmt(e.price_yuan)+'元/股':'，价格未披露');
+    }
+    html+='<tr><td>'+escapeHtml(e.disclosed_at||'未知')+'</td>'+
+      '<td>'+escapeHtml(kind[e.event_type]||'公司交易')+
+      (e.actor?'<div class="section-caption">'+escapeHtml(e.actor)+'</div>':'')+'</td>'+
+      '<td>'+escapeHtml(magnitude)+'</td>'+
+      '<td>'+escapeHtml(e.status==='completed'?'已执行/完成':'计划，非已实施')+
+      (e.source_url?' · '+safeExternalLink(e.source_url,'公告'):'')+'</td></tr>';
+  });
+  html+='</tbody></table></div>';
+  if(clues.length)html+='<p class="section-caption">另有'+clues.length+
+    '条相关公告标题待核实实际成交和金额；暂不计入上述已执行交易。</p>';
+  html+='<p class="section-caption">减持交易价是否为当时高位，必须与相应日期的历史复权行情和估值分位核对。'
+    +'新股融资不必然毁损价值，但募集资金的每股回报和股权稀释不能被增长叙事掩盖；'
+    +'用于员工激励的回购不是注销式回购。</p></section>';
+  return html;
+}
+
 function renderDimensionAnalysisSection(summary) {
   const analyses = (summary || {}).dimension_analyses || {};
   const order = [
@@ -2529,7 +2578,8 @@ function renderResult(report) {
   const position = report.position_risk || {};
   if(position.regime==='bearish_concurrence'){
     const names={valuation:'估值仍高',price_trend:'趋势偏弱',cash_conversion:'现金回款不足',
-      foreign_policy:'海外政策风险',market_style:'市场风格转弱',margin_context:'融资盘调整'};
+      foreign_policy:'海外政策风险',market_style:'市场风格转弱',margin_context:'融资盘调整',
+      capital_allocation:'内部人减持与股权融资'};
     const risks=(position.risk_signals||[]).map(x=>names[x.family]).filter(Boolean);
     if(risks.length) html+='<p class="section-caption">当前风险共振：'+
       escapeHtml([...new Set(risks)].join(' · '))+'</p>';
@@ -2544,6 +2594,7 @@ function renderResult(report) {
   html += '</section>';
 
   html += renderDashboardCharts(report);
+  html += renderIssuerCapitalSection(report);
   html += renderDimensionAnalysisSection(summary);
   html += renderIndustryValuationLab(report);
 
