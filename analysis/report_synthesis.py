@@ -38,8 +38,9 @@ from analysis.reviewer import ResearchReview, review_dimension_analyses
 from backtest.llm_client import call_analysis_with_tools, call_json_ex
 from model.m_analysis import CandidateOpinion, StructuredSummary
 from tools.utils import utils
-from analysis.position_risk import (
-    position_risk_prompt_block, position_risk_context, enforce_asymmetric_odds
+from analysis.position_risk import position_risk_prompt_block, position_risk_context
+from analysis.investment_method_distiller import (
+    compile_investment_methods, investment_manager_prompt,
 )
 
 
@@ -225,6 +226,23 @@ async def _generate_summary(
     if context:
         prompt += "\n\n" + position_risk_prompt_block(context)
 
+    # Subjective investment methods are synthesized from private knowledge,
+    # then anonymized and checked before entering the final report model.
+    # The model is free to disagree with any method, including its authors.
+    profile = getattr(inputs, "research_profile", None)
+    style_ctx = (getattr(inputs, "valuation_model_result", None) or {}).get("style_context") or {}
+    methods = await compile_investment_methods(
+        getattr(inputs, "knowledge_excerpts", None) or [],
+        as_of=str(getattr(inputs, "as_of", "") or ""),
+        archetype=getattr(profile, "archetype", "general"),
+        industry=getattr(profile, "industry", ""),
+        stock_name=str(getattr(inputs, "stock_name", "") or ""),
+        fallback_principles=style_ctx.get("investment_principles") or [],
+    )
+    prompt += "\n\n" + investment_manager_prompt(
+        methods, archetype=getattr(profile, "archetype", "general"),
+    )
+
     # 工具调用路径: 强制十二维度逐一分析后提交
     analyses, submit_input, tool_reason = await call_analysis_with_tools(
         prompt,
@@ -299,8 +317,8 @@ async def _generate_summary(
         dimension_scores=dimension_scores,
         dimension_analyses=analyses or None,
     )
-    if context:
-        summary = enforce_asymmetric_odds(summary, context)
+    # Data validity is enforced in report validation. A deterministic screening
+    # rule must NEVER overwrite the LLM's portfolio-manager conclusion.
     return summary, review
 
 
