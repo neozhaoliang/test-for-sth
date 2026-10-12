@@ -30,7 +30,7 @@ from typing import Dict, List, Optional
 from analysis.a_share_structure import get_a_share_structure
 from analysis.candidates import find_candidates
 from analysis.chip_position import assess_chip_price_context
-from analysis.position_risk import validated_quote_or_close, position_risk_context
+from analysis.position_risk import validated_quote_or_close
 from analysis.commodity import get_cycle_commodity_signal, get_rmb_trend_signal
 from analysis.freight import get_container_freight_signal
 from analysis.fundamentals import get_ths_fundamentals
@@ -445,7 +445,6 @@ async def generate_report(
     )
     inputs.research_profile = research_profile
     inputs.research_quality = research_quality
-    inputs.position_risk = position_risk_context(inputs)
     summary, review = await _generate_summary(inputs, candidates, evidence)
     # 置信度同时受全局证据覆盖率、公司画像重点证据准备度限制，
     # 再扣除跨维度冲突/弱证据惩罚。
