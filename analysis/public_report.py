@@ -118,7 +118,7 @@ def _safe_prose(value: str, names: set[str], cases: set[str],
         if part and not _contaminated(part, names, cases, excerpts, target_code)
     ]
     result = "".join(clean).strip()
-    return result or "这一方面需要结合本公司的经营、估值和市场数据重新分析。"
+    return result or "本项需要依据本公司数据重新分析。"
 
 
 def _sanitize_narrative(payload: Any, names: set[str], cases: set[str],
