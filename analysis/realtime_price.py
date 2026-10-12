@@ -22,6 +22,7 @@
 """
 
 import re
+import math
 import logging
 import time
 from datetime import date, timedelta
@@ -137,11 +138,31 @@ async def get_realtime_quote(stock_code: str) -> Optional[Dict]:
         return None
 
     row = matched.iloc[0]
+    try:
+        price = float(row["最新价"])
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(price) or price <= 0:
+        logger.warning("[realtime_price] %s 实时行情最新价无效: %s", stock_code, price)
+        return None
+    try:
+        change = float(row["涨跌幅"])
+    except (TypeError, ValueError):
+        change = None
+    if change is not None and not math.isfinite(change):
+        change = None
+    try:
+        volume = float(row["成交量"])
+    except (TypeError, ValueError):
+        volume = None
+    if volume is not None and (not math.isfinite(volume) or volume < 0):
+        volume = None
     return {
-        "latest_price": float(row["最新价"]),
-        "change_pct": float(row["涨跌幅"]),
-        "volume": float(row["成交量"]),
-        "timestamp": str(row["时间戳"]),
+        "latest_price": price,
+        "change_pct": change,
+        "volume": volume,
+        "timestamp": str(row.get("时间戳") or ""),
+        "quote_mode": "live_spot",
     }
 
 
@@ -175,6 +196,8 @@ async def get_historical_quote(
         return None
     last = rows.iloc[-1]
     latest = float(last["close"])
+    if not math.isfinite(latest) or latest <= 0:
+        return None
     change_pct = None
     if len(rows) >= 2:
         prev = float(rows.iloc[-2]["close"])
