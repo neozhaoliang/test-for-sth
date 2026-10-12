@@ -2094,51 +2094,44 @@ function renderDashboardCharts(report) {
 // Render precisely one full research narrative. Never duplicate it as a
 // per-dimension thesis overview, and never hide the detailed analysis in <details>.
 function renderIssuerCapitalSection(report) {
-  const context=report.issuer_capital_context || {};
-  const verified=context.source_verified_events || [];
-  const clues=context.title_only_clues || [];
-  if(!verified.length && !clues.length)return '';
-  const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('zh-CN'):'未核实';
-  const kind={
-    insider_sale:'大股东/董监高减持',
-    holder_sale:'其他股东减持',
-    equity_issuance:'公司发行新股融资',
-    corporate_buyback:'公司回购'
-  };
+  // Only render the public-safe, normalized company capital ledger. The full
+  // private issuer capital context is intentionally never returned by API.
+  const data=report.shareholder_capital_summary || {};
+  const sales=data.completed_holder_sales || [];
+  const issuances=data.equity_issuances || [];
+  const buybacks=data.corporate_buybacks || [];
+  const reconciled=data.reconciled_ownership_not_additional_sales || [];
+  if(!sales.length&&!issuances.length&&!buybacks.length)return '';
+  const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('zh-CN'):'暂缺';
   let html='<section class="research-panel capital-flow-section">'+
-    '<h3>资本流向：减持、融资与回购</h3>'+
-    '<p class="section-caption">区分卖股股东个人获得现金、公司发行新股获得资金，以及公司使用资金回购。'
-    +'仅统计有明确披露的案例，不代表全部历史交易。</p>';
-  html+='<div style="overflow-x:auto"><table class="investor-band-table">'+
-    '<thead><tr><th>公告日期</th><th>交易性质</th><th>实际规模或预算</th><th>状态 / 官方文件</th></tr></thead><tbody>';
-  verified.slice(0,9).forEach(e=>{
-    let magnitude='';
-    if(e.event_type==='corporate_buyback'){
-      magnitude=(e.min_budget_yuan!==undefined&&e.max_budget_yuan!==undefined)
-        ?(fmt(e.min_budget_yuan/1e8)+'—'+fmt(e.max_budget_yuan/1e8)+'亿元预算（非已执行金额）'):'预算暂缺';
-      if(e.planned_use==='equity_incentive_or_employee_share_plan')
-        magnitude+='，用于激励/员工持股';
-    }else if(e.event_type==='equity_issuance'){
-      magnitude=(typeof e.shares==='number'?fmt(e.shares)+'股新股':'股数未核')+
-        (typeof e.estimated_net_proceeds_hkd==='number'
-        ?'，预计融资净额'+fmt(e.estimated_net_proceeds_hkd/1e8)+'亿港元':'');
-    }else{
-      magnitude=(typeof e.shares==='number'?fmt(e.shares)+'股':'数量未核')+
-        (typeof e.price_yuan==='number'?'，公告均价'+fmt(e.price_yuan)+'元/股':'，价格未披露');
-    }
-    html+='<tr><td>'+escapeHtml(e.disclosed_at||'未知')+'</td>'+
-      '<td>'+escapeHtml(kind[e.event_type]||'公司交易')+
-      (e.actor?'<div class="section-caption">'+escapeHtml(e.actor)+'</div>':'')+'</td>'+
-      '<td>'+escapeHtml(magnitude)+'</td>'+
-      '<td>'+escapeHtml(e.status==='completed'?'已执行/完成':'计划，非已实施')+
-      (e.source_url?' · '+safeExternalLink(e.source_url,'公告'):'')+'</td></tr>';
+    '<h3>股东减持、融资与回购</h3>'+
+    '<p class="section-caption">把卖方变现、公司融资和回购分开看，均以公司正式公告为准。</p>'+
+    '<div style="overflow-x:auto"><table class="investor-band-table">'+
+    '<thead><tr><th>公告日</th><th>交易主体与性质</th><th>实际规模</th><th>出处</th></tr></thead><tbody>';
+  sales.slice(0,10).forEach(e=>{
+    const price=typeof e.average_sale_price_yuan==='number'?'，均价'+fmt(e.average_sale_price_yuan)+'元/股':'，均价暂缺';
+    html+='<tr><td>'+escapeHtml(e.disclosed_at||'')+'</td><td>'+
+      escapeHtml(e.actor||'股东')+'<div class="section-caption">已完成减持</div></td><td>'+
+      fmt(e.shares)+'股'+escapeHtml(price)+'</td><td>'+
+      (e.source_url?safeExternalLink(e.source_url,'公司公告'):'暂缺')+'</td></tr>';
+  });
+  issuances.slice(0,5).forEach(e=>{
+    html+='<tr><td>'+escapeHtml(e.disclosed_at||'')+'</td><td>公司发行新股融资</td><td>'+
+      fmt(e.shares)+'股'+(e.issue_price_hkd?'，发行价'+fmt(e.issue_price_hkd)+'港元':'')+
+      '</td><td>'+(e.source_url?safeExternalLink(e.source_url,'公司公告'):'暂缺')+'</td></tr>';
+  });
+  buybacks.slice(0,5).forEach(e=>{
+    const desc=e.status==='plan_only'?'回购方案，非已完成':'公司回购';
+    const intended=e.planned_use==='equity_incentive_or_employee_share_plan'?'（用于股权激励/员工持股）':'';
+    html+='<tr><td>'+escapeHtml(e.disclosed_at||'')+'</td><td>'+
+      escapeHtml(desc+intended)+'</td><td>不能与内部人个人增持等同</td><td>'+
+      (e.source_url?safeExternalLink(e.source_url,'公司公告'):'暂缺')+'</td></tr>';
   });
   html+='</tbody></table></div>';
-  if(clues.length)html+='<p class="section-caption">另有'+clues.length+
-    '条相关公告标题待核实实际成交和金额；暂不计入上述已执行交易。</p>';
-  html+='<p class="section-caption">减持交易价是否为当时高位，必须与相应日期的历史复权行情和估值分位核对。'
-    +'新股融资不必然毁损价值，但募集资金的每股回报和股权稀释不能被增长叙事掩盖；'
-    +'用于员工激励的回购不是注销式回购。</p></section>';
+  if(reconciled.some(r=>r.fully_reconciled))html+=
+    '<p class="section-caption">持股比例变动公告中部分减持数量已包括上面列出的交易，不再重复相加。发行新股、股权激励引起的持股比例稀释也不等于主动卖股。</p>';
+  html+='<p class="section-caption">控股股东与高管出售股份获得的资金归卖方，不归上市公司；公司发行新股则可能稀释原股东。'
+    +'是否构成高位减持，需要比较交易当时的复权股价和估值位置，不能仅凭绝对成交价下结论。</p></section>';
   return html;
 }
 
