@@ -167,7 +167,7 @@ _SOURCES: List[KnowledgeSource] = [
 ]
 
 # 雪球用户发帖也作为知识库来源 (其观点摘要与 B 站直播稿同权参与报告分析)
-_XUEQIU_KB_USERS = ["3058599833", "4780688814"]
+_XUEQIU_KB_USERS = ["3058599833", "4780688814", "5270498878", "6262681062"]
 
 
 def _build_sources() -> List[KnowledgeSource]:
@@ -338,6 +338,24 @@ async def _distill_missing(raws: List[Dict], cache: Dict[str, Dict]) -> Dict[str
 
     if not to_distill:
         return cache
+
+    # New large investor archives can contain tens of thousands of past posts.
+    # Never make one report trigger unbounded third-party LLM calls. Existing
+    # cached distillations remain available and uncached posts will be picked
+    # up incrementally. Company-specific valuation statements are retrieved
+    # separately, directly and with an as-of guard.
+    budget = 16
+    if len(to_distill) > budget:
+        to_distill.sort(
+            key=lambda item: (
+                item.get("timestamp", 0),
+                int(bool(re.search(r"估值|现金流|ROE|市净率|市盈率|利润", item.get("content", ""), re.I))),
+            ),
+            reverse=True,
+        )
+        logger.info("[knowledge_base] %d new entries; distilling only %d this run",
+                    len(to_distill), budget)
+        to_distill = to_distill[:budget]
 
     logger.info(f"[knowledge_base] 需要提炼 {len(to_distill)} 条知识库条目 (新增/内容变化)")
     semaphore = asyncio.Semaphore(_DISTILL_CONCURRENCY)
