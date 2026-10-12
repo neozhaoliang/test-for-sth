@@ -75,6 +75,19 @@ _ISSUE_RULES: Dict[str, Dict[str, object]] = {
             "公司自身历史估值是否因商业模式/资本结构变化而需要口径重置？",
         ),
     },
+    "equity_financing_cost": {
+        "label": "科技融资与存量股东承担的成本",
+        "patterns": (
+            r"再融资|定增|增发|配股|股权激励|融资|发行H股|股民|稀释|"
+            r"套现|减持|割韭菜|二级市场|技术泡沫|资本市场",
+        ),
+        "questions": (
+            "公司新增股本、募集资金及每股收益稀释分别是多少，所投项目何时产生超过资本成本的回报？",
+            "同一阶段实控人/董监高是否以个人持股减持获得现金，上市公司回购是否用于股权激励而非注销？",
+            "募集资金被用于研发与扩产时，维持性资本开支、订单现金回款及项目实际ROIC能否补偿股东稀释和估值风险？",
+            "股民承担的是新股认购、股价高位估值回落，还是二级市场卖方套现的承接风险？必须分开核算。",
+        ),
+    },
     "insider_alignment": {
         "label": "内部人利益一致性",
         "patterns": (
@@ -214,6 +227,7 @@ def active_knowledge_topics(
                 "moat_control",
                 "customer_dependency",
                 "demand_financing",
+                "equity_financing_cost",
                 "policy_geopolitics",
             }
         )
