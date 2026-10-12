@@ -185,3 +185,26 @@ def test_tech_financing_knowledge_method_without_identity_or_irrelevant_stock():
     assert "tech_capital_discipline" not in [
         p["id"] for p in nontech["investment_principles"]
     ]
+
+
+def test_old_tech_finance_method_remains_retrievable_and_anonymous():
+    from analysis.market_research_context import select_evergreen_tech_finance_excerpts
+    old=SimpleNamespace(
+        source="private_archive", author="买股票的老木匠",
+        title="科技股融资的股东成本",
+        distilled="科技股增发给股民造成持股稀释，须核查高管减持、回购与资本开支回报。",
+        published_at="2023-05-02", source_url="https://example.com/not-public",
+    )
+    out=select_evergreen_tech_finance_excerpts(
+        [old],as_of="2026-10-12")
+    assert out == [old]
+    ctx=build_style_investment_context(
+        as_of="2026-10-12",archetype="technology",
+        industry="光模块",knowledge_excerpts=[old])
+    assert any(p["id"]=="tech_capital_discipline"
+               for p in ctx["investment_principles"])
+    assert "买股票的老木匠" not in str(ctx)
+    before=build_style_investment_context(
+        as_of="2023-05-01",archetype="technology",
+        industry="光模块",knowledge_excerpts=[old])
+    assert before["investment_principles"]==[]
