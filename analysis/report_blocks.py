@@ -359,8 +359,8 @@ def _build_sentiment_block(sentiment: Optional[Dict]) -> str:
         f"中性 {sentiment.get('neutral')} 条, 无关 {sentiment.get('irrelevant')} 条; "
         f"看多占方向性表态 {sentiment.get('bullish_ratio')}",
     ]
-    if sentiment.get("note"):
-        lines.append(f"  {sentiment['note']}")
+    # note is a free-text provider field and can contain original discussion;
+    # aggregate numerical counts above are sufficient for public research.
     return "\n".join(lines)
 
 
@@ -448,27 +448,25 @@ def _build_dividend_chart(
 
 
 def _build_debate_block(debate: Optional[Dict]) -> str:
+    """Only aggregate market polarity and backtested counts.
+
+    The source's free-form bull/bear arguments might themselves be copied posts
+    with handles, unrelated stocks and private original text; do not send them
+    to the final report model.
+    """
     if not debate:
-        return f"雪球多空辩论: {_MISSING_TAIL}"
+        return f"市场多空情绪: {_MISSING_TAIL}"
     bull = debate.get("bull") or {}
     bear = debate.get("bear") or {}
-    lines = [
-        f"雪球讨论区多空辩论 (收集 {debate.get('posts_collected')} 条表态, "
-        f"分类 {debate.get('classified')} 条):",
-        f"  多方: {bull.get('count')} 条, 其中有时间范围的股价预测验证 "
-        f"{bull.get('verified')} 条 (正确 {bull.get('correct')}, 错误 {bull.get('incorrect')}), "
-        f"未验证 {bull.get('unverified')} 条",
-        f"  空方: {bear.get('count')} 条, 其中有时间范围的股价预测验证 "
-        f"{bear.get('verified')} 条 (正确 {bear.get('correct')}, 错误 {bear.get('incorrect')}), "
-        f"未验证 {bear.get('unverified')} 条",
-        "  多方核心论点:",
-        *[f"    · {ln}" for ln in (debate.get('bull_core') or '').split('\n') if ln.strip()][:6],
-        "  空方核心论点:",
-        *[f"    · {ln}" for ln in (debate.get('bear_core') or '').split('\n') if ln.strip()][:6],
-    ]
-    if debate.get("verdict"):
-        lines.append(f"  哪方更合理: {debate.get('verdict')} — {debate.get('reason', '')}")
-    return "\n".join(lines)
+    return (
+        f"市场讨论区意见数量：多方{bull.get('count')}条、"
+        f"空方{bear.get('count')}条；"
+        f"历史已验证多方预测{bull.get('verified')}条、"
+        f"空方预测{bear.get('verified')}条。"
+        "这是汇总统计，不代表公司内在价值；"
+        "原帖论点、发布者和外部股票案例不传给模型。"
+    )
+
 
 
 def _build_industry_block(industry_comparison: Optional[Dict]) -> str:
