@@ -148,6 +148,7 @@ jobs:
             tests/test_investor_reference_style.py \
             tests/test_public_report_privacy.py \
             tests/test_issuer_business.py \
+            tests/test_issuer_capital_alignment.py \
             tests/test_valuation_config.py \
             tests/test_valuation_assumptions.py \
             tests/test_valuation_payout.py \
