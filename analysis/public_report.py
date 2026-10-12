@@ -21,7 +21,7 @@ _PUBLIC_FIELDS = frozenset((
     "rd_team", "major_events", "refinancing_history", "executive_profile",
     "governance_alerts", "a_share_structure", "management_capital",
     "filing_calendar", "research_profile", "sentiment", "summary",
-    "generated_at",
+    "shareholder_capital_summary", "generated_at",
 ))
 _PUBLIC_MODEL_FIELDS = frozenset((
     "framework_version", "status", "route", "valuation", "cross_checks",
