@@ -79,7 +79,7 @@ def _build_knowledge_hypotheses_block(inputs: Any) -> str:
         if len(unique) >= 18:
             break
     return (
-        "可复用的投资研究问题（不含原帖、账号或案例）：\n"
+        "待核验假设与可复用的投资研究问题（不含原帖、账号或案例）：\n"
         + ("\n".join("· " + q for q in unique) if unique
            else "暂无额外的特定问题，依据公司的财务与市场数据判断。")
     )
