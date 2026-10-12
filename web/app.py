@@ -2071,7 +2071,7 @@ function renderDashboardCharts(report) {
   html+='<div class="chart-grid" style="margin-top:16px;">';
   html+=chartTile('盈利质量的变化','ROE、毛利率与净利率；季报ROE为报告期间累计数，不跨期年化',
     renderProfitabilityTrendChart(report.profitability_trend));
-  html+=chartTile('十二方面的多空力度','分数从 -10 到 +10，数值越高表示观点越积极',
+  html+=chartTile('研究视角倾向（非综合评分）','各方面的文字分析倾向示意；不得求和、平均或据此推导买卖结论',
     scores.length>=6?renderDimensionBars(scores):'');
   html+=chartTile('历年分红与回购','金额和回购分开理解，原图含历史金额及备注',
     (report.dividend_chart || []).length?renderDividendChart(report.dividend_chart):'');
@@ -2568,15 +2568,8 @@ function renderResult(report) {
     html += '<span class="verdict-industry">' + escapeHtml(profile.industry) + '</span>';
   }
   html += '</div>';
-  const position = report.position_risk || {};
-  if(position.regime==='bearish_concurrence'){
-    const names={valuation:'估值仍高',price_trend:'趋势偏弱',cash_conversion:'现金回款不足',
-      foreign_policy:'海外政策风险',market_style:'市场风格转弱',margin_context:'融资盘调整',
-      capital_allocation:'内部人减持与股权融资'};
-    const risks=(position.risk_signals||[]).map(x=>names[x.family]).filter(Boolean);
-    if(risks.length) html+='<p class="section-caption">当前风险共振：'+
-      escapeHtml([...new Set(risks)].join(' · '))+'</p>';
-  }
+  // The investment thesis is authored by the model. Screening indicators
+  // remain available to the research logic, not as a programmatic verdict.
   const conciseThesis=String(summary.thesis_summary || '').trim();
   const hasDetailedAnalysis=Object.keys(summary.dimension_analyses || {}).length >= 6;
   // Historical cached reports sometimes put the entire 12-dimension essay in
