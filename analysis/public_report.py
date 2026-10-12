@@ -14,7 +14,7 @@ from typing import Any, Mapping
 _PUBLIC_FIELDS = frozenset((
     "stock_code", "stock_name", "research_mode", "as_of", "realtime_quote",
     "industry_comparison", "shareholder_trend", "chip_price_context",
-    "position_risk", "issuer_capital_context", "dividend_history", "buyback_history", "dividend_chart",
+    "position_risk", "dividend_history", "buyback_history", "dividend_chart",
     "commodity_signal", "freight_signal", "margin_signal", "market_context",
     "rmb_signal", "macro_rates", "policy_events", "profitability_trend",
     "fundamentals", "valuation", "valuation_model", "valuation_history",
@@ -51,7 +51,7 @@ _SOURCE_ATRIBUTION = re.compile(
     r"(?:投资者观察|(?:有|某位?)?(?:博主|大V|KOL|投资者|雪球用户)"
     r"(?:指出|认为|表示|提到|说|发帖|的帖子|观点)|据(?:某|有)?(?:博主|投资者|帖子))"
 )
-_POST_ID = re.compile(r"(?:用户|账号|作者|ID|id)[：:\s]*[0-9A-Za-z_]{8,}")
+_POST_ID = re.compile(r"(?<![0-9A-Za-z_])(?:用户|账号|作者|ID|id)[：:=\s]+[0-9A-Za-z_]{8,}")
 _SENTENCE_BREAK = re.compile(r"(?<=[。！？；\n])")
 
 
@@ -182,6 +182,38 @@ def _capital_alignment_summary(private: Any) -> dict | None:
     }
 
 
+_PUBLIC_CAPITAL_GROUPS = ("completed_holder_sales", "equity_issuances", "corporate_buybacks")
+_PUBLIC_CAPITAL_FIELDS = frozenset((
+    "disclosed_at", "source_url", "actor", "shares", "average_sale_price_yuan",
+    "category", "trade_start", "trade_end", "issue_price_hkd", "status", "planned_use",
+))
+
+
+def _project_capital_summary(value: Any) -> dict | None:
+    """Drop private ledger internals, retaining only a small official-filing projection."""
+    if not isinstance(value, dict):
+        return None
+    out = {}
+    for group in _PUBLIC_CAPITAL_GROUPS:
+        rows = value.get(group)
+        if not isinstance(rows, list):
+            continue
+        out[group] = [
+            {k: deepcopy(v) for k, v in item.items() if k in _PUBLIC_CAPITAL_FIELDS}
+            for item in rows[:10] if isinstance(item, dict)
+        ]
+    reconciled = value.get("reconciled_ownership_not_additional_sales")
+    if isinstance(reconciled, list):
+        allowed = ("disclosed_at", "reported_group_sales_shares", "fully_reconciled")
+        out["reconciled_ownership_not_additional_sales"] = [
+            {k: deepcopy(item[k]) for k in allowed if k in item}
+            for item in reconciled[:5] if isinstance(item, dict)
+        ]
+    if out:
+        out["basis"] = "正式实施公告口径。股东减持、公司融资与回购分账处理。"
+    return out or None
+
+
 def public_stock_report(raw: Mapping[str, Any]) -> dict:
     """Safe copy for REST/UI; private source data is never serialized."""
     names, cases, excerpts = _private_cues(raw)
@@ -194,6 +226,11 @@ def public_stock_report(raw: Mapping[str, Any]) -> dict:
     derived_capital = _capital_alignment_summary(raw.get("issuer_capital_context"))
     if derived_capital:
         out["shareholder_capital_summary"] = derived_capital
+    capital = _project_capital_summary(out.get("shareholder_capital_summary"))
+    if capital:
+        out["shareholder_capital_summary"] = capital
+    else:
+        out.pop("shareholder_capital_summary", None)
     model = out.get("valuation_model")
     if isinstance(model, dict):
         out["valuation_model"] = {

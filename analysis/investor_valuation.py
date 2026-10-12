@@ -69,7 +69,7 @@ def _completed_dividend_years(records: Sequence[Mapping], cutoff: date):
 def investor_reference_valuation(*, archetype: str, dividend_history=None,
                                  valuation=None, profitability_trend=None,
                                  valuation_history=None, quote=None,
-                                 as_of=None) -> dict:
+                                 as_of=None, valuation_assumption_context=None) -> dict:
     """Produce transparent reference price zones without pretending FCFE was forecast."""
     cutoff = _date(as_of) or date.today()
     v = valuation or {}
@@ -85,39 +85,23 @@ def investor_reference_valuation(*, archetype: str, dividend_history=None,
         "archetype": archetype, "price_reference": price,
         "as_of": cutoff.isoformat(), "dividend_basis": None,
         "dividend_scenarios": [], "historical_pb_anchor": None,
+        "return_decomposition": None,
         "normalized_earnings": None, "key_assumptions": [],
         "warnings": [
-            "收益率定价是参考区间，不是现金流折现的内在价值或买卖指令。",
+            "历史股息收益率不等于未来总回报，不得使用通用固定股息率倒算内在价值。",
             "已实施分红按公告日所在公历年统计，不等于财年宣告或未来承诺；回购不算现金股息。",
         ],
     }
-    # Dividends matter most for public utilities and other stable-distribution
-    # archetypes. For cyclicals they are an extra lens, not the main one.
+    # The announcement-year record is only an observed cash-distribution lens.
+    # It does NOT establish fiscal-year payout or a universal target dividend yield.
     if len(rows) >= 2 and cutoff.year - rows[-1][0] <= 3:
         recent = rows[-5:]
-        observed_positive = [d for _, d in recent]
-        baseline = median(observed_positive)
-        # Explicit investor hurdle examples, not issuer WACC or market forecasts.
-        assumptions = [
-            ("谨慎", .70, 7.0),
-            ("中性", 1.00, 5.5),
-            ("乐观", 1.15, 4.5),
-        ]
-        scenarios = []
-        for name, multiple, required_yield in assumptions:
-            dps = baseline * multiple
-            scenarios.append({
-                "name": name,
-                "annual_cash_dividend_per_share": round(dps, 4),
-                "assumed_cash_dividend_yield_pct": required_yield,
-                "reference_price": round(dps / (required_yield / 100), 2),
-                "basis": "已实施派息年份中位 × 情景分红调整 / 假设收益率",
-            })
+        baseline = median([d for _, d in recent])
         result["dividend_basis"] = {
             "years": [y for y, _ in recent],
             "payments_by_announcement_year": [
-                {"year": y, "dividend_per_share": round(d, 4)}
-                for y, d in recent],
+                {"year": y, "dividend_per_share": round(d, 4)} for y, d in recent
+            ],
             "observed_median_cash_dividend_per_share": round(baseline, 4),
             "last_implemented_dividend_year": rows[-1][0],
             "last_implemented_dividend_per_share": round(rows[-1][1], 4),
@@ -128,14 +112,9 @@ def investor_reference_valuation(*, archetype: str, dividend_history=None,
                 round(baseline / price * 100, 2) if price else None
             ),
             "sample_includes_zero_dividend_years": False,
-            "sampling_note": "只统计有明确实施记录的派息年份；未见记录的年份不能被假定已派息，也不能假定一定为零。",
+            "sampling_note": "按公告日统计已实施派息；缺失年份既不视为已分红，也不擅自补零。",
         }
-        result["dividend_scenarios"] = scenarios
         result["status"] = "indicative_reference"
-        result["key_assumptions"].append(
-            "参考情景以已实施年度派息中位数为锚；股息分别按0.70/1.00/1.15倍情景化，"
-            "投资者假设收益率为7.0%/5.5%/4.5%；这些是固定压力情景，不是预测。"
-        )
     else:
         result["warnings"].append("不足两个近年已实施分红年份，不能从缺失记录补造派息估值。")
 
@@ -180,4 +159,138 @@ def investor_reference_valuation(*, archetype: str, dividend_history=None,
             ),
             "note": "ROE中位数×期末账面净资产 / 当前股价，仅为跨周期盈利能力参照；不等于可分配现金收益率。",
         }
+    result["return_decomposition"] = _build_return_decomposition(
+        payout_inputs=valuation_assumption_context or {},
+        annual_roes=annual,
+        current_price=price,
+        book_per_share=book,
+        historical_pb_anchor=result["historical_pb_anchor"],
+        as_of=cutoff,
+    )
     return result
+
+
+def _build_return_decomposition(*, payout_inputs, annual_roes, current_price,
+                                book_per_share, historical_pb_anchor, as_of):
+    """Explicit, finite-horizon ROE/retention/cash/PB scenarios.
+
+    This is an *illustrative* total-return decomposition based on published
+    fiscal-year payout matches and user-configured hurdle; it is not an
+    automatic intrinsic value, and the final-period PB is only a sensitivity.
+    """
+    from analysis.valuation_payout import annual_payout_from_eps
+    from analysis.valuation_assumptions import estimate_valuation_scenarios
+
+    record = {
+        "status": "insufficient_evidence",
+        "framework": "five_year_roe_payout_pb_sensitivity_v1",
+        "holding_years": 5,
+        "payout_evidence": None,
+        "scenarios": [],
+        "missing_requirements": [],
+        "warnings": [
+            "总回报分解只是情景近似，ROE×留存×转化率不保证实现EPS增长。",
+            "终点PB是条件假设而非预测，不得把条件参考价称为精准买点。",
+            "现金股息、回购、增发、资本开支和债务融资不能混为一谈。",
+        ],
+    }
+    paid = annual_payout_from_eps(
+        annual_eps=payout_inputs.get("annual_eps"),
+        dividends=payout_inputs.get("fiscal_dividends"),
+        as_of=as_of.isoformat(),
+    )
+    record["payout_evidence"] = {
+        "status": paid["status"], "payout_pct": paid.get("payout_pct"),
+        "fiscal_years": paid.get("years") or [],
+        "basis": "同财年EPS与已实施现金分红匹配，含正式公告来源；EPS仍需年报原文核验",
+    }
+    if paid["status"] != "verified":
+        record["missing_requirements"].append("至少三个同财年、带来源的已实施派息/EPS配对")
+    if len(annual_roes) < 3:
+        record["missing_requirements"].append("至少三个完整年度的ROE")
+    if not current_price or current_price <= 0 or not book_per_share or book_per_share <= 0:
+        record["missing_requirements"].append("同一研究时点的正股价及每股净资产")
+    required_return = _number(payout_inputs.get("required_return_pct"))
+    if required_return is None or not 6 <= required_return <= 25:
+        record["missing_requirements"].append("用户明确设置的6%—25%年化要求收益率")
+    terminal_pb = _number(payout_inputs.get("terminal_pb"))
+    terminal_pb_basis = str(payout_inputs.get("terminal_pb_basis") or "").strip()
+    if not (terminal_pb and terminal_pb > 0 and terminal_pb_basis):
+        terminal_pb = _number((historical_pb_anchor or {}).get("median_pb"))
+        if terminal_pb and terminal_pb > 0:
+            terminal_pb_basis = "同一截止日之前的历史PB中位数，仅用作终点情景假设"
+    if terminal_pb is None or terminal_pb <= 0 or terminal_pb > 30:
+        record["missing_requirements"].append("有可追溯依据的终点PB假设")
+    if record["missing_requirements"]:
+        return record
+
+    profitability = {
+        "periods": [
+            {"period": f"{yr}-12-31", "roe_pct": roe}
+            for yr, roe in annual_roes.items()
+        ],
+    }
+    estimated = estimate_valuation_scenarios(
+        profitability_trend=profitability, as_of=as_of.isoformat(),
+        payout_pct=paid["payout_pct"], required_return_pct=required_return,
+    )
+    if estimated["status"] != "estimated":
+        record["missing_requirements"].extend(estimated.get("reasons") or ["情景数据不完整"])
+        return record
+
+    current_pb = current_price / book_per_share
+    horizon = record["holding_years"]
+    for item in estimated["scenarios"]:
+        roe = item["sustainable_roe_pct"] / 100.0
+        payout = item["payout_pct"] / 100.0
+        conversion = item["retention_conversion_pct"] / 100.0
+        hurdle = item["required_return_pct"] / 100.0
+        growth = roe * (1.0 - payout) * conversion
+        # Future earnings are assumed to evolve with the stated, imperfect
+        # conversion hypothesis. They are NOT accounting forecasts.
+        first_dividend = book_per_share * roe * payout
+        dividends = [
+            first_dividend * (1.0 + growth) ** yr
+            for yr in range(horizon)
+        ]
+        # Earnings-based proxy for future book, rather than claiming audited
+        # net assets will equal retained-growth accounting.
+        terminal_book_proxy = book_per_share * (1.0 + growth) ** horizon
+        terminal_value = terminal_book_proxy * terminal_pb
+        discount = 1.0 + hurdle
+        discounted_dividends = sum(
+            cash / (discount ** (year + 1))
+            for year, cash in enumerate(dividends)
+        )
+        discounted_terminal = terminal_value / discount ** horizon
+        expected_pb_change = (terminal_pb / current_pb) ** (1.0 / horizon) - 1.0
+        dividend_yield = first_dividend / current_price
+        record["scenarios"].append({
+            "name": item["name"],
+            "sustainable_roe_pct": item["sustainable_roe_pct"],
+            "payout_pct": item["payout_pct"],
+            "retention_conversion_pct": item["retention_conversion_pct"],
+            "growth_contribution_pct": round(growth * 100, 3),
+            "cash_dividend_yield_pct": round(dividend_yield * 100, 3),
+            "valuation_change_annualized_pct": round(expected_pb_change * 100, 3),
+            "illustrative_total_return_pct": round(
+                (growth + dividend_yield + expected_pb_change) * 100, 3
+            ),
+            "required_return_pct": item["required_return_pct"],
+            "terminal_pb": round(terminal_pb, 4),
+            "discounted_dividends_per_share": round(discounted_dividends, 4),
+            "discounted_terminal_per_share": round(discounted_terminal, 4),
+            "terminal_share_of_value_pct": round(
+                discounted_terminal / (discounted_dividends + discounted_terminal) * 100, 2
+            ) if discounted_dividends + discounted_terminal > 0 else None,
+            "conditional_reference_price": round(
+                discounted_dividends + discounted_terminal, 2
+            ),
+            "basis": "5年分红现值+终点PB情景价值；仅供敏感性讨论",
+        })
+    record["status"] = "illustrative_scenarios"
+    record["roe_years"] = estimated["observation_years"]
+    record["terminal_pb_basis"] = terminal_pb_basis
+    record["current_pb_from_quote"] = round(current_pb, 4)
+    record["policy"] = estimated["policy"]
+    return record

@@ -180,3 +180,48 @@ def test_prompt_blocks_only_use_anonymous_investment_methods():
         assert term not in combined
     assert "市净率与分红率" in hypotheses_prompt
     assert "多方2条" in debate_prompt
+
+
+def test_capital_ledger_is_never_exported_even_with_official_filing():
+    report = _report()
+    report["issuer_capital_context"] = {
+        "source_verified_events": [{
+            "source_tier": "official_filing", "event_type": "insider_sale",
+            "status": "completed", "actor": "实际披露的股东",
+            "actor_type": "holder", "shares": 10000,
+            "price_yuan": 8.7, "disclosed_at": "2026-10-01",
+            "source_url": "https://www.cninfo.com.cn/example.pdf",
+            "internal_source_id": "PRIVATE_LEDGER_ITEM",
+            "raw_post": "军师祭咖啡",
+        }],
+        "raw_ledger": {"source_id": "PRIVATE_SECRET"},
+    }
+    report["shareholder_capital_summary"] = {
+        "completed_holder_sales": [{
+            "category": "insider_sale", "shares": 1,
+            "internal_source_id": "PRIVATE_LEDGER_ITEM",
+        }],
+        "private_source_data": "PRIVATE_SECRET",
+    }
+    public = public_stock_report(report)
+    text = str(public)
+    for item in ("issuer_capital_context", "source_verified_events",
+                 "PRIVATE_SECRET", "PRIVATE_LEDGER_ITEM", "raw_ledger"):
+        assert item not in text
+    sales = public["shareholder_capital_summary"]["completed_holder_sales"]
+    assert sales[0]["shares"] == 10000
+    assert sales[0]["source_url"].startswith("https://www.cninfo.com.cn")
+    assert public_stock_report(public) == public
+
+
+def test_privacy_identifier_guard_preserves_ordinary_machine_tokens():
+    report = _report()
+    report["valuation_model"]["style_context"]["style_regime"] = "dividend_leading"
+    report["summary"]["thesis_summary"] = (
+        "本公司年度分红分析符合dividend_leading的机器标记。"
+        "账号：ABCD123456789的原始昵称不应公开。"
+    )
+    public = public_stock_report(report)
+    assert public["valuation_model"]["style_context"]["style_regime"] == "dividend_leading"
+    assert "ABCD123456789" not in public["summary"]["thesis_summary"]
+    assert "机器标记" in public["summary"]["thesis_summary"]
