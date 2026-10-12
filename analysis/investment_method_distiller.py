@@ -100,12 +100,39 @@ async def compile_investment_methods(
     Internal knowledge is private. No raw post becomes a user-facing source.
     """
     cutoff = _published(as_of) or date.today()
-    selected = [
+    available = [
         e for e in excerpts
         if _published(getattr(e, "published_at", None))
         and _published(e.published_at) <= cutoff
         and bool(str(getattr(e, "distilled", "") or "").strip())
-    ][:14]
+    ]
+    # No FIFO-only selection: otherwise evergreen stockholder-cost methods
+    # are crowded out by a dozen recent but less useful market commentary posts.
+    priority = []
+    if archetype == "technology":
+        from analysis.market_research_context import (
+            select_evergreen_tech_finance_excerpts,
+        )
+        priority.extend(select_evergreen_tech_finance_excerpts(
+            available, as_of=as_of, limit=5,
+        ))
+    if stock_name:
+        priority.extend(
+            e for e in available
+            if stock_name in (str(getattr(e, "title", "") or "") + " " +
+                              str(getattr(e, "distilled", "") or ""))
+        )
+    priority.extend(available)
+    selected = []
+    seen = set()
+    for e in priority:
+        key = (getattr(e, "source", ""), getattr(e, "title", ""),
+               getattr(e, "published_at", ""))
+        if key not in seen:
+            selected.append(e)
+            seen.add(key)
+        if len(selected) >= 14:
+            break
     baseline = [
         {
             "insight": str(p.get("principle") or ""),
