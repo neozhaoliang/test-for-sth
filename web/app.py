@@ -2474,8 +2474,23 @@ function renderResult(report) {
 
   if (report.realtime_quote) {
     const q = report.realtime_quote;
-    html += '<p class="quote">' + (isHistorical ? '截止日收盘/最近交易价 ' : '最新价 ') +
-      q.latest_price + ' 涨跌幅 ' + q.change_pct + '% 成交量 ' + q.volume + '</p>';
+    const price = numericOrNull(q.latest_price);
+    if(price!==null && price>0){
+      const previous = q.quote_mode === 'verified_previous_close';
+      let qtext = '<p class="quote">' +
+        (previous ? '最近可核验收盘价 ' : isHistorical ? '截止日收盘价 ' : '最新价 ') +
+        escapeHtml(String(price)) + '元';
+      if(q.change_pct!==null && q.change_pct!==undefined &&
+         numericOrNull(q.change_pct)!==null)
+        qtext += ' 涨跌幅 ' + escapeHtml(String(q.change_pct)) + '%';
+      if(q.volume!==null && q.volume!==undefined &&
+         numericOrNull(q.volume)!==null)
+        qtext += ' 成交量 ' + escapeHtml(String(q.volume));
+      if(previous) qtext += '（'+escapeHtml(q.date||q.timestamp||'未知日期')+'，不是盘中实时价）';
+      html+=qtext+'</p>';
+    } else {
+      html+='<p class="quote">有效股价暂缺，不能判断当前股票赔率。</p>';
+    }
   }
 
   const summary = report.summary || {};
@@ -2500,6 +2515,14 @@ function renderResult(report) {
     html += '<span class="verdict-industry">' + escapeHtml(profile.industry) + '</span>';
   }
   html += '</div>';
+  const position = report.position_risk || {};
+  if(position.regime==='bearish_concurrence'){
+    const names={valuation:'估值仍高',price_trend:'趋势偏弱',cash_conversion:'现金回款不足',
+      foreign_policy:'海外政策风险',market_style:'市场风格转弱',margin_context:'融资盘调整'};
+    const risks=(position.risk_signals||[]).map(x=>names[x.family]).filter(Boolean);
+    if(risks.length) html+='<p class="section-caption">当前风险共振：'+
+      escapeHtml([...new Set(risks)].join(' · '))+'</p>';
+  }
   const conciseThesis=String(summary.thesis_summary || '').trim();
   const hasDetailedAnalysis=Object.keys(summary.dimension_analyses || {}).length >= 6;
   // Historical cached reports sometimes put the entire 12-dimension essay in
