@@ -143,7 +143,7 @@ report.valuation_model.style_context={
 };
 ctx.renderResult(report);
 const newer=nodes.result.innerHTML;
-assert.ok(newer.includes('投资者参考估值'));
+assert.ok(newer.includes('投资者长期回报情景'));
 assert.ok(newer.includes('5.12元'));
 assert.ok(newer.includes('留存转化'));
 assert.ok(!newer.includes('要求股息率'));
