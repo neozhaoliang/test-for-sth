@@ -1,0 +1,79 @@
+{
+  "stock_code": "300308",
+  "events": [
+    {
+      "id": "300308-2025-09-18-other-holders",
+      "disclosed_at": "2025-09-18",
+      "event_type": "holder_sale",
+      "status": "completed",
+      "actor_type": "other_significant_holders",
+      "actor": "苏州益兴福及一致行动人",
+      "trade_start": "2025-07-01",
+      "trade_end": "2025-09-17",
+      "shares": 4634100,
+      "percentage_of_total_before": 0.4171,
+      "price_yuan": null,
+      "document_title": "关于特定股东及其一致行动人持股比例变动超过1%整数倍的公告",
+      "source_url": "https://disc.static.szse.cn/disc/disk03/finalpage/2025-09-18/1ff20834-e6f5-47bd-9aed-5a9f141a9eb1.PDF",
+      "interpretation": "该阶段实际二级市场出售；披露持股比例9.4170%降至8.9999%；没有交易加权均价，不能猜测出售金额。"
+    },
+    {
+      "id": "300308-2025-11-25-executive",
+      "disclosed_at": "2025-11-25",
+      "event_type": "insider_sale",
+      "status": "completed",
+      "actor_type": "director_executive",
+      "actor": "董事、常务副总裁王晓东",
+      "trade_start": "2025-08-27",
+      "trade_end": "2025-11-24",
+      "shares": 708552,
+      "price_yuan": 414.24,
+      "percentage_of_total_before": 0.06,
+      "document_title": "关于部分高级管理人员减持计划期限届满暨实施情况公告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2025-11-25/1224824021.PDF",
+      "interpretation": "公司董事及一致行动人已在二级市场减持，不是上市公司再融资，也不能与控股股东减持重复计算。"
+    },
+    {
+      "id": "300308-2026-01-16-controlling-holder",
+      "disclosed_at": "2026-01-16",
+      "event_type": "insider_sale",
+      "status": "completed",
+      "actor_type": "controlling_shareholder",
+      "actor": "山东中际投资控股有限公司",
+      "trade_start": "2025-11-20",
+      "trade_end": "2026-01-15",
+      "shares": 5500000,
+      "price_yuan": 521.73,
+      "percentage_of_total_before": 0.49,
+      "document_title": "关于控股股东减持计划实施完毕的公告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2026-01-16/1224938645.PDF",
+      "interpretation": "控股股东大宗交易减持；卖出所得由原股东取得，既不是公司融资也不是公司回购。承诺该减持完成后12个月不再减持，需随公告跟踪。"
+    },
+    {
+      "id": "300308-2026-07-30-h-issuance",
+      "disclosed_at": "2026-07-30",
+      "event_type": "equity_issuance",
+      "status": "completed",
+      "actor_type": "issuer",
+      "shares": 54500000,
+      "issue_price_hkd": 980,
+      "estimated_net_proceeds_hkd": 52891000000,
+      "document_title": "关于境外上市股份（H股）挂牌并上市交易的公告",
+      "source_url": "https://disc.static.szse.cn/download/disc/disk03/finalpage/2026-07-30/a8b99a9d-e88f-412c-9814-609aae36513e.PDF",
+      "interpretation": "公司发行新股向投资者募集资本；在不计超额配售权时按5450万股及公告估算的528.91亿港元净额列示。发行增加股本与资金，股东权益和每股指标的最终影响须结合资金使用回报。不能与个人股东减持混成一笔。"
+    },
+    {
+      "id": "300308-2026-09-01-incentive-buyback-plan",
+      "disclosed_at": "2026-09-01",
+      "event_type": "corporate_buyback",
+      "status": "plan_only",
+      "actor_type": "issuer",
+      "min_budget_yuan": 4000000000,
+      "max_budget_yuan": 8000000000,
+      "planned_use": "equity_incentive_or_employee_share_plan",
+      "document_title": "关于回购公司股份方案的公告",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2026-09-01/1225538120.PDF",
+      "interpretation": "40亿至80亿元为回购预算方案，非已经回购支出；拟用于激励/员工持股，不是注销式减少流通股的现金股东回报。"
+    }
+  ]
+}
