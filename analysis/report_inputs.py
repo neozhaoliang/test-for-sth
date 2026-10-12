@@ -54,6 +54,7 @@ class AnalysisInputs:
     freight_signal: Optional[Dict] = None
     primary_evidence: List[Dict] = field(default_factory=list)
     issuer_business: Optional[Dict] = None  # operating filings, contracts, capex and dated exchange Q&A
+    issuer_capital_context: Optional[Dict] = None  # point-in-time issuer and insider capital flows
     a_share_structure: Optional[Dict] = None
     management_capital: Optional[Dict] = None
     filing_calendar: List[Dict] = field(default_factory=list)
