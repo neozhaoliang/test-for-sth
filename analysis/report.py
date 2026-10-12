@@ -30,6 +30,7 @@ from typing import Dict, List, Optional
 from analysis.a_share_structure import get_a_share_structure
 from analysis.candidates import find_candidates
 from analysis.chip_position import assess_chip_price_context
+from analysis.position_risk import validated_quote_or_close, position_risk_context
 from analysis.commodity import get_cycle_commodity_signal, get_rmb_trend_signal
 from analysis.freight import get_container_freight_signal
 from analysis.fundamentals import get_ths_fundamentals
@@ -198,6 +199,19 @@ async def generate_report(
         pit_financials_task,
         ownership_task,
     )
+
+    # The spot feed sometimes returns a zero on weekends or unavailable
+    # symbols. Prefer the most recent dated daily close, never a fake 0 price.
+    verified_quote = validated_quote_or_close(
+        quote, market_context, as_of=str(request.as_of or ""),
+    )
+    if not historical_mode and verified_quote is None:
+        raise RuntimeError(
+            "行情无有效价格：实时行情为空/为0，且最近7日没有可核验的交易日收盘价。"
+            "本次不发布'当前赔率中性'等误导性研究结论。"
+        )
+    if verified_quote is not None:
+        quote = verified_quote
 
     if historical_mode:
         historical_name = next(
@@ -402,6 +416,7 @@ async def generate_report(
         market_context=market_context,
         freight_signal=freight_signal,
         margin_signal=margin_signal,
+        position_risk=inputs.position_risk,
         primary_evidence=primary_evidence,
         issuer_business=issuer_business,
         a_share_structure=a_share_structure,
@@ -430,6 +445,7 @@ async def generate_report(
     )
     inputs.research_profile = research_profile
     inputs.research_quality = research_quality
+    inputs.position_risk = position_risk_context(inputs)
     summary, review = await _generate_summary(inputs, candidates, evidence)
     # 置信度同时受全局证据覆盖率、公司画像重点证据准备度限制，
     # 再扣除跨维度冲突/弱证据惩罚。
