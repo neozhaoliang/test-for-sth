@@ -361,27 +361,20 @@ def build_knowledge_hypotheses(
 
 
 def format_knowledge_hypotheses(items: Iterable[Dict]) -> str:
-    rows = list(items)
-    if not rows:
-        return "(没有检索到与当前公司核心因果风险相关的知识库假设)"
-    lines = [
-        "以下内容来自老木匠、军师祭咖啡等长期观察者的观点库。它们是【待核验假设】，不是事实，",
-        "用途是提醒你公开数据背后可能存在的资金、利益、产业链或周期机制。不得因为作者说过就直接加减分；",
-        "必须用本次硬数据/一手公告交叉验证。无法验证时写“假设成立与否暂缺”，而不是忽略。",
-    ]
-    for i, item in enumerate(rows, 1):
-        src = item.get("author") or item.get("source") or "knowledge"
-        dt = item.get("published_at") or "日期未知"
-        labels = "、".join(item.get("topic_labels") or [])
-        lines.append(f"{i}. [{src} {dt}] 主题={labels}")
-        lines.append(f"   主张: {item.get('claim') or '未说明'}")
-        if item.get("mechanism"):
-            lines.append(f"   机制: {item['mechanism']}")
-        if item.get("applicability"):
-            lines.append(f"   适用条件: {item['applicability']}")
-        if item.get("failure_conditions"):
-            lines.append(f"   失效条件: {item['failure_conditions']}")
-        questions = item.get("verification_questions") or []
-        if questions:
-            lines.append("   本次必须核验: " + "；".join(questions[:4]))
-    return "\n".join(lines)
+    """Only pass reusable checklist questions, never KB metadata or quotes.
+
+    The raw hypotheses are retained in private research data for attribution,
+    but must not be serialized into the LLM's public report prompt.
+    """
+    questions: List[str] = []
+    for item in items:
+        for question in item.get("verification_questions") or []:
+            if question not in questions:
+                questions.append(question)
+        if len(questions) >= 20:
+            break
+    if not questions:
+        return "当前没有可用的额外分析原则，按本公司事实进行判断。"
+    return "需要以本公司的数据检验：\n" + "\n".join(
+        f"- {q}" for q in questions[:20]
+    )
