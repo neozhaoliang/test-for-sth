@@ -86,6 +86,7 @@ def investor_reference_valuation(*, archetype: str, dividend_history=None,
         "as_of": cutoff.isoformat(), "dividend_basis": None,
         "dividend_scenarios": [], "historical_pb_anchor": None,
         "return_decomposition": None,
+        "earnings_power": None,
         "normalized_earnings": None, "key_assumptions": [],
         "warnings": [
             "历史股息收益率不等于未来总回报，不得使用通用固定股息率倒算内在价值。",
@@ -166,6 +167,10 @@ def investor_reference_valuation(*, archetype: str, dividend_history=None,
         book_per_share=book,
         historical_pb_anchor=result["historical_pb_anchor"],
         as_of=cutoff,
+    )
+    result["earnings_power"] = _company_earnings_power_sensitivity(
+        archetype=archetype, profitability_trend=profitability_trend,
+        valuation_history=valuation_history, as_of=cutoff, market_price=price,
     )
     return result
 
@@ -294,3 +299,89 @@ def _build_return_decomposition(*, payout_inputs, annual_roes, current_price,
     record["current_pb_from_quote"] = round(current_pb, 4)
     record["policy"] = estimated["policy"]
     return record
+
+
+def _empirical_quantile(values: list[float], quantile: float) -> float:
+    """Interpolated empirical sample quantile, no imposed P/E target."""
+    values = sorted(values)
+    offset = (len(values) - 1) * quantile
+    low = int(offset)
+    high = min(low + 1, len(values) - 1)
+    return values[low] + (offset - low) * (values[high] - values[low])
+
+
+def _company_earnings_power_sensitivity(*, archetype, profitability_trend,
+                                        valuation_history, as_of, market_price):
+    """A *historical*, stock-specific EPS × P/E stress table, not fair value.
+
+    The company investor can form a forward earnings thesis separately. Historical
+    EPS and P/E marginals are not independent scenario probabilities; especially
+    with cyclicals, P/E can soar precisely when earnings hit a trough.
+    """
+    result = {
+        "status": "insufficient_history",
+        "model": "historical_earnings_power_sensitivity_v1",
+        "scenarios": [],
+        "earnings_years": [],
+        "pe_sample_months": 0,
+        "cautions": [
+            "这是历史每股盈利×历史市场PE的条件敏感性，不是当前公允价值或预测。",
+            "周期股盈利低谷可能推高PE，因此历史EPS分位与PE分位的组合并非联合概率。",
+            "财务应收款、净债务、资本开支及潜在股本稀释未进入这个简化计算。",
+        ],
+    }
+    if archetype not in ("cyclical", "general", "consumer_brand", "technology"):
+        result["cautions"].append("当前企业类型不适合以此作为主要估值方法。")
+        return result
+    if not market_price or market_price <= 0:
+        return result
+    earnings: dict[int, float] = {}
+    for row in (profitability_trend or {}).get("periods") or []:
+        when = _date(row.get("period"))
+        eps = _number(row.get("eps_yuan"))
+        if (when and when <= as_of and when.month == 12 and when.day == 31
+                and eps is not None):
+            earnings[when.year] = eps
+    selected_years = sorted(earnings)[-5:]
+    earnings_values = [earnings[y] for y in selected_years]
+    if len(earnings_values) < 3:
+        result["cautions"].append("少于三个完整财年每股盈利，无法进行盈利能力压力情景。")
+        return result
+    result["earnings_years"] = selected_years
+    if any(x <= 0 for x in earnings_values):
+        result["cautions"].append("观察期包含亏损年度；PE定价易失真，应改用全周期自由现金流和资产负债表。")
+        return result
+
+    pe_values = []
+    for row in (valuation_history or {}).get("history_monthly") or []:
+        observed = _date(row.get("date"))
+        pe = _number(row.get("pe_ttm"))
+        if not observed or observed > as_of or pe is None or pe <= 0:
+            continue
+        # Retain only the last 5 completed years (no hindsight from newer data).
+        if observed.year < as_of.year - 5:
+            continue
+        pe_values.append(pe)
+    result["pe_sample_months"] = len(pe_values)
+    if len(pe_values) < 24:
+        result["cautions"].append("同期正PE月度样本不足24个，不生成机械参考价格。")
+        return result
+    if _empirical_quantile(pe_values, 0.5) > 60:
+        result["cautions"].append("历史PE中位数超过60倍，可能由盈利低谷造成，停止价格外推。")
+        return result
+
+    for label, fraction in (("历史较弱", 0.25), ("历史中枢", 0.50),
+                            ("历史较强", 0.75)):
+        eps = _empirical_quantile(earnings_values, fraction)
+        pe = _empirical_quantile(pe_values, fraction)
+        result["scenarios"].append({
+            "name": label,
+            "observed_annual_eps_yuan": round(eps, 3),
+            "historical_pe_quantile": round(pe, 2),
+            "conditional_price_yuan": round(eps * pe, 2),
+            "relative_to_market_pct": round((eps * pe / market_price - 1) * 100, 2),
+        })
+    result["status"] = "historical_sensitivity_only"
+    result["market_price_yuan"] = market_price
+    result["pe_as_of"] = str((valuation_history or {}).get("as_of") or "")
+    return result
