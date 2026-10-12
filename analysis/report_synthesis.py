@@ -157,6 +157,14 @@ async def _generate_summary(
     prompt += "\n\n" + issuer_business_prompt_block(
         getattr(inputs, "issuer_business", None)
     )
+    from analysis.issuer_capital import issuer_capital_prompt_block
+    prompt += "\n\n" + issuer_capital_prompt_block(
+        getattr(inputs, "issuer_capital_context", None)
+    )
+    # Fintech-equity financing is NOT interchangeable with margin loans.
+    # The investor pays for issuer new equity via dilution/required return,
+    # while shareholder secondary sales do not fund company projects.
+
     # Valuation is a method layer, never counted as primary factual evidence.
     # Load the locally versioned framework on every run (including fallback path).
     method_file = Path(__file__).resolve().parents[1] / "docs" / "valuation_shuangmulin_chensir_knowledge.md"
