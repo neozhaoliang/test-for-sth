@@ -57,3 +57,47 @@ async def test_core_research_refusal_returns_explicit_error_not_empty_report(mon
     ctx = SimpleNamespace(stock_code="SH601899", research_mode="live", as_of="2026-10-09")
     with pytest.raises(RuntimeError, match="拒绝输出股票研究"):
         await synthesis._generate_summary(ctx, [], [])
+
+
+@pytest.mark.asyncio
+async def test_text_distillation_retries_reasoning_only_token_exhaustion(monkeypatch):
+    calls = []
+
+    async def fake_response(prompt, max_tokens):
+        calls.append(max_tokens)
+        if len(calls) == 1:
+            return "", "max_tokens"  # all tokens consumed by thinking
+        return "【原则】核对企业现金流。", "end_turn"
+
+    monkeypatch.setattr(llm, "_call_llm_raw_ex", fake_response)
+    result = await llm.call_text("提炼投资观点", max_tokens=8192)
+    assert result == "【原则】核对企业现金流。"
+    assert calls == [8192, 16384]
+
+
+@pytest.mark.asyncio
+async def test_text_distillation_does_not_accept_partial_cutoff(monkeypatch):
+    calls = []
+
+    async def fake_response(prompt, max_tokens):
+        calls.append(max_tokens)
+        return "只有半句话", "max_tokens"
+
+    monkeypatch.setattr(llm, "_call_llm_raw_ex", fake_response)
+    result = await llm.call_text("提炼投资观点", max_tokens=8192)
+    assert result is None
+    assert calls == [8192, 16384]
+
+
+@pytest.mark.asyncio
+async def test_text_distillation_does_not_retry_complete_response(monkeypatch):
+    calls = []
+
+    async def fake_response(prompt, max_tokens):
+        calls.append(max_tokens)
+        return "提炼完成", "end_turn"
+
+    monkeypatch.setattr(llm, "_call_llm_raw_ex", fake_response)
+    result = await llm.call_text("提炼投资观点", max_tokens=8192)
+    assert result == "提炼完成"
+    assert calls == [8192]
