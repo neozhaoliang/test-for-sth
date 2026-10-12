@@ -240,14 +240,21 @@ async def _generate_summary(
     # The model is free to disagree with any method, including its authors.
     profile = getattr(inputs, "research_profile", None)
     style_ctx = (getattr(inputs, "valuation_model_result", None) or {}).get("style_context") or {}
-    methods = await compile_investment_methods(
-        getattr(inputs, "knowledge_excerpts", None) or [],
-        as_of=str(getattr(inputs, "as_of", "") or ""),
-        archetype=getattr(profile, "archetype", "general"),
-        industry=getattr(profile, "industry", ""),
-        stock_name=str(getattr(inputs, "stock_name", "") or ""),
-        fallback_principles=style_ctx.get("investment_principles") or [],
-    )
+    if (getattr(inputs, "research_mode", "") == "historical"
+            and as_of and as_of < "2026-10-12"):
+        # This synthesis design was introduced in 2026-10. Older historical
+        # backtests retain the ordinary manager principles but must not borrow
+        # hindsight-distilled knowledge strategies.
+        methods = []
+    else:
+        methods = await compile_investment_methods(
+            getattr(inputs, "knowledge_excerpts", None) or [],
+            as_of=str(getattr(inputs, "as_of", "") or ""),
+            archetype=getattr(profile, "archetype", "general"),
+            industry=getattr(profile, "industry", ""),
+            stock_name=str(getattr(inputs, "stock_name", "") or ""),
+            fallback_principles=style_ctx.get("investment_principles") or [],
+        )
     prompt += "\n\n" + investment_manager_prompt(
         methods, archetype=getattr(profile, "archetype", "general"),
     )
