@@ -38,6 +38,7 @@ from analysis.filing_calendar import get_financial_filing_calendar
 from analysis.industry import get_industry_comparison
 from analysis.margin import get_margin_signal
 from analysis.management_capital import build_management_capital_record
+from analysis.issuer_capital import build_issuer_capital_context
 from analysis.macro_rates import get_macro_rate_context
 from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
@@ -334,6 +335,13 @@ async def generate_report(
         as_of=request.as_of,
     )
 
+    # Time-safe facts: insider sell-down is NOT corporate fundraising,
+    # company repurchases for incentives are NOT canceling shares.
+    issuer_capital_context = build_issuer_capital_context(
+        stock_code, as_of=request.as_of, primary_evidence=primary_evidence,
+        research_profile=preliminary_profile,
+    )
+
     # Explicit investor hurdle, not a fabricated issuer WACC. Configuration is optional.
     # Example: VALUATION_REQUIRED_RETURN_PCT=11
     hurdle_raw = os.environ.get("VALUATION_REQUIRED_RETURN_PCT", "").strip()
@@ -416,11 +424,13 @@ async def generate_report(
         market_context=market_context,
         freight_signal=freight_signal,
         margin_signal=margin_signal,
-        position_risk=inputs.position_risk,
         primary_evidence=primary_evidence,
         issuer_business=issuer_business,
+        issuer_capital_context=issuer_capital_context,
         a_share_structure=a_share_structure,
         management_capital=management_capital,
+        issuer_capital_context=issuer_capital_context,
+        position_risk=inputs.position_risk,
         filing_calendar=filing_calendar,
     )
 
