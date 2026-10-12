@@ -13,6 +13,9 @@ assert.ok(!prefix.includes('function renderValuationLab('));
 assert.ok(prefix.includes('function renderIndustryValuationLab('));
 const nodes={};
 const mockDocument={
+  // Tooltips are attached to actual SVG nodes in browsers. The VM fixture
+  // intentionally has none, so DOM querying should return an empty NodeList.
+  querySelectorAll(){return [];},
   createElement(){
     let text='';
     return {set textContent(value){text=String(value);},
@@ -125,6 +128,14 @@ report.valuation_model.investor_reference={
       conditional_reference_price:5.12}]},
   historical_pb_anchor:{window_years:5,median_pb:1.15,
     median_pb_reference_price:6.31},
+  earnings_power:{status:'historical_sensitivity_only',
+    earnings_years:[2022,2023,2024,2025],pe_sample_months:48,
+    scenarios:[{name:'历史中枢',observed_annual_eps_yuan:2.50,
+      historical_pe_quantile:14.2,conditional_price_yuan:35.50,
+      relative_to_market_pct:2.81}]},
+};
+report.valuation_model.company_view_coverage={
+  status:'found_dated_hypotheses',count:2,latest_published_at:'2026-10-10',
 };
 report.valuation_model.style_context={
   status:'observed',style_regime:'dividend_leading',style_window:'20 trading days',
@@ -140,9 +151,13 @@ report.valuation_model.style_context={
 };
 ctx.renderResult(report);
 const newer=nodes.result.innerHTML;
-assert.ok(newer.includes('投资者参考估值'));
+assert.ok(newer.includes('投资者长期回报情景'));
 assert.ok(newer.includes('5.12元'));
 assert.ok(newer.includes('留存转化'));
+assert.ok(newer.includes('公司历史盈利能力'));
+assert.ok(newer.includes('35.50元'));
+assert.ok(newer.includes('历史估值观点'));
+assert.ok(newer.includes('2026-10-10'));
 assert.ok(!newer.includes('要求股息率'));
 assert.ok(newer.includes('近20个交易日'));
 assert.ok(newer.includes('红利指数基金大额申购限制'));

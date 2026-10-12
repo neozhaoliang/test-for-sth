@@ -13,6 +13,7 @@ Responsibilities here are limited to:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from pathlib import Path
@@ -36,9 +37,12 @@ from analysis.report_contract import (
 )
 from analysis.reviewer import ResearchReview, review_dimension_analyses
 from backtest.llm_client import call_analysis_with_tools, call_json_ex
-from model.m_analysis import CandidateOpinion, StructuredSummary
+from model.m_analysis import CandidateOpinion, StructuredSummary, KnowledgeExcerpt
 from tools.utils import utils
 from analysis.position_risk import position_risk_prompt_block, position_risk_context
+from analysis.company_valuation_knowledge import (
+    load_company_valuation_views, company_valuation_prompt,
+)
 from analysis.investment_method_distiller import (
     compile_investment_methods, investment_manager_prompt,
 )
@@ -256,6 +260,46 @@ async def _generate_summary(
         )
     prompt += "\n\n" + investment_manager_prompt(
         methods, archetype=getattr(profile, "archetype", "general"),
+    )
+
+    # Private issuer-specific historical theses must not disappear in a generic
+    # "extract timeless principles" step. They carry testable assumptions such
+    # as future profit and P/E, but are NOT certified company financial facts.
+    # No live/late-researched thesis may be backfilled into old as-of reports.
+    direct_views = []
+    if getattr(inputs, "research_mode", "") != "historical":
+        direct_views = await asyncio.to_thread(
+            load_company_valuation_views,
+            stock_name=str(getattr(inputs, "stock_name", "") or ""),
+            stock_code=str(getattr(inputs, "stock_code", "") or ""),
+            as_of=str(getattr(inputs, "as_of", "") or ""),
+        )
+    # Preserve the anonymous raw-derived excerpts in the PRIVATE report
+    # container so the public projection can detect and remove any near-verbatim
+    # phrases accidentally copied by the synthesis model.
+    if direct_views:
+        original_entries = getattr(inputs, "knowledge_excerpts", None)
+        if isinstance(original_entries, list):
+            original_entries.extend(
+                KnowledgeExcerpt(
+                    source="private_company_valuation_view",
+                    title="公司历史估值假设",
+                    distilled=item["hypothesis"],
+                    published_at=item["published_at"],
+                )
+                for item in direct_views
+            )
+    model = getattr(inputs, "valuation_model_result", None)
+    if isinstance(model, dict):
+        model["company_view_coverage"] = {
+            "status": "found_dated_hypotheses" if direct_views else "not_found_in_local_archive",
+            "count": len(direct_views),
+            "latest_published_at": direct_views[0]["published_at"] if direct_views else None,
+            "note": ("研究者观点仅作为非事实的估值假设。"
+                     "未发现文章不代表作者没有发表；本地归档可能滞后。"),
+        }
+    prompt += "\n\n" + company_valuation_prompt(
+        direct_views, stock_name=str(getattr(inputs, "stock_name", "") or ""),
     )
 
     # 工具调用路径: 强制十二维度逐一分析后提交

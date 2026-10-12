@@ -26,6 +26,7 @@ _PUBLIC_FIELDS = frozenset((
 _PUBLIC_MODEL_FIELDS = frozenset((
     "framework_version", "status", "route", "valuation", "cross_checks",
     "investor_reference", "style_context", "macro_stress_scenarios",
+    "company_view_coverage",
     "evidence_gate", "macro_context", "assumptions", "interactive_inputs",
     "warnings",
 ))

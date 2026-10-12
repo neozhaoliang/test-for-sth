@@ -27,7 +27,8 @@ jobs:
           python -m pip install \
             pytest pytest-asyncio uv \
             "pydantic>=2,<3" "pypdf>=5,<7" \
-            akshare anthropic python-dotenv
+            akshare anthropic python-dotenv \
+            "httpx[socks]==0.28.1" pillow playwright opencv-python tenacity requests
 
       - name: Verify uv lock is in sync
         run: uv lock --locked
@@ -147,6 +148,8 @@ jobs:
             tests/test_valuation_engine.py \
             tests/test_valuation_industry_models.py \
             tests/test_investor_reference_style.py \
+            tests/test_investor_return_decomposition.py \
+            tests/test_company_valuation_knowledge.py \
             tests/test_public_report_privacy.py \
             tests/test_issuer_business.py \
             tests/test_issuer_capital_alignment.py \

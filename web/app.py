@@ -2253,9 +2253,12 @@ function renderInvestorReference(model) {
   const pb=ref.historical_pb_anchor || {};
   const norm=ref.normalized_earnings || {};
   const decomposition=ref.return_decomposition || {};
+  const earnings=ref.earnings_power || {};
+  const companyCoverage=(model||{}).company_view_coverage || {};
   const scenarios=decomposition.scenarios || [];
+  const earningsScenarios=earnings.scenarios || [];
   const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(2):'暂缺';
-  if(!dividend.years&&!pb.median_pb&&!norm.annual_roe_years&&!scenarios.length)return '';
+  if(!dividend.years&&!pb.median_pb&&!norm.annual_roe_years&&!scenarios.length&&!earningsScenarios.length)return '';
   let html='<div class="investor-reference" style="margin-top:16px;">'+
     '<h4>投资者长期回报情景</h4>'+
     '<p class="section-caption">先看可持续ROE、留存转化和现金股息，再单独讨论估值变化。'+
@@ -2289,12 +2292,46 @@ function renderInvestorReference(model) {
       escapeHtml(decomposition.terminal_pb_basis||'待核验')+
       '。期末价值占比越高，情景对远期PB越敏感。</p>';
   } else if((decomposition.missing_requirements||[]).length) {
-    html+='<p class="section-caption">暂不计算收益率情景或条件参考价；尚缺：'+
-      escapeHtml(decomposition.missing_requirements.join('；'))+'。</p>';
+    html+='<p class="section-caption">现金流折现情景尚未具备全部条件：'+
+      escapeHtml(decomposition.missing_requirements.join('；'))+
+      '。这不妨碍下述基于公司历史盈利的敏感性研究。</p>';
+  }
+  if(earningsScenarios.length) {
+    html+='<h4>公司历史盈利能力 × 市场定价情景</h4>'+
+      '<p class="section-caption">采用完整年度EPS与本公司过去的正PE月度样本，'+
+      '分别取25%、50%、75%分位，仅说明不同盈利能力和市场定价同时出现时对应的价格。'+
+      '不是公允价值、盈利预测，也不能把PE周期与EPS周期视为独立事件。</p>'+
+      '<div style="overflow-x:auto;"><table class="investor-band-table">'+
+      '<thead><tr><th>情景</th><th>历史EPS</th><th>历史PE</th>'+
+      '<th>条件价格</th><th>与现价差</th></tr></thead><tbody>'+
+      earningsScenarios.map(x=>'<tr><td>'+escapeHtml(x.name||'')+
+      '</td><td>'+fmt(x.observed_annual_eps_yuan)+'元</td><td>'+
+      fmt(x.historical_pe_quantile)+'倍</td><td><b>'+
+      fmt(x.conditional_price_yuan)+'元</b></td><td>'+
+      fmt(x.relative_to_market_pct)+'%</td></tr>').join('')+'</tbody></table></div>'+
+      '<p class="section-caption">使用'+
+      escapeHtml((earnings.earnings_years||[]).join('、'))+'年EPS和'+
+      escapeHtml(String(earnings.pe_sample_months||0))+
+      '个月正PE观测；周期股的低利润高PE可能破坏上述分位组合。'+
+      '请用镍钴锂利润预测、现金流、资本开支与债务变化交叉检验。</p>';
+  } else if(earnings.status==='insufficient_history') {
+    html+='<p class="section-caption">历史盈利敏感性未满足数据条件：'+
+      escapeHtml((earnings.cautions||[]).slice(-1)[0]||'缺少完整年度EPS或同期PE样本')+
+      '。</p>';
+  }
+  if(companyCoverage.status==='found_dated_hypotheses') {
+    html+='<p class="section-caption">本地知识库检索到'+
+      escapeHtml(String(companyCoverage.count||0))+
+      '条涉及本公司的历史估值观点（最近一条发表于'+
+      escapeHtml(companyCoverage.latest_published_at||'未知日期')+
+      '）。这些观点作为需复核的利润与估值假设进入文字研究，并非财报事实。</p>';
+  } else if(companyCoverage.status==='not_found_in_local_archive') {
+    html+='<p class="section-caption">本地归档未发现可用的本公司估值观点，'+
+      '不代表研究者没有发帖；本次分析不能声称已采用其最新具体估值。</p>';
   }
   if(pb.median_pb)html+='<p><b>历史PB：</b>近'+escapeHtml(String(pb.window_years))+
     '年中位'+fmt(Number(pb.median_pb))+'倍，对应'+
-    fmt(pb.median_pb_reference_price)+'元；它反映历史市场定价，不意味着一定回归。</p>';
+    fmt(pb.median_pb_reference_price)+'元；这只是历史定价中枢，周期公司尤其不能直接把它当作合理价值。</p>';
   if(norm.annual_roe_years)html+='<p><b>跨周期盈利：</b>完整年度ROE中位'+
     fmt(norm.median_roe_pct)+'%，按当前账面权益折算的盈利收益率约'+
     fmt(norm.indicative_normalized_earnings_yield_pct)+'%；不能直接当现金股息率。</p>';
@@ -2372,6 +2409,7 @@ function renderIndustryValuationLab(report) {
     const ref=model.investor_reference || {};
     const haveReference=(ref.dividend_basis||{}).years?.length ||
       (ref.return_decomposition||{}).scenarios?.length ||
+      (ref.earnings_power||{}).scenarios?.length ||
       (ref.historical_pb_anchor||{}).median_pb;
     html+=renderInvestorReference(model);
     html+='<div class="evidence-block missing">'+

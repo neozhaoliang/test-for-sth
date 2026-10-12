@@ -316,6 +316,7 @@ def industry_model_prompt_block(model: dict) -> str:
         f"有来源的ROE/派息/留存转化/估值变化五年情景={reference.get('return_decomposition')}；"
         f"历史PB中枢={reference.get('historical_pb_anchor')}；"
         f"跨周期ROE/盈利收益率={reference.get('normalized_earnings')}；"
+        f"本公司历史EPS×历史PE敏感性（不是目标价）={reference.get('earnings_power')}；"
         f"明确的假设={reference.get('key_assumptions')}。"
     )
     lines.append(style_investment_prompt_block(model.get("style_context")))
@@ -331,6 +332,10 @@ def industry_model_prompt_block(model: dict) -> str:
         "若完整模型状态不为calculated，严禁把参考收益率价格说成内在价值或精准目标价；"
         "必须说明可观测股息率、ROE、历史PB，以及五年总回报情景的缺失条件；"
         "不得以固定股息率7%/5.5%/4.5%机械反推目标价，"
-        "缺乏同期派息/EPS配对或用户要求收益率时，不得补造条件参考价。",
+        "缺乏同期派息/EPS配对或用户要求收益率时，不得补造现金流折现价。"
+        "但如存在公司完整年度EPS和可比历史PE样本，应明确分析本公司的"
+        "盈利能力×历史PE压力情景，并检查现金转换率、周期顶部/底部、"
+        "资本开支和股东稀释为何使这种参考可能失效。"
+        "不能把历史PB中位价直接当合理价。",
     ])
     return "\n".join(lines)
