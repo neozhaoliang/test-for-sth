@@ -2249,28 +2249,48 @@ function industryModelCompute(route, src, hurdlePct, growthPct, stressPct, polic
 }
 function renderInvestorReference(model) {
   const ref=(model||{}).investor_reference || {};
-  const scenarios=ref.dividend_scenarios || [];
   const dividend=ref.dividend_basis || {};
   const pb=ref.historical_pb_anchor || {};
   const norm=ref.normalized_earnings || {};
+  const decomposition=ref.return_decomposition || {};
+  const scenarios=decomposition.scenarios || [];
   const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(2):'暂缺';
-  if(!scenarios.length&&!pb.median_pb&&!norm.annual_roe_years)return '';
+  if(!dividend.years&&!pb.median_pb&&!norm.annual_roe_years&&!scenarios.length)return '';
   let html='<div class="investor-reference" style="margin-top:16px;">'+
-    '<h4>投资者参考估值</h4>'+
-    '<p class="section-caption">用历史分红、PB和跨周期盈利判断当前股价。表内是明确假设下的参考价格，不是保证能兑现的内在价值。</p>';
-  if(scenarios.length) {
+    '<h4>投资者长期回报情景</h4>'+
+    '<p class="section-caption">先看可持续ROE、留存转化和现金股息，再单独讨论估值变化。'+
+    '不是按统一的股息率阈值倒推目标价；全部价格仅为有条件的敏感性计算。</p>';
+  if(dividend.years&&dividend.years.length) {
     html+='<div class="metric-strip">'+
       metricCard('已派息年份分红中位',''+fmt(dividend.observed_median_cash_dividend_per_share)+'元/股',
                  (dividend.years||[]).join('、')+'年实施记录')+
-      metricCard('参考价对应分红收益率',fmt(dividend.median_implemented_dividend_yield_pct)+'%',
-                 '用已实施派息年份中位数÷当前价格')+
-      '</div><div style="overflow-x:auto;"><table class="investor-band-table">'+
-      '<thead><tr><th>情景</th><th>假设年派息</th><th>要求股息率</th><th>对应参考价</th></tr></thead><tbody>'+
-      scenarios.map(x=>'<tr><td>'+escapeHtml(x.name)+'</td><td>'+
-        fmt(x.annual_cash_dividend_per_share)+'元</td><td>'+
-        fmt(x.assumed_cash_dividend_yield_pct)+'%</td><td><b>'+
-        fmt(x.reference_price)+'元</b></td></tr>').join('')+
-      '</tbody></table></div>';
+      metricCard('历史股息与现价比值',fmt(dividend.median_implemented_dividend_yield_pct)+'%',
+                 '历史实施记录不等于未来承诺')+
+      '</div>';
+  }
+  if(scenarios.length) {
+    html+='<p><b>五年持有情景：</b>增长≈ROE×(1−派息率)×留存转化率；'+
+      '长期总回报拆成增长、现金股息和PB变化的近似贡献。终点PB不是预测。</p>'+
+      '<div style="overflow-x:auto;"><table class="investor-band-table">'+
+      '<thead><tr><th>情景</th><th>可持续ROE</th><th>派息率</th>'+
+      '<th>留存转化</th><th>增长贡献</th><th>现金股息</th><th>PB变化/年</th>'+
+      '<th>合计/年(近似)</th><th>要求收益率</th><th>条件参考价</th></tr></thead><tbody>'+
+      scenarios.map(x=>'<tr><td>'+escapeHtml(x.name||'')+'</td><td>'+
+        fmt(x.sustainable_roe_pct)+'%</td><td>'+fmt(x.payout_pct)+
+        '%</td><td>'+fmt(x.retention_conversion_pct)+'%</td><td>'+
+        fmt(x.growth_contribution_pct)+'%</td><td>'+
+        fmt(x.cash_dividend_yield_pct)+'%</td><td>'+
+        fmt(x.valuation_change_annualized_pct)+'%</td><td>'+
+        fmt(x.illustrative_total_return_pct)+'%</td><td>'+
+        fmt(x.required_return_pct)+'%</td><td><b>'+
+        fmt(x.conditional_reference_price)+'元</b></td></tr>').join('')+
+      '</tbody></table></div>'+
+      '<p class="section-caption">终点PB假设依据：'+
+      escapeHtml(decomposition.terminal_pb_basis||'待核验')+
+      '。期末价值占比越高，情景对远期PB越敏感。</p>';
+  } else if((decomposition.missing_requirements||[]).length) {
+    html+='<p class="section-caption">暂不计算收益率情景或条件参考价；尚缺：'+
+      escapeHtml(decomposition.missing_requirements.join('；'))+'。</p>';
   }
   if(pb.median_pb)html+='<p><b>历史PB：</b>近'+escapeHtml(String(pb.window_years))+
     '年中位'+fmt(Number(pb.median_pb))+'倍，对应'+
@@ -2278,9 +2298,8 @@ function renderInvestorReference(model) {
   if(norm.annual_roe_years)html+='<p><b>跨周期盈利：</b>完整年度ROE中位'+
     fmt(norm.median_roe_pct)+'%，按当前账面权益折算的盈利收益率约'+
     fmt(norm.indicative_normalized_earnings_yield_pct)+'%；不能直接当现金股息率。</p>';
-  html+='<p class="section-caption">特别提醒：尚未分红的年份可能不在实施样本内；'
-    +'不能将不同年度公告、实施和中期分红重复计入。'
-    +'分红恢复能力、煤价、电价及资本开支决定参考区间是否有意义。</p></div>';
+  html+='<p class="section-caption">未实施分红、增发稀释、未来资本开支、回购用途、负债及ROE下滑'+
+    '可能改变长期收益；不能把这些情景当作已核实的公司价值。</p></div>';
   return html;
 }
 function renderInvestmentStyleStrip(model) {
@@ -2351,7 +2370,8 @@ function renderIndustryValuationLab(report) {
     html+='<div class="chart-empty">旧版报告尚未包含行业估值结果。请用更新后的Agent重新分析。</div>';
   } else if(calc.status!=='calculated'||!model.interactive_inputs) {
     const ref=model.investor_reference || {};
-    const haveReference=(ref.dividend_scenarios||[]).length ||
+    const haveReference=(ref.dividend_basis||{}).years?.length ||
+      (ref.return_decomposition||{}).scenarios?.length ||
       (ref.historical_pb_anchor||{}).median_pb;
     html+=renderInvestorReference(model);
     html+='<div class="evidence-block missing">'+
