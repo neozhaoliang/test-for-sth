@@ -7,8 +7,8 @@ Responsibilities here are limited to:
 - run the 12 dimension tool contract;
 - recover gracefully if tool calling is incomplete;
 - review duplicate factors / contradictions;
-- revise the final synthesis without inventing new evidence;
-- generate dimension scores for visualization.
+- revise verifiably wrong factual claims without rewriting the manager's thesis;
+- generate optional descriptive dimension visuals (never the investment verdict).
 """
 
 from __future__ import annotations
@@ -228,9 +228,8 @@ async def _generate_summary(
     else:
         inputs.position_risk = position_risk_context(inputs)
 
-    # The deterministic overlay is injected after macro/valuation: when an
-    # extreme valuation and confirmed independent risks converge, the LLM
-    # must explain rather than average positive and negative bullet counts.
+    # Source-dated observations enter as inputs; they are NOT a factor-count
+    # rule and have zero authority to override the eventual model stance.
     context = getattr(inputs, "position_risk", None)
     if context:
         prompt += "\n\n" + position_risk_prompt_block(context)
