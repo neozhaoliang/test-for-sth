@@ -13,6 +13,9 @@ assert.ok(!prefix.includes('function renderValuationLab('));
 assert.ok(prefix.includes('function renderIndustryValuationLab('));
 const nodes={};
 const mockDocument={
+  // Tooltips are attached to actual SVG nodes in browsers. The VM fixture
+  // intentionally has none, so DOM querying should return an empty NodeList.
+  querySelectorAll(){return [];},
   createElement(){
     let text='';
     return {set textContent(value){text=String(value);},
