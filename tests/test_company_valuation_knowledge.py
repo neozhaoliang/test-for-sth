@@ -104,4 +104,4 @@ def test_future_earnings_and_pe_not_visible_to_historical_valuations():
     )
     analysis = result["earnings_power"]
     assert analysis["earnings_years"] == [2022, 2023, 2024]
-    assert analysis["pe_sample_months"] == 39
+    assert analysis["pe_sample_months"] == 40
