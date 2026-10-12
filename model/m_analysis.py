@@ -92,6 +92,7 @@ class AnalysisReport(BaseModel):
     shareholder_trend: Optional[dict] = Field(default=None, description="股东户数环比变化 (散户情绪/筹码集中度代理)")
     chip_price_context: Optional[dict] = Field(default=None, description="52周价格位置与股东户数变化的联合审慎判断")
     position_risk: Optional[dict] = Field(default=None, description="当前股票赔率的多风险共振和低位复苏核验，按事实来源判定")
+    issuer_capital_context: Optional[dict] = Field(default=None, description="发行人融资及内部人交易按主体、已执行和拟执行区分")
     dividend_history: List[dict] = Field(default_factory=list, description="历史分红记录")
     buyback_history: List[dict] = Field(default_factory=list, description="历史回购记录")
     dividend_chart: Optional[List[dict]] = Field(
