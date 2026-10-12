@@ -168,7 +168,18 @@ async def get_task(task_id: str) -> Dict:
         # A second projection protects responses from reports cached before
         # the privacy change, even when the HTML does not display the data.
         result = public_stock_report(result)
-    return {"status": task["status"], "result": result, "error": task["error"]}
+    # Detailed exceptions may contain provider payloads or a pasted source
+    # excerpt. Keep diagnostic details in server logs only, not public JSON.
+    public_error = None
+    if task["status"] == "failed":
+        raw_error = str(task.get("error") or "")
+        if "行情无有效价格" in raw_error:
+            public_error = "当前行情不可用，无法形成可靠价格判断，请稍后重试。"
+        elif "模型" in raw_error or "LLM" in raw_error:
+            public_error = "本次模型分析未能完成，请重试或更换模型服务。"
+        else:
+            public_error = "本次股票分析未能完成，请稍后重试。"
+    return {"status": task["status"], "result": result, "error": public_error}
 
 
 class CrawlXueqiuRequest(BaseModel):
@@ -2060,7 +2071,7 @@ function renderDashboardCharts(report) {
   html+='<div class="chart-grid" style="margin-top:16px;">';
   html+=chartTile('盈利质量的变化','ROE、毛利率与净利率；季报ROE为报告期间累计数，不跨期年化',
     renderProfitabilityTrendChart(report.profitability_trend));
-  html+=chartTile('十二方面的多空力度','分数从 -10 到 +10，数值越高表示观点越积极',
+  html+=chartTile('研究视角倾向（非综合评分）','各方面的文字分析倾向示意；不得求和、平均或据此推导买卖结论',
     scores.length>=6?renderDimensionBars(scores):'');
   html+=chartTile('历年分红与回购','金额和回购分开理解，原图含历史金额及备注',
     (report.dividend_chart || []).length?renderDividendChart(report.dividend_chart):'');
@@ -2082,6 +2093,48 @@ function renderDashboardCharts(report) {
 
 // Render precisely one full research narrative. Never duplicate it as a
 // per-dimension thesis overview, and never hide the detailed analysis in <details>.
+function renderIssuerCapitalSection(report) {
+  // Only render the public-safe, normalized company capital ledger. The full
+  // private issuer capital context is intentionally never returned by API.
+  const data=report.shareholder_capital_summary || {};
+  const sales=data.completed_holder_sales || [];
+  const issuances=data.equity_issuances || [];
+  const buybacks=data.corporate_buybacks || [];
+  const reconciled=data.reconciled_ownership_not_additional_sales || [];
+  if(!sales.length&&!issuances.length&&!buybacks.length)return '';
+  const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('zh-CN'):'暂缺';
+  let html='<section class="research-panel capital-flow-section">'+
+    '<h3>股东减持、融资与回购</h3>'+
+    '<p class="section-caption">把卖方变现、公司融资和回购分开看，均以公司正式公告为准。</p>'+
+    '<div style="overflow-x:auto"><table class="investor-band-table">'+
+    '<thead><tr><th>公告日</th><th>交易主体与性质</th><th>实际规模</th><th>出处</th></tr></thead><tbody>';
+  sales.slice(0,10).forEach(e=>{
+    const price=typeof e.average_sale_price_yuan==='number'?'，均价'+fmt(e.average_sale_price_yuan)+'元/股':'，均价暂缺';
+    html+='<tr><td>'+escapeHtml(e.disclosed_at||'')+'</td><td>'+
+      escapeHtml(e.actor||'股东')+'<div class="section-caption">已完成减持</div></td><td>'+
+      fmt(e.shares)+'股'+escapeHtml(price)+'</td><td>'+
+      (e.source_url?safeExternalLink(e.source_url,'公司公告'):'暂缺')+'</td></tr>';
+  });
+  issuances.slice(0,5).forEach(e=>{
+    html+='<tr><td>'+escapeHtml(e.disclosed_at||'')+'</td><td>公司发行新股融资</td><td>'+
+      fmt(e.shares)+'股'+(e.issue_price_hkd?'，发行价'+fmt(e.issue_price_hkd)+'港元':'')+
+      '</td><td>'+(e.source_url?safeExternalLink(e.source_url,'公司公告'):'暂缺')+'</td></tr>';
+  });
+  buybacks.slice(0,5).forEach(e=>{
+    const desc=e.status==='plan_only'?'回购方案，非已完成':'公司回购';
+    const intended=e.planned_use==='equity_incentive_or_employee_share_plan'?'（用于股权激励/员工持股）':'';
+    html+='<tr><td>'+escapeHtml(e.disclosed_at||'')+'</td><td>'+
+      escapeHtml(desc+intended)+'</td><td>不能与内部人个人增持等同</td><td>'+
+      (e.source_url?safeExternalLink(e.source_url,'公司公告'):'暂缺')+'</td></tr>';
+  });
+  html+='</tbody></table></div>';
+  if(reconciled.some(r=>r.fully_reconciled))html+=
+    '<p class="section-caption">持股比例变动公告中部分减持数量已包括上面列出的交易，不再重复相加。发行新股、股权激励引起的持股比例稀释也不等于主动卖股。</p>';
+  html+='<p class="section-caption">控股股东与高管出售股份获得的资金归卖方，不归上市公司；公司发行新股则可能稀释原股东。'
+    +'是否构成高位减持，需要比较交易当时的复权股价和估值位置，不能仅凭绝对成交价下结论。</p></section>';
+  return html;
+}
+
 function renderDimensionAnalysisSection(summary) {
   const analyses = (summary || {}).dimension_analyses || {};
   const order = [
@@ -2515,14 +2568,8 @@ function renderResult(report) {
     html += '<span class="verdict-industry">' + escapeHtml(profile.industry) + '</span>';
   }
   html += '</div>';
-  const position = report.position_risk || {};
-  if(position.regime==='bearish_concurrence'){
-    const names={valuation:'估值仍高',price_trend:'趋势偏弱',cash_conversion:'现金回款不足',
-      foreign_policy:'海外政策风险',market_style:'市场风格转弱',margin_context:'融资盘调整'};
-    const risks=(position.risk_signals||[]).map(x=>names[x.family]).filter(Boolean);
-    if(risks.length) html+='<p class="section-caption">当前风险共振：'+
-      escapeHtml([...new Set(risks)].join(' · '))+'</p>';
-  }
+  // The investment thesis is authored by the model. Screening indicators
+  // remain available to the research logic, not as a programmatic verdict.
   const conciseThesis=String(summary.thesis_summary || '').trim();
   const hasDetailedAnalysis=Object.keys(summary.dimension_analyses || {}).length >= 6;
   // Historical cached reports sometimes put the entire 12-dimension essay in
@@ -2533,6 +2580,7 @@ function renderResult(report) {
   html += '</section>';
 
   html += renderDashboardCharts(report);
+  html += renderIssuerCapitalSection(report);
   html += renderDimensionAnalysisSection(summary);
   html += renderIndustryValuationLab(report);
 

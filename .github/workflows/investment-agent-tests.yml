@@ -57,6 +57,7 @@ jobs:
             analysis/valuation_payout.py \
             analysis/chip_position.py \
             analysis/position_risk.py \
+            analysis/investment_method_distiller.py \
             analysis/rd_team.py \
             analysis/primary_sources.py \
             analysis/policy_context.py \
@@ -148,6 +149,7 @@ jobs:
             tests/test_investor_reference_style.py \
             tests/test_public_report_privacy.py \
             tests/test_issuer_business.py \
+            tests/test_issuer_capital_alignment.py \
             tests/test_valuation_config.py \
             tests/test_valuation_assumptions.py \
             tests/test_valuation_payout.py \
@@ -155,6 +157,7 @@ jobs:
             tests/test_valuation_real_filings_2025.py \
             tests/test_chip_position.py \
             tests/test_position_risk.py \
+            tests/test_investment_method_distiller.py \
             tests/test_market_context_asof.py \
             tests/test_realtime_price_asof.py \
             tests/test_margin_asof.py \

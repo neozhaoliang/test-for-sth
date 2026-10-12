@@ -7,8 +7,8 @@ Responsibilities here are limited to:
 - run the 12 dimension tool contract;
 - recover gracefully if tool calling is incomplete;
 - review duplicate factors / contradictions;
-- revise the final synthesis without inventing new evidence;
-- generate dimension scores for visualization.
+- revise verifiably wrong factual claims without rewriting the manager's thesis;
+- generate optional descriptive dimension visuals (never the investment verdict).
 """
 
 from __future__ import annotations
@@ -38,8 +38,9 @@ from analysis.reviewer import ResearchReview, review_dimension_analyses
 from backtest.llm_client import call_analysis_with_tools, call_json_ex
 from model.m_analysis import CandidateOpinion, StructuredSummary
 from tools.utils import utils
-from analysis.position_risk import (
-    position_risk_prompt_block, position_risk_context, enforce_asymmetric_odds
+from analysis.position_risk import position_risk_prompt_block, position_risk_context
+from analysis.investment_method_distiller import (
+    compile_investment_methods, investment_manager_prompt,
 )
 
 
@@ -157,6 +158,14 @@ async def _generate_summary(
     prompt += "\n\n" + issuer_business_prompt_block(
         getattr(inputs, "issuer_business", None)
     )
+    from analysis.issuer_capital import issuer_capital_prompt_block
+    prompt += "\n\n" + issuer_capital_prompt_block(
+        getattr(inputs, "issuer_capital_context", None)
+    )
+    # Fintech-equity financing is NOT interchangeable with margin loans.
+    # The investor pays for issuer new equity via dilution/required return,
+    # while shareholder secondary sales do not fund company projects.
+
     # Valuation is a method layer, never counted as primary factual evidence.
     # Load the locally versioned framework on every run (including fallback path).
     method_file = Path(__file__).resolve().parents[1] / "docs" / "valuation_shuangmulin_chensir_knowledge.md"
@@ -168,6 +177,15 @@ async def _generate_summary(
         method = method_file.read_text(encoding="utf-8")
         method = method.split("## 5. 可追溯原始讨论", 1)[0]
         method = method[method.find("## 1. "):] if "## 1. " in method else method
+        # The numbered mandatory 'calculate every company in this order' section
+        # is useful for offline formula testing, but not for a subjective PM
+        # considering companies with radically different economics.
+        if "## 3. Agent 强制计算顺序" in method:
+            first, latter = method.split("## 3. Agent 强制计算顺序", 1)
+            method = first + (
+                "\n## 方法适用边界\n" + latter.split("## 4. 不得机械使用的边界", 1)[1]
+                if "## 4. 不得机械使用的边界" in latter else ""
+            )
         for author in ("陈chensir", "双木林叔", "买股票的老木匠", "军师祭咖啡"):
             method = method.replace(author, "投资方法")
         prompt += (
@@ -210,12 +228,35 @@ async def _generate_summary(
     else:
         inputs.position_risk = position_risk_context(inputs)
 
-    # The deterministic overlay is injected after macro/valuation: when an
-    # extreme valuation and confirmed independent risks converge, the LLM
-    # must explain rather than average positive and negative bullet counts.
+    # Source-dated observations enter as inputs; they are NOT a factor-count
+    # rule and have zero authority to override the eventual model stance.
     context = getattr(inputs, "position_risk", None)
     if context:
         prompt += "\n\n" + position_risk_prompt_block(context)
+
+    # Subjective investment methods are synthesized from private knowledge,
+    # then anonymized and checked before entering the final report model.
+    # The model is free to disagree with any method, including its authors.
+    profile = getattr(inputs, "research_profile", None)
+    style_ctx = (getattr(inputs, "valuation_model_result", None) or {}).get("style_context") or {}
+    if (getattr(inputs, "research_mode", "") == "historical"
+            and as_of and as_of < "2026-10-12"):
+        # This synthesis design was introduced in 2026-10. Older historical
+        # backtests retain the ordinary manager principles but must not borrow
+        # hindsight-distilled knowledge strategies.
+        methods = []
+    else:
+        methods = await compile_investment_methods(
+            getattr(inputs, "knowledge_excerpts", None) or [],
+            as_of=str(getattr(inputs, "as_of", "") or ""),
+            archetype=getattr(profile, "archetype", "general"),
+            industry=getattr(profile, "industry", ""),
+            stock_name=str(getattr(inputs, "stock_name", "") or ""),
+            fallback_principles=style_ctx.get("investment_principles") or [],
+        )
+    prompt += "\n\n" + investment_manager_prompt(
+        methods, archetype=getattr(profile, "archetype", "general"),
+    )
 
     # 工具调用路径: 强制十二维度逐一分析后提交
     analyses, submit_input, tool_reason = await call_analysis_with_tools(
@@ -291,8 +332,8 @@ async def _generate_summary(
         dimension_scores=dimension_scores,
         dimension_analyses=analyses or None,
     )
-    if context:
-        summary = enforce_asymmetric_odds(summary, context)
+    # Data validity is enforced in report validation. A deterministic screening
+    # rule must NEVER overwrite the LLM's portfolio-manager conclusion.
     return summary, review
 
 

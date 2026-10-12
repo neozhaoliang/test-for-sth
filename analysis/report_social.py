@@ -23,7 +23,9 @@ from analysis.knowledge_base import (
     load_cached_entries,
 )
 from analysis.knowledge_context import prefilter_knowledge_by_context
-from analysis.market_research_context import select_recent_style_excerpts
+from analysis.market_research_context import (
+    select_recent_style_excerpts, select_evergreen_tech_finance_excerpts,
+)
 from backtest.score import load_records
 from model.m_analysis import CandidateOpinion, KnowledgeExcerpt
 
@@ -247,6 +249,19 @@ async def filter_relevant_knowledge(
             industry_name,
         )
 
+    # Do not rely on LLM relevance ranking alone: older investor methods
+    # about financing costs/insider sales remain applicable to tech businesses.
+    # Only generic verification principles will be passed to report synthesis.
+    if archetype == "technology":
+        known = {(e.source, e.title, e.published_at) for e in prefetched}
+        for entry in select_evergreen_tech_finance_excerpts(
+            knowledge_excerpts, limit=10
+        ):
+            key = (entry.source, entry.title, entry.published_at)
+            if key not in known:
+                prefetched.append(entry)
+                known.add(key)
+
     items_block = "\n".join(
         f"[{i}] {e.title}: {e.distilled}"
         for i, e in enumerate(prefetched)
@@ -275,6 +290,15 @@ async def filter_relevant_knowledge(
             if key not in known:
                 selected.append(entry)
                 known.add(key)
+        if archetype == "technology":
+            existing = {(e.source, e.title, e.published_at) for e in selected}
+            for entry in select_evergreen_tech_finance_excerpts(
+                knowledge_excerpts, limit=10
+            ):
+                key = (entry.source, entry.title, entry.published_at)
+                if key not in existing:
+                    selected.append(entry)
+                    existing.add(key)
         return selected
 
     kept = {
@@ -297,6 +321,14 @@ async def filter_relevant_knowledge(
         if key not in seen:
             selected.append(entry)
             seen.add(key)
+    if archetype == "technology":
+        for entry in select_evergreen_tech_finance_excerpts(
+            knowledge_excerpts, limit=10
+        ):
+            key = (entry.source, entry.title, entry.published_at)
+            if key not in seen:
+                selected.append(entry)
+                seen.add(key)
     return selected
 
 

@@ -187,6 +187,33 @@ def position_risk_context(inputs: Any) -> dict:
                    f"官方发布：{e['headline']}。海外营收占比约{external:.1f}%；"
                    "该名单不等同全面商业禁售，公司公告表示当时订单、生产和供应链未受实质影响；后续仍须核验。",
                    severity="material")
+    # Verified inside sales + new equity issuance is a distinct capital
+    # allocation/recovery question, not an automatic claim of shareholder loss.
+    # It does not duplicate market margin financing or the price trend.
+    issuer = getattr(inputs, "issuer_capital_context", None) or {}
+    confirmed = issuer.get("source_verified_events") or []
+    if archetype == "technology" and issuer.get("status") == "source_verified_events":
+        recent_sales = [
+            e for e in confirmed if e.get("status") == "completed"
+            and e.get("event_type") == "insider_sale"
+            and _dt(e.get("disclosed_at"))
+            and 0 <= (cutoff - _dt(e["disclosed_at"])).days <= 365
+        ]
+        funded = [
+            e for e in confirmed if e.get("status") == "completed"
+            and e.get("event_type") == "equity_issuance"
+            and _dt(e.get("disclosed_at"))
+            and _dt(e["disclosed_at"]) <= cutoff
+        ]
+        if price_ok and recent_sales and funded:
+            signal(
+                "capital_allocation", "内部人已减持且公司完成新增股权融资",
+                len(recent_sales),
+                max(recent_sales[0]["disclosed_at"], funded[0]["disclosed_at"]),
+                "官方公告确认个人/控股股东已减持、公司另行发行新股募集资金；"
+                "两者不能混记为公司分红或回购。现有股东承担估值与每股稀释风险，"
+                "新增资金能否获得足够回报仍需看项目兑现，而不能推断违法套现。",
+            )
     if margin and _fresh(margin.get("latest_date"), cutoff, 10):
         balance = _n(margin.get("latest_balance_yi"))
         change = _n(margin.get("change_pct"))
@@ -200,20 +227,16 @@ def position_risk_context(inputs: Any) -> dict:
                    margin["latest_date"], f"最近{margin.get('days')}个观察日融资余额变化{change:.1f}%；"
                    "去杠杆迹象待核查，不能仅凭绝对余额推断强平。")
 
+    # These factors are a research *inventory*, not an equation for a verdict.
+    # Their relative materiality is issuer- and market-specific. One severe
+    # factor can dominate; five mild correlated observations need not matter.
     independent = {x["family"] for x in signals} - {"margin_context"}
-    severe_policy = any(x["family"] == "foreign_policy" for x in signals)
-    # Four independent families, or a verified material policy event + two
-    # others (policy + valuation + cash, etc). This is a *decision review
-    # condition*, not empirical evidence that a price will fall.
-    bearish = price_ok and (
-        len(independent) >= 4 or (severe_policy and len(independent) >= 3)
-    )
     low_price = any(x["family"] == "price_position" for x in opp)
     low_valuation = any(x["family"] == "valuation" for x in opp)
-    regime = ("bearish_concurrence" if bearish else
-              "low_price_recovery_watch" if low_price and low_valuation else
-              "risk_watch" if len(independent) >= 2 else
-              "mixed_or_incomplete")
+    regime = ("invalid_quote" if not price_ok else
+              "low_price_and_valuation_observed" if low_price and low_valuation else
+              "factors_to_interpret" if signals or opp else
+              "insufficient_signals")
     return {
         "status": "assessed" if price_ok else "invalid_quote",
         "regime": regime,
@@ -222,70 +245,50 @@ def position_risk_context(inputs: Any) -> dict:
         "risk_signals": signals,
         "opportunity_signals": opp,
         "independent_downside_families": sorted(independent),
-        "risk_asymmetry_triggered": bearish,
+        # Backwards compatible field. It can NEVER drive a directional stance.
+        "risk_asymmetry_triggered": False,
         "issuer_policy_events": events,
         "interpretation": (
-            "当前多项独立下行驱动叠加，股票赔率评估应以风险为先；"
-            "企业高增长不能自动抵消高估值、市场退潮或重大政策风险。"
-            if bearish else
-            "先区分价格所处位置与估值是否便宜；低位核验复苏证据，"
-            "高估值或弱趋势时核验损失幅度，不因数据缺失预设方向。"
+            "以下仅为客观观察到的市场与经营线索。"
+            "综合投资结论要由研究模型根据竞争、资本回报、市场预期、"
+            "行业周期和具体价格独立形成，不能根据阈值或信号数量自动决定方向。"
         ),
         "warnings": [
-            "52周股价低位不等于估值低位；大幅下跌后仍可能处于估值高分位。",
-            "风险信号是观察到的条件，不等于公司失去客户或股价必然继续下跌。",
-            "同一价量与融资信号可能相关，融资只作辅助解释而不重复计入独立风险家族。",
+            "52周价格低位不等于估值便宜，市场反转也不等于经营改善。",
+            "单个重大事件可能比多个小指标更重要；信号存在并不代表必然下跌。",
+            "融资余额变化、价格下跌和市场风格可能共因，不能重复计票。",
         ],
     }
 
 
 def position_risk_prompt_block(ctx: dict) -> str:
+    """Present researchable observations; never command a stance."""
     rows = [
-        "## 股价位置 × 估值 × 风格 × 政策：不对称投资赔率",
-        f"状态={ctx.get('status')}；情景={ctx.get('regime')}；"
-        f"基准价={ctx.get('reference_price')}；日期={ctx.get('as_of')}。",
-        "高位先找损失路径，低位先找复苏证据；52周位置低并不意味着估值低，"
-        "经历大幅回撤后仍高估值的情况尤其要警惕。"
+        "## 市场位置与公司风险：供投资经理自由研判的观察线索",
+        f"数据状态={ctx.get('status')}；观察类别={ctx.get('regime')}；"
+        f"基准价={ctx.get('reference_price')}；截至={ctx.get('as_of')}。",
+        "以下不是打分表或决策树。高位可以偏重下行风险，低位可以寻找改善，"
+        "但价格本身既不证明贵，也不证明便宜。"
     ]
-    for s in ctx.get("risk_signals") or []:
-        rows.append(f"下行风险[{s['family']}，{s['as_of']}]：{s['reason']}")
-    for s in ctx.get("opportunity_signals") or []:
-        rows.append(f"机会核验[{s['family']}]：{s['reason']}")
-    if ctx.get("risk_asymmetry_triggered"):
-        rows.append(
-            "已出现多条彼此独立的下行风险。不能因公司业绩同比增长漂亮，就用"
-            "'利好利空相抵'归为中性。应分别给公司质量和当前股票赔率结论，"
-            "明确讨论为何看空赔率，除非存在可验证的实质性反证。"
-        )
-    else:
-        rows.append("未触发客观多风险共振；不要为了迎合某种观点强行判看空或看多。")
-    if ctx["status"] == "invalid_quote":
-        rows.append("价格无效，不得给出任何当前赔率方向或实时股价。")
+    for item in ctx.get("risk_signals") or []:
+        rows.append(f"需判断重要性[{item['family']}，{item['as_of']}]：{item['reason']}")
+    for item in ctx.get("opportunity_signals") or []:
+        rows.append(f"可能的机会线索[{item['family']}]：{item['reason']}")
+    rows.append(
+        "这些观察是研究入口而非最终判断。你可以看多、看空或中性，"
+        "可以认为某项数据被市场错误定价，也可以认为它不重要。"
+        "从当下公司和买入价格挑出决定性矛盾，解释为什么其影响"
+        "大于其他数据；任何方向都不能由信号数目自动推出。"
+    )
+    if ctx.get("status") == "invalid_quote":
+        rows.append("当前价格失效，禁止推断当前赔率或编造实时行情。")
     return "\n".join(rows)
 
 
 def enforce_asymmetric_odds(summary, ctx: dict):
-    """Final guard against LLM neutralization of independent *documented* risks."""
-    if ctx.get("regime") != "bearish_concurrence":
-        return summary
-    summary.current_odds_stance = "bearish"
-    summary.stance = "bearish"
-    # Preserve business-quality assessment: bearish equity odds is NOT a
-    # conclusion that the product or company has no technology or customers.
-    risks = {s["family"]: s for s in ctx.get("risk_signals") or []}
-    key_points = []
-    if "foreign_policy" in risks:
-        key_points.append("已发生的海外政策列名与高海外收入暴露同时存在（不等于全面禁售）")
-    if "valuation" in risks:
-        key_points.append(f"PB在历史{risks['valuation']['value']:.1f}%分位")
-    if "cash_conversion" in risks:
-        key_points.append(f"经营现金流/利润约{risks['cash_conversion']['value']:.2f}")
-    if "market_style" in risks:
-        key_points.append(f"红利相对成长领先{risks['market_style']['value']:.2f}个百分点")
-    if "price_trend" in risks:
-        key_points.append(f"距52周高点回撤{risks['price_trend']['value']:.1f}%且趋势偏弱")
-    summary.thesis_summary = (
-        "当前股票赔率看空：" + "；".join(key_points[:5])
-        + "。企业真实增长并不能自动抵消估值和政策风险，需跟踪订单、回款与市场风格变化。"
-    )
+    """Legacy compatibility only. Never rewrite an investor's authored view.
+
+    Price, dates, event status and report completeness are validated elsewhere;
+    a formula must not replace the model's actual investment judgment.
+    """
     return summary

@@ -75,6 +75,19 @@ _ISSUE_RULES: Dict[str, Dict[str, object]] = {
             "公司自身历史估值是否因商业模式/资本结构变化而需要口径重置？",
         ),
     },
+    "equity_financing_cost": {
+        "label": "科技融资与存量股东承担的成本",
+        "patterns": (
+            r"再融资|定增|增发|配股|股权激励|融资|发行H股|股民|稀释|"
+            r"套现|减持|割韭菜|二级市场|技术泡沫|资本市场",
+        ),
+        "questions": (
+            "公司新增股本、募集资金及每股收益稀释分别是多少，所投项目何时产生超过资本成本的回报？",
+            "同一阶段实控人/董监高是否以个人持股减持获得现金，上市公司回购是否用于股权激励而非注销？",
+            "募集资金被用于研发与扩产时，维持性资本开支、订单现金回款及项目实际ROIC能否补偿股东稀释和估值风险？",
+            "股民承担的是新股认购、股价高位估值回落，还是二级市场卖方套现的承接风险？必须分开核算。",
+        ),
+    },
     "insider_alignment": {
         "label": "内部人利益一致性",
         "patterns": (
@@ -214,6 +227,7 @@ def active_knowledge_topics(
                 "moat_control",
                 "customer_dependency",
                 "demand_financing",
+                "equity_financing_cost",
                 "policy_geopolitics",
             }
         )
@@ -361,27 +375,20 @@ def build_knowledge_hypotheses(
 
 
 def format_knowledge_hypotheses(items: Iterable[Dict]) -> str:
-    rows = list(items)
-    if not rows:
-        return "(没有检索到与当前公司核心因果风险相关的知识库假设)"
-    lines = [
-        "以下内容来自老木匠、军师祭咖啡等长期观察者的观点库。它们是【待核验假设】，不是事实，",
-        "用途是提醒你公开数据背后可能存在的资金、利益、产业链或周期机制。不得因为作者说过就直接加减分；",
-        "必须用本次硬数据/一手公告交叉验证。无法验证时写“假设成立与否暂缺”，而不是忽略。",
-    ]
-    for i, item in enumerate(rows, 1):
-        src = item.get("author") or item.get("source") or "knowledge"
-        dt = item.get("published_at") or "日期未知"
-        labels = "、".join(item.get("topic_labels") or [])
-        lines.append(f"{i}. [{src} {dt}] 主题={labels}")
-        lines.append(f"   主张: {item.get('claim') or '未说明'}")
-        if item.get("mechanism"):
-            lines.append(f"   机制: {item['mechanism']}")
-        if item.get("applicability"):
-            lines.append(f"   适用条件: {item['applicability']}")
-        if item.get("failure_conditions"):
-            lines.append(f"   失效条件: {item['failure_conditions']}")
-        questions = item.get("verification_questions") or []
-        if questions:
-            lines.append("   本次必须核验: " + "；".join(questions[:4]))
-    return "\n".join(lines)
+    """Only pass reusable checklist questions, never KB metadata or quotes.
+
+    The raw hypotheses are retained in private research data for attribution,
+    but must not be serialized into the LLM's public report prompt.
+    """
+    questions: List[str] = []
+    for item in items:
+        for question in item.get("verification_questions") or []:
+            if question not in questions:
+                questions.append(question)
+        if len(questions) >= 20:
+            break
+    if not questions:
+        return "当前没有可用的额外分析原则，按本公司事实进行判断。"
+    return "需要以本公司的数据检验：\n" + "\n".join(
+        f"- {q}" for q in questions[:20]
+    )

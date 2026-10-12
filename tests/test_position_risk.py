@@ -1,7 +1,6 @@
-"""No neutralization of high-valuation multi-risk equity odds.
+"""Asymmetric investing observations do not dictate portfolio-manager stance.
 
-The tests model a company with actual growth but asymmetric *stock* risk.
-They do not assert that stocks in any industry must be bearish.
+Fixed thresholds may suggest questions but never overrule a reasoned view.
 """
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -56,26 +55,31 @@ class Inputs:
     })
 
 
-def test_innolight_2026_asymmetric_downside_not_silently_neutral():
-    x=position_risk_context(Inputs())
-    fam=set(x["independent_downside_families"])
+def test_innolight_2026_has_distinct_risks_but_no_automatic_bearish_verdict():
+    data=position_risk_context(Inputs())
+    fam=set(data["independent_downside_families"])
     assert {"foreign_policy","market_style","valuation","cash_conversion","price_trend"} <= fam
-    assert x["regime"]=="bearish_concurrence"
-    assert x["risk_asymmetry_triggered"]
-    assert len(x["issuer_policy_events"])==1
-    assert "2026-06-10" in x["issuer_policy_events"][0]["published_at"]
-    prompt=position_risk_prompt_block(x)
-    assert "不等于" in prompt  # avoid claim that every US commercial sale is banned
-    summary=StructuredSummary(
-        stance="neutral",company_quality_stance="bullish",current_odds_stance="neutral",
-        confidence=.4,thesis_summary="半年报利润高速增长，因此中性",
-    )
-    adjusted=enforce_asymmetric_odds(summary,x)
-    assert adjusted.stance=="bearish"
-    assert adjusted.current_odds_stance=="bearish"
-    assert adjusted.company_quality_stance=="bullish"
-    assert "海外" in adjusted.thesis_summary
-    assert "现金流" in adjusted.thesis_summary or "经营现金流" in adjusted.thesis_summary
+    assert data["regime"]=="factors_to_interpret"
+    assert not data["risk_asymmetry_triggered"]
+    assert len(data["issuer_policy_events"])==1
+    assert "2026-06-10" in data["issuer_policy_events"][0]["published_at"]
+    prompt=position_risk_prompt_block(data)
+    assert "不等于" in prompt or "不能" in prompt
+    assert "不是打分表或决策树" in prompt
+    # With EXACTLY THE SAME material risk data, the stock manager can
+    # disagree with a prescribed bearish stance and keep either conviction.
+    for original in ("neutral","bullish","bearish"):
+        draft=StructuredSummary(
+            stance=original, company_quality_stance="bullish",
+            current_odds_stance=original,
+            confidence=.4,
+            thesis_summary="这是模型的独立判断，需要结合当前买入价。",
+        )
+        updated=enforce_asymmetric_odds(draft,data)
+        assert updated.stance==original
+        assert updated.current_odds_stance==original
+        assert updated.company_quality_stance=="bullish"
+        assert updated.thesis_summary==draft.thesis_summary
 
 
 def test_policy_event_available_only_after_publication():
@@ -91,7 +95,7 @@ def test_three_downside_families_without_verified_policy_stay_risk_watch():
     x.valuation_model_result={"macro_context":{}}
     ctx=position_risk_context(x)
     assert not ctx["risk_asymmetry_triggered"]
-    assert ctx["regime"]=="risk_watch"
+    assert ctx["regime"]=="factors_to_interpret"
     assert not ctx["issuer_policy_events"]
 
 
@@ -142,7 +146,7 @@ def test_low_position_only_no_automatic_bullish_recommendation():
                             "overseas_revenue_pct":10}}
     x.valuation_model_result={"macro_context":{}}
     result=position_risk_context(x)
-    assert result["regime"]=="low_price_recovery_watch"
+    assert result["regime"]=="low_price_and_valuation_observed"
     assert not result["risk_asymmetry_triggered"]
 
 

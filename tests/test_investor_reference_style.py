@@ -156,3 +156,55 @@ def test_knowledge_is_abstracted_without_other_stock_examples():
     prompt=style_investment_prompt_block(result)
     for prohibited in ("军师祭咖啡", "齐鲁银行", "腾讯", "601665"):
         assert prohibited not in prompt
+
+
+def test_tech_financing_knowledge_method_without_identity_or_irrelevant_stock():
+    excerpt = SimpleNamespace(
+        source="private_KB", author="买股票的老木匠",
+        title="科技公司融资和股东权益",
+        distilled=(
+            "科技企业以较高估值进行融资、增发和股权激励，"
+            "原股东承担估值下滑及稀释风险，必须对比高管减持与回购用途。"
+        ),
+        published_at="2026-09-20", source_url="https://xueqiu.com/anonymous"
+    )
+    result=build_style_investment_context(
+        as_of="2026-10-12", archetype="technology", industry="光通信",
+        knowledge_excerpts=[excerpt])
+    principles=result["investment_principles"]
+    assert "tech_capital_discipline" in [p["id"] for p in principles]
+    tech=next(p for p in principles if p["id"]=="tech_capital_discipline")
+    assert "稀释" in tech["principle"]
+    assert "减持" in tech["company_check"]
+    assert "股权激励" in tech["principle"]
+    for private in ("买股票的老木匠", "xueqiu", "private_KB"):
+        assert private not in str(result)
+    nontech=build_style_investment_context(
+        as_of="2026-10-12", archetype="stable_yield", industry="电力",
+        knowledge_excerpts=[excerpt])
+    assert "tech_capital_discipline" not in [
+        p["id"] for p in nontech["investment_principles"]
+    ]
+
+
+def test_old_tech_finance_method_remains_retrievable_and_anonymous():
+    from analysis.market_research_context import select_evergreen_tech_finance_excerpts
+    old=SimpleNamespace(
+        source="private_archive", author="买股票的老木匠",
+        title="科技股融资的股东成本",
+        distilled="科技股增发给股民造成持股稀释，须核查高管减持、回购与资本开支回报。",
+        published_at="2023-05-02", source_url="https://example.com/not-public",
+    )
+    out=select_evergreen_tech_finance_excerpts(
+        [old],as_of="2026-10-12")
+    assert out == [old]
+    ctx=build_style_investment_context(
+        as_of="2026-10-12",archetype="technology",
+        industry="光模块",knowledge_excerpts=[old])
+    assert any(p["id"]=="tech_capital_discipline"
+               for p in ctx["investment_principles"])
+    assert "买股票的老木匠" not in str(ctx)
+    before=build_style_investment_context(
+        as_of="2023-05-01",archetype="technology",
+        industry="光模块",knowledge_excerpts=[old])
+    assert before["investment_principles"]==[]

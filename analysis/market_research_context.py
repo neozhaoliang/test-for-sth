@@ -90,10 +90,47 @@ def select_recent_style_excerpts(excerpts: Iterable, *, as_of=None, limit=8) -> 
     return [x[2] for x in ranked[:max(0, limit)]]
 
 
+def select_evergreen_tech_finance_excerpts(
+    excerpts: Iterable, *, as_of=None, limit: int = 10
+) -> list:
+    """Preserve older stockholder-cost and dilution arguments for technology.
+
+    The originals stay in the *private* retrieval pipeline. Only generic
+    verification principles, never these source objects, reach synthesis.
+    """
+    cutoff = _day(as_of) or date.today()
+    ranked = []
+    for item in excerpts or []:
+        dt = _day(getattr(item, "published_at", None))
+        if dt is None or dt > cutoff or (cutoff - dt).days > 3650:
+            continue
+        content = (str(getattr(item, "title", "") or "") + " " +
+                   str(getattr(item, "distilled", "") or ""))
+        if not _TECH_FINANCING_RE.search(content):
+            continue
+        # Prefer finance/ownership claims over generic AI announcements.
+        weight = sum(bool(re.search(token, content, re.I))
+                     for token in (
+                         r"股民|股东|稀释|融资", r"减持|套现",
+                         r"股权激励|回购|增发|H股", r"估值|泡沫"
+                     ))
+        ranked.append((weight, dt.toordinal(), item))
+    ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return [x[2] for x in ranked[:max(0, limit)]]
+
+
 # Investment principles are the *only* output of KOL retrieval. The user-facing
 # report must never contain original excerpts, examples, account identities or links.
 # An extracted principle is tested against the issuer and market data; it is
 # not treated as proof that a buy/sell signal has fired.
+_TECH_FINANCING_RE = re.compile(
+    r"科技|融资|再融资|定增|增发|H股|股权激励|二级市场|散户|股民|"
+    r"管理层减持|控股股东减持|套现|资本市场|AI|算力|光模块|"
+    r"高估值|市盈率|估值泡沫|研发费用|技术护城河|"
+    r"订单|资本开支|债务融资|技术路线",
+    re.I,
+)
+
 _PRINCIPLE_RULES = (
     (
         "dividend_sustainability",
@@ -132,25 +169,51 @@ def _synthesized_principles(excerpts: Iterable, cutoff: date, *,
     applicable = archetype == "stable_yield" or any(
         x in str(industry) for x in ("电力", "水务", "煤炭", "银行", "燃气", "公用事业")
     )
+    tech = archetype == "technology"
     matched = set()
     for item in excerpts or []:
         dt = _day(getattr(item, "published_at", None))
-        if dt is None or dt > cutoff or (cutoff - dt).days > 120:
+        if dt is None or dt > cutoff:
             continue
+        age = (cutoff - dt).days
         content = str(getattr(item, "title", "") or "") + " " + str(
             getattr(item, "distilled", "") or "")
-        if not _STYLE_WORDS.search(content):
+        evergreen_tech = bool(tech and _TECH_FINANCING_RE.search(content))
+        # A market observation expires quickly, but an investor's capital
+        # allocation method should survive past the last 120 days. General
+        # methods may be referenced for ten years, NEVER as current facts.
+        if age > 120 and (not evergreen_tech or age > 3650):
             continue
+        if not _STYLE_WORDS.search(content) and not evergreen_tech:
+            continue
+        if tech and _TECH_FINANCING_RE.search(content):
+            matched.add("tech_capital_discipline")
         for key, pattern, _mechanism, _verification in _PRINCIPLE_RULES:
             if pattern.search(content):
                 matched.add(key)
     if not applicable:
         matched.discard("dividend_sustainability")
-    return [
+    principles = [
         {"id": key, "principle": mechanism, "company_check": verification}
         for key, _pattern, mechanism, verification in _PRINCIPLE_RULES
         if key in matched
-    ][:limit]
+    ]
+    if "tech_capital_discipline" in matched:
+        principles.insert(0, {
+            "id": "tech_capital_discipline",
+            "principle": (
+                "科技公司融资并非无成本利好：原股东承担新增股份稀释、"
+                "高估值回落以及研发/扩产投入回报不足的风险；"
+                "管理层或控股股东出售持股的所得不进入公司，"
+                "公司回购用于员工激励也不同于注销回购。"
+            ),
+            "company_check": (
+                "核验本公司已完成的减持数量与均价、增发/H股新股数、"
+                "回购是已执行还是方案、现金流与项目资本回报；"
+                "以当时复权价格和估值分位判断是否高位承接。"
+            ),
+        })
+    return principles[:limit]
 
 
 def build_style_investment_context(
