@@ -41,8 +41,11 @@ def _when(raw: Any) -> date | None:
 
 
 def _clean(value: Any) -> str:
-    # Remove HTML markup and normalize whitespace, not financial digits.
+    # Remove HTML markup and potential post attribution/URLs, not valuation digits.
     text = unescape(_TAGS.sub(" ", str(value or "")))
+    text = re.sub(r"https?://[^\\s]+", "（链接省略）", text, flags=re.I)
+    for name in ("双木林叔", "陈chensir", "军师祭咖啡", "买股票的老木匠"):
+        text = text.replace(name, "（匿名）")
     return _SPACE.sub(" ", text).strip()
 
 
