@@ -71,6 +71,42 @@ def _official_issuer_ledger(stock_code: str, as_of: date) -> list:
     return sorted(rows, key=lambda x: x["disclosed_at"], reverse=True)
 
 
+def _issuer_reconciliations(stock_code: str, as_of: date, events: list) -> list:
+    """Check overlapping ownership-change totals against executed component trades.
+
+    A percentage-change disclosure must never be counted as a fresh sale if it
+    restates underlying sales already included in the issuer's filings.
+    """
+    code6 = re.sub(r"\\D", "", str(stock_code))[-6:]
+    try:
+        data = json.loads((_LEDGER_DIR / (code6 + ".json")).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    by_id = {e.get("id"): e for e in events}
+    out = []
+    for row in data.get("reconciliation") or []:
+        disclosed = _date(row.get("disclosed_at"))
+        if not disclosed or disclosed > as_of:
+            continue
+        ids = row.get("component_event_ids") or []
+        components = [by_id[x] for x in ids if x in by_id]
+        reported = _number(row.get("reported_group_sales_shares"))
+        totals = sum(int(x.get("shares") or 0) for x in components)
+        out.append({
+            "disclosed_at": disclosed.isoformat(),
+            "source_url": row.get("source_url"),
+            "reported_group_sales_shares": reported,
+            "matched_components": [e.get("id") for e in components],
+            "component_total_shares": totals,
+            "fully_reconciled": bool(reported is not None and
+                                     len(components) == len(ids) and
+                                     totals == int(reported)),
+            "not_additional_trade": True,
+            "interpretation": row.get("interpretation"),
+        })
+    return out
+
+
 def _metadata_clues(primary_evidence, cutoff: date, already: list) -> list:
     """Only official announcement title/date/source. Not an executed transaction."""
     official_urls = {x.get("source_url", "").lower() for x in already}
@@ -121,6 +157,15 @@ def build_issuer_capital_context(stock_code: str, *, as_of=None,
                  and r.get("status") == "completed"]
     buybacks = [r for r in verified if r.get("event_type") == "corporate_buyback"]
     tech = getattr(research_profile, "archetype", "") == "technology"
+    reconciliations = _issuer_reconciliations(stock_code, cutoff, verified)
+    insider = [e for e in executed if e.get("event_type") == "insider_sale"]
+    insider_shares = sum(int(e.get("shares") or 0) for e in insider)
+    # Actual realized proceeds are estimated using disclosed average execution
+    # price, and are paid to SELLING holders, never to the issuer.
+    insider_proceeds = sum(
+        (int(e.get("shares") or 0) * float(e["price_yuan"]))
+        for e in insider if _number(e.get("price_yuan")) is not None
+    )
     # Strict bookkeeping: a sale by a shareholder does NOT inject cash into
     # the company, and a company share buyback is NOT an insider purchase.
     return {
@@ -130,6 +175,10 @@ def build_issuer_capital_context(stock_code: str, *, as_of=None,
         "source_verified_events": verified,
         "title_only_clues": clues,
         "completed_holder_sales": len(executed),
+        "completed_insider_sales": len(insider),
+        "completed_insider_sale_shares": insider_shares,
+        "disclosed_price_insider_proceeds_yuan": round(insider_proceeds, 2),
+        "reconciled_ownership_not_additional_sales": reconciliations,
         "completed_equity_issuances": len(issuances),
         "buyback_plan_records": sum(1 for x in buybacks if x.get("status") == "plan_only"),
         "capital_question": (
@@ -182,6 +231,22 @@ def issuer_capital_prompt_block(context: Optional[Mapping[str, Any]]) -> str:
             if r.get(key) is not None:
                 segments.append(f"{label}={r[key]}{unit}")
         output.append("；".join(segments))
+    if ctx.get("completed_insider_sales"):
+        output.append(
+            f"已实施内部人减持{ctx['completed_insider_sales']}笔、"
+            f"合计{ctx.get('completed_insider_sale_shares')}股；"
+            f"按公告均价估算卖方取得人民币"
+            f"{ctx.get('disclosed_price_insider_proceeds_yuan')}元。"
+            "这是出售个人/关联方持股的所得，不是公司募集资金。"
+        )
+    for reconciliation in (ctx.get("reconciled_ownership_not_additional_sales") or [])[:5]:
+        if reconciliation.get("fully_reconciled"):
+            output.append(
+                f"持股比例变动公告{reconciliation.get('disclosed_at')}披露累计减持"
+                f"{reconciliation.get('reported_group_sales_shares')}股，"
+                f"已由上述实际交易合计核对，绝不能再作为新增一笔减持；"
+                f"其中因发行新股和股权激励导致的持股比例被动下降不是出售。"
+            )
     for r in (ctx.get("title_only_clues") or [])[:5]:
         output.append(
             f"仅公告标题线索：{r['disclosed_at']} {r['document_title']} "
