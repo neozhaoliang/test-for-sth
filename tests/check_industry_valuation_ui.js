@@ -58,7 +58,7 @@ const model={status:'calculated',route,
 };
 const html=ctx.renderIndustryValuationLab({valuation_model:model});
 assert.ok(html.includes('股权自由现金流 FCFE'));
-assert.ok(html.includes('us_10y_yield_pct'));
+assert.ok(html.includes('美国10年国债收益率'));
 assert.ok(html.includes('2026-10-08'));
 assert.ok(html.includes('美元兑人民币'));
 const defaults={
