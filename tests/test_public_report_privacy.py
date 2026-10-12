@@ -81,3 +81,102 @@ def test_public_projection_is_idempotent_and_does_not_drop_market_facts():
     assert first["valuation_model"]["style_context"]["dated_market_events"][0][
         "headline"
     ] == "红利基金大额申购限制"
+
+
+def test_legacy_report_without_private_sources_still_removes_known_post_cases():
+    # Prior API responses already dropped knowledge_excerpts; a second GET
+    # must still be safe without access to its original private source corpus.
+    old = {
+        "stock_code": "SH600023",
+        "stock_name": "浙能电力",
+        "summary": {
+            "thesis_summary": (
+                "该企业分红兑现依赖经营现金流。"
+                "投资者观察：军师祭咖啡认为齐鲁银行短期会出现回撤。"
+                "腾讯高增长可能跑输农业银行。"
+                "需要结合电价和煤价评估股息。"
+            ),
+            "dimension_analyses": {
+                "chip_flow": "据某博主认为，红利股短线波动大。",
+                "price_position": "该股PB为0.97倍；与齐鲁银行(SH601665)相比。",
+            },
+        },
+        "new_internal_field": {
+            "username": "军师祭咖啡",
+            "raw_post": "全部原文、作者与无关案例",
+        },
+        "valuation_model": {
+            "style_context": {
+                "kol_style_hypotheses": [{
+                    "author": "军师祭咖啡",
+                    "source_url": "https://xueqiu.com/4780688814/410221558",
+                }],
+                "style_regime": "dividend_leading",
+                "dated_market_events": [{"headline": "红利基金申购限制"}],
+            }
+        },
+    }
+    public = public_stock_report(old)
+    value = str(public)
+    for term in (
+        "军师祭咖啡", "齐鲁银行", "腾讯", "农业银行", "SH601665",
+        "xueqiu.com", "new_internal_field", "kol_style_hypotheses",
+        "投资者观察", "据某博主",
+    ):
+        assert term not in value, term
+    assert "股息" in public["summary"]["thesis_summary"]
+    assert public["valuation_model"]["style_context"]["style_regime"] == "dividend_leading"
+    assert public_stock_report(public) == public
+
+
+def test_new_unknown_poster_name_from_private_metadata_is_not_exposed():
+    report = _report()
+    report["knowledge_excerpts"].append({
+        "author": "示例交易大师917", "title": "新能源讨论",
+        "distilled": "讨论资金结构，不能直接认定公司会上涨。",
+    })
+    report["summary"]["thesis_summary"] = (
+        "本股近期有红利风格参与。示例交易大师917认为当前趋势向上。"
+        "只按本股实际数据判断。"
+    )
+    public = public_stock_report(report)
+    assert "示例交易大师917" not in str(public)
+    assert "只按本股实际数据判断" in public["summary"]["thesis_summary"]
+
+
+def test_prompt_blocks_only_use_anonymous_investment_methods():
+    from types import SimpleNamespace
+    from analysis.report_blocks import (
+        _build_candidates_block, _build_debate_block,
+    )
+    from analysis.knowledge_context import format_knowledge_hypotheses
+
+    candidates = [SimpleNamespace(
+        user_nickname="军师祭咖啡",
+        credibility_note="齐鲁银行上涨后应减仓",
+        historical_thesis=["腾讯与农业银行的股价比较"],
+        latest_posts=["https://xueqiu.com/4780688814/410221558"],
+    )]
+    candidates_prompt = _build_candidates_block(candidates)
+    debate_prompt = _build_debate_block({
+        "bull": {"count": 2, "verified": 1},
+        "bear": {"count": 4, "verified": 2},
+        "bull_core": "军师祭咖啡看好齐鲁银行(SH601665)",
+        "bear_core": "腾讯的股价可能下跌",
+        "verdict": "跟随军师祭咖啡",
+    })
+    hypotheses_prompt = format_knowledge_hypotheses([{
+        "author": "军师祭咖啡",
+        "title": "齐鲁银行",
+        "claim": "腾讯不如农业银行",
+        "source_url": "https://xueqiu.com/4780688814/410221558",
+        "verification_questions": [
+            "公司当前的市净率与分红率是否支持买入？",
+        ],
+    }])
+    combined = candidates_prompt + debate_prompt + hypotheses_prompt
+    for term in ("军师祭咖啡", "齐鲁银行", "腾讯", "农业银行",
+                 "SH601665", "xueqiu.com"):
+        assert term not in combined
+    assert "市净率与分红率" in hypotheses_prompt
+    assert "多方2条" in debate_prompt
