@@ -429,8 +429,6 @@ async def generate_report(
         issuer_capital_context=issuer_capital_context,
         a_share_structure=a_share_structure,
         management_capital=management_capital,
-        issuer_capital_context=issuer_capital_context,
-        position_risk=inputs.position_risk,
         filing_calendar=filing_calendar,
     )
 
