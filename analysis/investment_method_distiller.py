@@ -27,8 +27,11 @@ def _published(value: Any):
 
 def _deidentify_seed(text: str, excerpts: Iterable) -> str:
     """Remove accounts and named issuer examples from private model input."""
-    s = _PRIVATE_URL.sub("（来源信息省略）", text)
-    s = _TICKER_COMPANY.sub("某公司", s)
+    s = _TICKER_COMPANY.sub("某公司", text)
+    s = _PRIVATE_URL.sub("（来源信息省略）", s)
+    # No legacy off-stock issuer examples are needed to learn the mechanism.
+    for name in ("齐鲁银行", "腾讯", "农业银行"):
+        s = s.replace(name, "某公司")
     for entry in excerpts:
         for name in (
             getattr(entry, "author", None), getattr(entry, "source", None)
