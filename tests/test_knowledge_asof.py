@@ -112,3 +112,49 @@ def test_cached_knowledge_loader_uses_only_matching_distill_cache(monkeypatch):
         },
     )
     assert knowledge_base.load_cached_entries() == []
+
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_empty_distillation_is_not_written_to_cache(monkeypatch):
+    raw = {
+        "source": "test", "entry_id": "lost", "title": "投资观点",
+        "content": "核对现金流和ROE", "timestamp": _ts(2026, 10, 12),
+    }
+    appended = []
+
+    async def empty(_raw):
+        return ""
+
+    monkeypatch.setattr(knowledge_base, "_distill_one", empty)
+    monkeypatch.setattr(knowledge_base, "_append_distill_cache", appended.append)
+    result = await knowledge_base._distill_missing([raw], {})
+    assert result == {}
+    assert appended == []
+
+
+@pytest.mark.asyncio
+async def test_old_empty_cache_is_reprocessed_after_model_budget_fix(monkeypatch):
+    raw = {
+        "source": "test", "entry_id": "lost", "title": "投资观点",
+        "content": "核对现金流和ROE", "timestamp": _ts(2026, 10, 12),
+    }
+    old = {
+        "test:lost": {
+            "cache_key": "test:lost",
+            "content_hash": knowledge_base._content_hash(raw["content"]),
+            "distilled": "",
+        }
+    }
+    appended = []
+
+    async def complete(_raw):
+        return "【机制】用现金流验证净利润。"
+
+    monkeypatch.setattr(knowledge_base, "_distill_one", complete)
+    monkeypatch.setattr(knowledge_base, "_append_distill_cache", appended.append)
+    result = await knowledge_base._distill_missing([raw], old)
+    assert result["test:lost"]["distilled"] == "【机制】用现金流验证净利润。"
+    assert len(appended) == 1
