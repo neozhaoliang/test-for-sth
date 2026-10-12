@@ -177,6 +177,15 @@ async def _generate_summary(
         method = method_file.read_text(encoding="utf-8")
         method = method.split("## 5. 可追溯原始讨论", 1)[0]
         method = method[method.find("## 1. "):] if "## 1. " in method else method
+        # The numbered mandatory 'calculate every company in this order' section
+        # is useful for offline formula testing, but not for a subjective PM
+        # considering companies with radically different economics.
+        if "## 3. Agent 强制计算顺序" in method:
+            first, latter = method.split("## 3. Agent 强制计算顺序", 1)
+            method = first + (
+                "\n## 方法适用边界\n" + latter.split("## 4. 不得机械使用的边界", 1)[1]
+                if "## 4. 不得机械使用的边界" in latter else ""
+            )
         for author in ("陈chensir", "双木林叔", "买股票的老木匠", "军师祭咖啡"):
             method = method.replace(author, "投资方法")
         prompt += (
