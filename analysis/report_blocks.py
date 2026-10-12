@@ -1035,22 +1035,15 @@ def _build_xueqiu_block(xueqiu_stock: Optional[Dict]) -> str:
 
 
 def _build_candidates_block(candidates: List[CandidateOpinion]) -> str:
-    lines = []
-    for c in candidates:
-        lines.append(f"- {c.user_nickname} ({c.credibility_note})")
-        if c.historical_thesis:
-            lines.append("  历史观点摘录:")
-            for t in c.historical_thesis:
-                lines.append(f"    · {t[:200]}")
-        if c.latest_posts:
-            lines.append("  最新发言摘录:")
-            for t in c.latest_posts:
-                lines.append(f"    · {t[:200]}")
-        else:
-            lines.append("  (未能获取到最新发言)")
-    if not lines:
-        lines.append("(暂无)")
-    return "\n".join(lines)
+    """Keep poster identities, original posts and off-topic ticker examples OUT
+    of the LLM context. The rule/checklist layers already distill reusable
+    mechanisms from the private corpus. Candidate backtests remain private.
+    """
+    return (
+        "历史讨论与回测仅用于后台校准选题；不传入账号、昵称、"
+        "历史论点原句、最新帖子、引用或无关股票案例。"
+        "请仅凭公司事实、日期匹配的市场数据及匿名化投资原则独立判断。"
+    )
 
 
 def _build_knowledge_block(knowledge_excerpts: List[KnowledgeExcerpt]) -> str:
