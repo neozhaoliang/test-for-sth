@@ -30,7 +30,8 @@ def _deidentify_seed(text: str, excerpts: Iterable) -> str:
     s = _TICKER_COMPANY.sub("某公司", text)
     s = _PRIVATE_URL.sub("（来源信息省略）", s)
     # No legacy off-stock issuer examples are needed to learn the mechanism.
-    for name in ("齐鲁银行", "腾讯", "农业银行"):
+    for name in ("齐鲁银行", "腾讯", "农业银行",
+                 "军师祭咖啡", "买股票的老木匠", "双木林叔", "陈chensir"):
         s = s.replace(name, "某公司")
     for entry in excerpts:
         for name in (
