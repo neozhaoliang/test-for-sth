@@ -156,6 +156,7 @@ def build_industry_valuation_report(inputs: Any) -> dict:
         valuation_history=getattr(inputs, "valuation_history", None),
         quote=getattr(inputs, "quote", None),
         as_of=getattr(inputs, "as_of", None),
+        valuation_assumption_context=getattr(inputs, "valuation_assumption_context", None),
     )
     style_context = build_style_investment_context(
         as_of=getattr(inputs, "as_of", None),
@@ -312,7 +313,7 @@ def industry_model_prompt_block(model: dict) -> str:
         "投资者参考估值（非内在价值，不是保证买点）："
         f"状态={reference.get('status')}；"
         f"历史已实施分红锚={reference.get('dividend_basis')}；"
-        f"现金股息收益率参考情景={reference.get('dividend_scenarios')}；"
+        f"有来源的ROE/派息/留存转化/估值变化五年情景={reference.get('return_decomposition')}；"
         f"历史PB中枢={reference.get('historical_pb_anchor')}；"
         f"跨周期ROE/盈利收益率={reference.get('normalized_earnings')}；"
         f"明确的假设={reference.get('key_assumptions')}。"
@@ -328,7 +329,8 @@ def industry_model_prompt_block(model: dict) -> str:
         f"独立第二种模型交叉检验={model.get('cross_checks')}",
         "严禁用海外收入占比直接推美元净敞口，不得将美债利率或A股红利风格自动加成固定PE。",
         "若完整模型状态不为calculated，严禁把参考收益率价格说成内在价值或精准目标价；"
-        "但必须说明可用的股息率参考价、历史PB位置及当前隐含收益率，"
-        "不能仅以缺少完整FCFE为由放弃估值。",
+        "必须说明可观测股息率、ROE、历史PB，以及五年总回报情景的缺失条件；"
+        "不得以固定股息率7%/5.5%/4.5%机械反推目标价，"
+        "缺乏同期派息/EPS配对或用户要求收益率时，不得补造条件参考价。",
     ])
     return "\n".join(lines)
