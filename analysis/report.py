@@ -499,6 +499,8 @@ async def generate_report(
         xueqiu_stock=inputs.xueqiu_stock,
         a_share_structure=a_share_structure,
         management_capital=management_capital,
+        issuer_capital_context=inputs.issuer_capital_context,
+        position_risk=inputs.position_risk,
         filing_calendar=filing_calendar,
         debate=inputs.debate,
         sentiment=inputs.sentiment,
