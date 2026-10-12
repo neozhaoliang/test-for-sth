@@ -90,6 +90,35 @@ def select_recent_style_excerpts(excerpts: Iterable, *, as_of=None, limit=8) -> 
     return [x[2] for x in ranked[:max(0, limit)]]
 
 
+def select_evergreen_tech_finance_excerpts(
+    excerpts: Iterable, *, as_of=None, limit: int = 10
+) -> list:
+    """Preserve older stockholder-cost and dilution arguments for technology.
+
+    The originals stay in the *private* retrieval pipeline. Only generic
+    verification principles, never these source objects, reach synthesis.
+    """
+    cutoff = _day(as_of) or date.today()
+    ranked = []
+    for item in excerpts or []:
+        dt = _day(getattr(item, "published_at", None))
+        if dt is None or dt > cutoff or (cutoff - dt).days > 3650:
+            continue
+        content = (str(getattr(item, "title", "") or "") + " " +
+                   str(getattr(item, "distilled", "") or ""))
+        if not _TECH_FINANCING_RE.search(content):
+            continue
+        # Prefer finance/ownership claims over generic AI announcements.
+        weight = sum(bool(re.search(token, content, re.I))
+                     for token in (
+                         r"股民|股东|稀释|融资", r"减持|套现",
+                         r"股权激励|回购|增发|H股", r"估值|泡沫"
+                     ))
+        ranked.append((weight, dt.toordinal(), item))
+    ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return [x[2] for x in ranked[:max(0, limit)]]
+
+
 # Investment principles are the *only* output of KOL retrieval. The user-facing
 # report must never contain original excerpts, examples, account identities or links.
 # An extracted principle is tested against the issuer and market data; it is
