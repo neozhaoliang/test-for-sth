@@ -168,7 +168,18 @@ async def get_task(task_id: str) -> Dict:
         # A second projection protects responses from reports cached before
         # the privacy change, even when the HTML does not display the data.
         result = public_stock_report(result)
-    return {"status": task["status"], "result": result, "error": task["error"]}
+    # Detailed exceptions may contain provider payloads or a pasted source
+    # excerpt. Keep diagnostic details in server logs only, not public JSON.
+    public_error = None
+    if task["status"] == "failed":
+        raw_error = str(task.get("error") or "")
+        if "行情无有效价格" in raw_error:
+            public_error = "当前行情不可用，无法形成可靠价格判断，请稍后重试。"
+        elif "模型" in raw_error or "LLM" in raw_error:
+            public_error = "本次模型分析未能完成，请重试或更换模型服务。"
+        else:
+            public_error = "本次股票分析未能完成，请稍后重试。"
+    return {"status": task["status"], "result": result, "error": public_error}
 
 
 class CrawlXueqiuRequest(BaseModel):
