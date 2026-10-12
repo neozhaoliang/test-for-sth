@@ -1,0 +1,17 @@
+{
+  "stock_code": "300308",
+  "events": [
+    {
+      "id": "dod-1260h-2026-06",
+      "published_at": "2026-06-10",
+      "event_type": "us_dod_1260h_listing",
+      "risk_level": "material_policy_exposure",
+      "headline": "中际旭创被列入美国国防部Section 1260H名单",
+      "official_source": "https://www.govinfo.gov/content/pkg/FR-2026-06-10/pdf/2026-11571.pdf",
+      "company_response": "https://static.cninfo.com.cn/finalpage/2026-06-10/1225364128.pdf",
+      "company_response_summary": "公司6月10日声明不同意列名依据，表示当时订单、生产和供应链未受实质影响。",
+      "legal_scope": "Section 1260H identification, NOT an automatic BIS Entity List designation or blanket commercial sales ban",
+      "recheck_required": true
+    }
+  ]
+}
