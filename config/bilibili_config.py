@@ -76,3 +76,13 @@ ENABLE_BILI_SUBTITLES = True
 
 # 字幕优先级：优先人工简中，其次 AI 中文，再退化到其他中文轨道。
 BILI_SUBTITLE_PREFERRED_LANGS = ["zh-Hans", "zh-CN", "zh", "ai-zh"]
+
+
+# Public Opus first: don't block reading public articles on account login.
+# If Bilibili denies an unauthenticated feed request, prompt for QR login
+# and retry that creator exactly once.
+BILI_OPUS_PUBLIC_FIRST = True
+
+# When authentication is needed, rotate expired QR images automatically.
+# Each Bilibili-issued QR expires after about 180 seconds.
+BILI_QR_MAX_ATTEMPTS = 2

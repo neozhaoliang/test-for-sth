@@ -38,6 +38,9 @@ from analysis.reviewer import ResearchReview, review_dimension_analyses
 from backtest.llm_client import call_analysis_with_tools, call_json_ex
 from model.m_analysis import CandidateOpinion, StructuredSummary
 from tools.utils import utils
+from analysis.position_risk import (
+    position_risk_prompt_block, position_risk_context, enforce_asymmetric_odds
+)
 
 
 _PROCESS_TERM_RE = re.compile(r"六查|第[一二三四五六七八九十\d]+步|检查项\d*")
@@ -150,14 +153,28 @@ async def _generate_summary(
     evidence: List[EvidenceItem],
 ) -> tuple[StructuredSummary, ResearchReview]:
     prompt = _build_prompt(inputs, candidates)
+    from analysis.issuer_business import issuer_business_prompt_block
+    prompt += "\n\n" + issuer_business_prompt_block(
+        getattr(inputs, "issuer_business", None)
+    )
     # Valuation is a method layer, never counted as primary factual evidence.
     # Load the locally versioned framework on every run (including fallback path).
     method_file = Path(__file__).resolve().parents[1] / "docs" / "valuation_shuangmulin_chensir_knowledge.md"
     # Prevent point-in-time backtests from seeing rules distilled after their as-of date.
     as_of = str(getattr(inputs, "as_of", "") or "")[:10]
     if method_file.is_file() and (not as_of or as_of >= "2026-10-08"):
-        prompt += ("\n\n## 估值方法知识库（待以本次数据验证，不构成事实证据）\n"
-                   + method_file.read_text(encoding="utf-8"))
+        # Keep formulas and reasoning rules, never source identities or the
+        # original-discussion bibliography in the company analysis prompt.
+        method = method_file.read_text(encoding="utf-8")
+        method = method.split("## 5. 可追溯原始讨论", 1)[0]
+        method = method[method.find("## 1. "):] if "## 1. " in method else method
+        for author in ("陈chensir", "双木林叔", "买股票的老木匠", "军师祭咖啡"):
+            method = method.replace(author, "投资方法")
+        prompt += (
+            "\n\n## 可复用估值方法（不得暴露来源身份或其他公司案例）\n"
+            + method
+            + "\n请仅使用本公司当期数据独立判断，禁止复述案例、作者、原文。"
+        )
     elif not method_file.is_file():
         utils.logger.warning("[analysis.report] 估值方法知识库文件缺失，无法注入长期收益率模型")
 
@@ -179,6 +196,26 @@ async def _generate_summary(
         inputs.valuation_model_result = build_industry_valuation_report(inputs)
         prompt += ("\\n\\n## 行业专用估值与A股宏观传导（不可虚构价值）\\n"
                    + industry_model_prompt_block(inputs.valuation_model_result))
+
+    if (getattr(inputs, "research_mode", "") == "historical"
+            and as_of and as_of < "2026-10-09"):
+        # A post-hoc research methodology must not be backported into earlier
+        # snapshots; actual historical issuer events remain in source archives.
+        inputs.position_risk = {
+            "status": "historical_method_not_available",
+            "regime": "not_assessed",
+            "risk_signals": [],
+            "risk_asymmetry_triggered": False,
+        }
+    else:
+        inputs.position_risk = position_risk_context(inputs)
+
+    # The deterministic overlay is injected after macro/valuation: when an
+    # extreme valuation and confirmed independent risks converge, the LLM
+    # must explain rather than average positive and negative bullet counts.
+    context = getattr(inputs, "position_risk", None)
+    if context:
+        prompt += "\n\n" + position_risk_prompt_block(context)
 
     # 工具调用路径: 强制十二维度逐一分析后提交
     analyses, submit_input, tool_reason = await call_analysis_with_tools(
@@ -254,6 +291,8 @@ async def _generate_summary(
         dimension_scores=dimension_scores,
         dimension_analyses=analyses or None,
     )
+    if context:
+        summary = enforce_asymmetric_odds(summary, context)
     return summary, review
 
 

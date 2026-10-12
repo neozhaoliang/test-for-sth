@@ -44,6 +44,7 @@ from analysis.knowledge_base import (
 )
 from analysis.realtime_price import resolve_stock_code
 from analysis.report import generate_report
+from analysis.public_report import public_stock_report
 from analysis.research_context import (
     ResearchRequest,
     assert_request_supported,
@@ -91,7 +92,7 @@ async def _run_analysis(
     try:
         report = await generate_report(stock_code, request=research_request)
         _tasks[task_id]["status"] = "done"
-        _tasks[task_id]["result"] = report.model_dump()
+        _tasks[task_id]["result"] = public_stock_report(report.model_dump())
     except Exception as e:
         utils.logger.error(f"[web.app] 分析任务 {task_id} ({stock_code}) 失败: {e}")
         _tasks[task_id]["status"] = "failed"
@@ -162,7 +163,12 @@ async def get_task(task_id: str) -> Dict:
     task = _tasks.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="task_id 不存在")
-    return {"status": task["status"], "result": task["result"], "error": task["error"]}
+    result = task["result"]
+    if isinstance(result, dict):
+        # A second projection protects responses from reports cached before
+        # the privacy change, even when the HTML does not display the data.
+        result = public_stock_report(result)
+    return {"status": task["status"], "result": result, "error": task["error"]}
 
 
 class CrawlXueqiuRequest(BaseModel):
@@ -2228,7 +2234,6 @@ function renderInvestmentStyleStrip(model) {
   const style=(model||{}).style_context || {};
   if(style.status!=='observed')return '';
   const events=style.dated_market_events || [];
-  const opinions=style.kol_style_hypotheses || [];
   const label=style.style_regime==='dividend_leading'?'红利资产相对走强':
     style.style_regime==='growth_leading'?'成长资产相对走强':
     style.style_regime==='mixed'?'风格相对收益不明显':'指数数据不足，关注最新市场事件';
@@ -2267,10 +2272,12 @@ function renderInvestmentStyleStrip(model) {
       (e.source_url?' <span>'+safeExternalLink(e.source_url,'报道来源')+'</span>':'')+
       '。限购可能意味着关注度升温，但不能直接据此判断顶部。</p>';
   });
-  if(opinions.length) {
-    html+='<p><b>投资者观察：</b>'+opinions.slice(0,2).map(e=>
-      escapeHtml((e.author||'投资者')+' '+(e.published_at||'')+'：'+(e.claim||'').slice(0,180))+
-      (e.source_url?' '+safeExternalLink(e.source_url,'原帖'):'')).join('；')+'</p>';
+  if(style.stock_20d_pct!==null && style.stock_20d_pct!==undefined &&
+     Number.isFinite(Number(style.stock_20d_pct))) {
+    const pct=Number(style.stock_20d_pct);
+    html+='<p><b>本股近20个交易日：</b>'+
+      (pct>0?'+':'')+pct.toFixed(2)+'%（'+
+      escapeHtml(style.stock_20d_as_of||'日期不明')+'），可对照上图判断是否已跟随红利风格上涨。</p>';
   }
   html+='<p class="section-caption">市场资金偏好与公司的长期盈利价值是两回事；'
      +'判断个股需同时看价格位置、实际派息、经营利润和指数相对走势。</p></div>';
@@ -2467,8 +2474,23 @@ function renderResult(report) {
 
   if (report.realtime_quote) {
     const q = report.realtime_quote;
-    html += '<p class="quote">' + (isHistorical ? '截止日收盘/最近交易价 ' : '最新价 ') +
-      q.latest_price + ' 涨跌幅 ' + q.change_pct + '% 成交量 ' + q.volume + '</p>';
+    const price = numericOrNull(q.latest_price);
+    if(price!==null && price>0){
+      const previous = q.quote_mode === 'verified_previous_close';
+      let qtext = '<p class="quote">' +
+        (previous ? '最近可核验收盘价 ' : isHistorical ? '截止日收盘价 ' : '最新价 ') +
+        escapeHtml(String(price)) + '元';
+      if(q.change_pct!==null && q.change_pct!==undefined &&
+         numericOrNull(q.change_pct)!==null)
+        qtext += ' 涨跌幅 ' + escapeHtml(String(q.change_pct)) + '%';
+      if(q.volume!==null && q.volume!==undefined &&
+         numericOrNull(q.volume)!==null)
+        qtext += ' 成交量 ' + escapeHtml(String(q.volume));
+      if(previous) qtext += '（'+escapeHtml(q.date||q.timestamp||'未知日期')+'，不是盘中实时价）';
+      html+=qtext+'</p>';
+    } else {
+      html+='<p class="quote">有效股价暂缺，不能判断当前股票赔率。</p>';
+    }
   }
 
   const summary = report.summary || {};
@@ -2493,6 +2515,14 @@ function renderResult(report) {
     html += '<span class="verdict-industry">' + escapeHtml(profile.industry) + '</span>';
   }
   html += '</div>';
+  const position = report.position_risk || {};
+  if(position.regime==='bearish_concurrence'){
+    const names={valuation:'估值仍高',price_trend:'趋势偏弱',cash_conversion:'现金回款不足',
+      foreign_policy:'海外政策风险',market_style:'市场风格转弱',margin_context:'融资盘调整'};
+    const risks=(position.risk_signals||[]).map(x=>names[x.family]).filter(Boolean);
+    if(risks.length) html+='<p class="section-caption">当前风险共振：'+
+      escapeHtml([...new Set(risks)].join(' · '))+'</p>';
+  }
   const conciseThesis=String(summary.thesis_summary || '').trim();
   const hasDetailedAnalysis=Object.keys(summary.dimension_analyses || {}).length >= 6;
   // Historical cached reports sometimes put the entire 12-dimension essay in

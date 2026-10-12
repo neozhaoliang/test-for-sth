@@ -122,86 +122,165 @@ class BilibiliLogin(AbstractLogin):
             "<html><head><meta charset='utf-8'><title>Bilibili QR Login</title>"
             "</head><body style='font-family:sans-serif;text-align:center;"
             "padding:35px'><h2>请使用哔哩哔哩 App 扫码并确认登录</h2>"
-            "<img alt='Bilibili login QR code' width='280' height='280' "
+            "<img alt='Bilibili login QR code' width='384' height='384' "
             f"src='data:image/png;base64,{encoded}'>"
-            "<p>二维码约 180 秒后过期，请勿分享登录二维码。</p></body></html>"
+            "<p id='login-status' style='font-size:18px;color:#303030'>"
+            "等待扫码，请使用哔哩哔哩 App 扫码并在手机确认</p>"
+            "<p>约 180 秒后过期，失效后自动刷新。不要分享二维码。</p>"
+            "<p>也可以在原 B 站标签页手动登录。</p></body></html>"
         )
         await page.bring_to_front()
         return page
 
+    async def _show_qrcode_status(self, page: Page, message: str) -> None:
+        """Update the Chrome tab with scan state, without exposing QR secrets."""
+        try:
+            await page.evaluate(
+                "(message) => { const element = document.getElementById('login-status');"
+                " if (element) element.textContent = message; }",
+                message,
+            )
+        except Exception:
+            pass  # Browser tab could have been closed by the user.
+
+    async def _finalize_qrcode_login(self, status: dict) -> None:
+        """Finish the cross-domain SSO callback and verify the browser session."""
+        callback = status.get("url") or ""
+        if callback:
+            parsed = urlparse(callback)
+            host = (parsed.hostname or "").lower()
+            if parsed.scheme != "https" or not (
+                host == "bilibili.com" or host.endswith(".bilibili.com")
+            ):
+                raise RuntimeError("Bilibili returned an unexpected QR callback host")
+            # Since mid-2026 successful login may return a crossDomain ticket
+            # URL. Following it sets SESSDATA through Set-Cookie, not URL params.
+            reply = await self.browser_context.request.get(
+                callback, timeout=15000
+            )
+            if not reply.ok:
+                utils.logger.warning(
+                    "[BilibiliLogin] SSO callback HTTP %s; checking Chrome session",
+                    reply.status,
+                )
+        if await self.check_login_state():
+            return
+        if callback:
+            # Some SSO responses require an actual browser navigation.
+            await self.context_page.goto(
+                callback, wait_until="domcontentloaded", timeout=15000
+            )
+        if not await self.check_login_state():
+            raise RuntimeError(
+                "Bilibili confirmed QR login, but /x/web-interface/nav still "
+                "reports not logged in. Check that Chrome allows Bilibili cookies."
+            )
+
     async def _login_by_qrcode_api(self) -> None:
-        """Use Bilibili's official web QR login, independent of homepage DOM."""
+        """Generate an official QR code, report states and refresh when expired."""
         request = self.browser_context.request
         base_url = "https://passport.bilibili.com/x/passport-login/web/qrcode"
         headers = {"Referer": "https://www.bilibili.com/"}
-        response = await request.get(
-            f"{base_url}/generate", headers=headers, timeout=15000
-        )
-        if not response.ok:
-            raise RuntimeError(f"Bilibili QR generation HTTP {response.status}")
-        payload = await response.json()
-        data = payload.get("data") or {}
-        login_url, qr_key = data.get("url"), data.get("qrcode_key")
-        if payload.get("code") != 0 or not login_url or not qr_key:
-            raise RuntimeError(
-                f"Bilibili QR generation rejected: {payload.get('message', 'unknown')}"
+        max_attempts = max(1, int(getattr(config, "BILI_QR_MAX_ATTEMPTS", 2)))
+        last_state = "not_scanned"
+        for attempt in range(1, max_attempts + 1):
+            response = await request.get(
+                f"{base_url}/generate", headers=headers, timeout=15000
             )
-
-        qr_page = await self._display_qrcode(login_url)
-        utils.logger.info(
-            "[BilibiliLogin] QR code displayed in Chrome; "
-            "scan with Bilibili app and confirm within 180 seconds."
-        )
-        try:
-            deadline = asyncio.get_running_loop().time() + 175
-            while asyncio.get_running_loop().time() < deadline:
-                await asyncio.sleep(2)
-                response = await request.get(
-                    f"{base_url}/poll",
-                    params={"qrcode_key": qr_key},
-                    headers=headers,
-                    timeout=15000,
-                )
-                if not response.ok:
-                    raise RuntimeError(
-                        f"Bilibili QR polling HTTP {response.status}"
-                    )
-                result = await response.json()
-                if result.get("code") != 0:
-                    raise RuntimeError(
-                        f"Bilibili QR polling failed: {result.get('message', 'unknown')}"
-                    )
-                status = result.get("data") or {}
-                code = status.get("code")
-                if code in (86101, 86090):  # not scanned / waiting for confirmation
-                    continue
-                if code == 86038:
-                    raise TimeoutError("Bilibili QR code expired; rerun to get a new one.")
-                if code != 0:
-                    raise RuntimeError(
-                        f"Bilibili QR login rejected (status={code}): "
-                        f"{status.get('message', 'unknown')}"
-                    )
-
-                # BrowserContext.request shares cookies with the browser context.
-                # Some Bilibili sessions also need the same-site SSO redirect.
-                if not await self.check_login_state():
-                    callback = status.get("url") or ""
-                    host = urlparse(callback).hostname or ""
-                    if host == "bilibili.com" or host.endswith(".bilibili.com"):
-                        await self.context_page.goto(
-                            callback, wait_until="domcontentloaded", timeout=15000
-                        )
-                if await self.check_login_state():
-                    utils.logger.info("[BilibiliLogin] QR login succeeded.")
-                    return
+            if not response.ok:
                 raise RuntimeError(
-                    "Bilibili returned QR success but the browser has no SESSDATA cookie."
+                    f"Bilibili QR generation HTTP {response.status}"
                 )
-            raise TimeoutError("Bilibili QR login expired before confirmation.")
-        finally:
-            if not qr_page.is_closed():
-                await qr_page.close()
+            payload = await response.json()
+            data = payload.get("data") or {}
+            login_url, qr_key = data.get("url"), data.get("qrcode_key")
+            if payload.get("code") != 0 or not login_url or not qr_key:
+                raise RuntimeError(
+                    f"Bilibili QR generation rejected: "
+                    f"{payload.get('message', 'unknown')}"
+                )
+
+            qr_page = await self._display_qrcode(login_url)
+            utils.logger.info(
+                "[BilibiliLogin] QR code %s/%s shown in Chrome. "
+                "Scan with the Bilibili app, then confirm on your phone.",
+                attempt, max_attempts,
+            )
+            previous_code = None
+            try:
+                deadline = asyncio.get_running_loop().time() + 175
+                while asyncio.get_running_loop().time() < deadline:
+                    await asyncio.sleep(3)
+                    # If the user logged into the original Bilibili tab, resume
+                    # without waiting for the QR image or its poll result.
+                    if await self.check_login_state():
+                        utils.logger.info(
+                            "[BilibiliLogin] Chrome session is authenticated."
+                        )
+                        return
+
+                    response = await request.get(
+                        f"{base_url}/poll",
+                        params={"qrcode_key": qr_key},
+                        headers=headers,
+                        timeout=15000,
+                    )
+                    if not response.ok:
+                        raise RuntimeError(
+                            f"Bilibili QR polling HTTP {response.status}"
+                        )
+                    result = await response.json()
+                    if result.get("code") != 0:
+                        raise RuntimeError(
+                            f"Bilibili QR polling failed: "
+                            f"{result.get('message', 'unknown')}"
+                        )
+                    status = result.get("data") or {}
+                    code = status.get("code")
+                    if code != previous_code:
+                        previous_code = code
+                        descriptions = {
+                            86101: ("not_scanned", "等待扫码：使用 B 站 App 扫描电脑中的二维码"),
+                            86090: ("scanned_waiting_confirmation", "已扫码，请在手机上点击确认登录"),
+                            86038: ("expired", "二维码已过期，正在刷新"),
+                            0: ("confirmed", "手机已确认，正在验证登录状态"),
+                        }
+                        state, message = descriptions.get(
+                            code, ("unknown", f"二维码返回未知状态：{code}")
+                        )
+                        last_state = state
+                        utils.logger.info(
+                            "[BilibiliLogin] QR state=%s (code=%s), attempt=%s/%s",
+                            state, code, attempt, max_attempts,
+                        )
+                        await self._show_qrcode_status(qr_page, message)
+                    if code in (86101, 86090):
+                        continue
+                    if code == 86038:
+                        break
+                    if code == 0:
+                        await self._finalize_qrcode_login(status)
+                        utils.logger.info(
+                            "[BilibiliLogin] Bilibili QR login verified."
+                        )
+                        return
+                    raise RuntimeError(
+                        f"Bilibili QR returned unsupported state {code}"
+                    )
+            finally:
+                if not qr_page.is_closed():
+                    await qr_page.close()
+
+            if attempt < max_attempts:
+                utils.logger.warning(
+                    "[BilibiliLogin] QR session expired (state=%s). "
+                    "Automatically generating a new QR code.", last_state
+                )
+        raise TimeoutError(
+            f"Bilibili QR login not completed after {max_attempts} code(s) "
+            f"(last_state={last_state}). Open Chrome, scan the QR code with "
+            "the Bilibili app and tap Confirm on your phone."
+        )
 
     async def _login_manually_in_browser(self) -> None:
         """Fallback if Bilibili's QR API is blocked or qrcode is unavailable."""
@@ -242,6 +321,10 @@ class BilibiliLogin(AbstractLogin):
         utils.logger.info("[BilibiliLogin.login_by_qrcode] Begin Bilibili QR login...")
         try:
             await self._login_by_qrcode_api()
+        except TimeoutError:
+            # Do not launch another invisible three-minute manual wait after
+            # the QR session has already expired.
+            raise
         except Exception as exc:
             utils.logger.warning(
                 "[BilibiliLogin] QR API login unavailable (%s: %s). "

@@ -30,6 +30,7 @@ from typing import Dict, List, Optional
 from analysis.a_share_structure import get_a_share_structure
 from analysis.candidates import find_candidates
 from analysis.chip_position import assess_chip_price_context
+from analysis.position_risk import validated_quote_or_close
 from analysis.commodity import get_cycle_commodity_signal, get_rmb_trend_signal
 from analysis.freight import get_container_freight_signal
 from analysis.fundamentals import get_ths_fundamentals
@@ -41,6 +42,7 @@ from analysis.macro_rates import get_macro_rate_context
 from analysis.market_context import get_market_context
 from analysis.profitability import get_profitability_trend
 from analysis.primary_sources import get_cninfo_primary_evidence
+from analysis.issuer_business import get_issuer_business_context
 from analysis.point_in_time_financials import (
     get_point_in_time_financials,
     to_historical_fundamentals,
@@ -197,6 +199,19 @@ async def generate_report(
         pit_financials_task,
         ownership_task,
     )
+
+    # The spot feed sometimes returns a zero on weekends or unavailable
+    # symbols. Prefer the most recent dated daily close, never a fake 0 price.
+    verified_quote = validated_quote_or_close(
+        quote, market_context, as_of=str(request.as_of or ""),
+    )
+    if not historical_mode and verified_quote is None:
+        raise RuntimeError(
+            "行情无有效价格：实时行情为空/为0，且最近7日没有可核验的交易日收盘价。"
+            "本次不发布'当前赔率中性'等误导性研究结论。"
+        )
+    if verified_quote is not None:
+        quote = verified_quote
 
     if historical_mode:
         historical_name = next(
@@ -365,6 +380,13 @@ async def generate_report(
         as_of=str(request.as_of) if historical_mode else None,
     )
 
+    # Issuer-authored source facts: unlike investor discussion this can support
+    # dated capex, order and production claims, with Q&A ranked BELOW filings.
+    issuer_business = await get_issuer_business_context(
+        stock_code, as_of=request.as_of, filing_calendar=filing_calendar,
+        historical=historical_mode,
+    )
+
     inputs = AnalysisInputs(
         stock_code=stock_code,
         stock_name=stock_name,
@@ -394,7 +416,9 @@ async def generate_report(
         market_context=market_context,
         freight_signal=freight_signal,
         margin_signal=margin_signal,
+        position_risk=inputs.position_risk,
         primary_evidence=primary_evidence,
+        issuer_business=issuer_business,
         a_share_structure=a_share_structure,
         management_capital=management_capital,
         filing_calendar=filing_calendar,
