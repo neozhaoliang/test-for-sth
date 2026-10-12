@@ -60,7 +60,7 @@ const html=ctx.renderIndustryValuationLab({valuation_model:model});
 assert.ok(html.includes('股权自由现金流 FCFE'));
 assert.ok(html.includes('美国10年国债收益率'));
 assert.ok(html.includes('2026-10-08'));
-assert.ok(html.includes('美元兑人民币'));
+assert.ok(html.includes('人民币汇率趋势'));
 const defaults={
   discount:10,growth:2,stress:0,premium:0,safety:20,
 };
