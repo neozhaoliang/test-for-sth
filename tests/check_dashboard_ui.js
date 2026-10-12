@@ -145,4 +145,31 @@ for(const forbidden of ['军师祭咖啡','齐鲁银行','腾讯','601665',
 }
 assert.ok(newer.includes('本股近20个交易日'));
 assert.ok(!newer.includes('1366.03元'));
+report.realtime_quote={
+  latest_price:775.29,change_pct:null,volume:null,date:'2026-10-09',
+  quote_mode:'verified_previous_close',
+};
+report.summary.stance='bearish';
+report.summary.current_odds_stance='bearish';
+report.summary.company_quality_stance='bullish';
+report.position_risk={
+  regime:'bearish_concurrence',
+  risk_signals:[
+    {family:'valuation'}, {family:'foreign_policy'},
+    {family:'cash_conversion'},{family:'market_style'},
+  ],
+};
+ctx.renderResult(report);
+const verdict=nodes.result.innerHTML;
+assert.ok(verdict.includes('最近可核验收盘价 775.29元'));
+assert.ok(verdict.includes('不是盘中实时价'));
+assert.ok(!verdict.includes('成交量 null'));
+assert.ok(!verdict.includes('涨跌幅 null%'));
+assert.ok(verdict.includes('当前风险共振'));
+assert.ok(verdict.includes('海外政策风险'));
+report.realtime_quote={latest_price:0};
+ctx.renderResult(report);
+assert.ok(!nodes.result.innerHTML.includes('最新价 0'));
+assert.ok(nodes.result.innerHTML.includes('有效股价暂缺'));
+
 console.log('Dashboard UI checks passed: 4 public sections, 12 unique dimensions, hidden internal reviews and industry no-price gate.');
