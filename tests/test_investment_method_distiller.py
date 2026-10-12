@@ -118,3 +118,44 @@ def test_subjective_view_is_not_an_average_of_twelve_scores():
     assert "不是十二票投票" in prompt
     assert "市场大多数人可能忽略了什么" in prompt
     assert "你可以判断这些方法中没有一个适用" in prompt
+
+
+@pytest.mark.asyncio
+async def test_older_tech_dilution_method_is_not_crowded_out_by_newer_posts(monkeypatch):
+    captured=[]
+    async def fake_call(prompt, **kwargs):
+        captured.append(prompt)
+        return methods(), "end_turn"
+    monkeypatch.setattr("backtest.llm_client.call_json_ex",fake_call)
+    unrelated=[
+        SimpleNamespace(
+            source=f"short_news_{i}", title="市场新闻", author="匿名来源",
+            distilled=f"行业板块的短期风格交易观察序号{i}，"
+                      "某些板块走势更多是资金风险偏好变化而不是公司利润。",
+            published_at="2026-10-09",
+        )
+        for i in range(30)
+    ]
+    veteran=SimpleNamespace(
+        source="historical_financing", title="科技股股东稀释的资本成本",
+        author="买股票的老木匠", published_at="2024-05-09",
+        distilled="科技股高位增发募集资金，高管同期减持，普通股东承受稀释，"
+                  "需要考察资本开支能否提高每股价值。",
+    )
+    out=await compile_investment_methods(
+        unrelated+[veteran],as_of="2026-10-12",archetype="technology",
+        stock_name="中际旭创",industry="光通信"
+    )
+    assert out==methods()
+    assert len(captured)==1
+    assert "高位增发募集资金" in captured[0]
+    assert "买股票的老木匠" not in captured[0]
+
+
+def test_report_synthesis_never_replaces_stance_by_a_risk_rule():
+    import inspect
+    from analysis.report_synthesis import _generate_summary
+    source=inspect.getsource(_generate_summary)
+    assert "enforce_asymmetric_odds(" not in source
+    assert "compile_investment_methods(" in source
+    assert "investment_manager_prompt(" in source
