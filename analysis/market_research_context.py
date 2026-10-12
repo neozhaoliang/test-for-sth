@@ -94,6 +94,14 @@ def select_recent_style_excerpts(excerpts: Iterable, *, as_of=None, limit=8) -> 
 # report must never contain original excerpts, examples, account identities or links.
 # An extracted principle is tested against the issuer and market data; it is
 # not treated as proof that a buy/sell signal has fired.
+_TECH_FINANCING_RE = re.compile(
+    r"科技|融资|再融资|定增|增发|H股|股权激励|二级市场|散户|股民|"
+    r"管理层减持|控股股东减持|套现|资本市场|AI|算力|光模块|"
+    r"高估值|市盈率|估值泡沫|研发费用|技术护城河|"
+    r"订单|资本开支|债务融资|技术路线",
+    re.I,
+)
+
 _PRINCIPLE_RULES = (
     (
         "dividend_sustainability",
@@ -132,6 +140,7 @@ def _synthesized_principles(excerpts: Iterable, cutoff: date, *,
     applicable = archetype == "stable_yield" or any(
         x in str(industry) for x in ("电力", "水务", "煤炭", "银行", "燃气", "公用事业")
     )
+    tech = archetype == "technology"
     matched = set()
     for item in excerpts or []:
         dt = _day(getattr(item, "published_at", None))
@@ -139,18 +148,38 @@ def _synthesized_principles(excerpts: Iterable, cutoff: date, *,
             continue
         content = str(getattr(item, "title", "") or "") + " " + str(
             getattr(item, "distilled", "") or "")
-        if not _STYLE_WORDS.search(content):
+        if not _STYLE_WORDS.search(content) and not (
+            tech and _TECH_FINANCING_RE.search(content)
+        ):
             continue
+        if tech and _TECH_FINANCING_RE.search(content):
+            matched.add("tech_capital_discipline")
         for key, pattern, _mechanism, _verification in _PRINCIPLE_RULES:
             if pattern.search(content):
                 matched.add(key)
     if not applicable:
         matched.discard("dividend_sustainability")
-    return [
+    principles = [
         {"id": key, "principle": mechanism, "company_check": verification}
         for key, _pattern, mechanism, verification in _PRINCIPLE_RULES
         if key in matched
-    ][:limit]
+    ]
+    if "tech_capital_discipline" in matched:
+        principles.insert(0, {
+            "id": "tech_capital_discipline",
+            "principle": (
+                "科技公司融资并非无成本利好：原股东承担新增股份稀释、"
+                "高估值回落以及研发/扩产投入回报不足的风险；"
+                "管理层或控股股东出售持股的所得不进入公司，"
+                "公司回购用于员工激励也不同于注销回购。"
+            ),
+            "company_check": (
+                "核验本公司已完成的减持数量与均价、增发/H股新股数、"
+                "回购是已执行还是方案、现金流与项目资本回报；"
+                "以当时复权价格和估值分位判断是否高位承接。"
+            ),
+        })
+    return principles[:limit]
 
 
 def build_style_investment_context(
