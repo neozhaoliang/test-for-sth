@@ -173,8 +173,12 @@ def test_live_shareholder_reconcile_keeps_newer_primary_source():
 
     out = shareholder.reconcile_live_shareholder_trend(primary, fundamentals)
 
-    assert out is primary
+    assert out["source_mode"] == "detail_history"
+    assert out["latest_count"] == primary["latest_count"]
     assert out["period"] == "2026-09-30"
+    assert [p["period"] for p in out["series"]] == [
+        "2026-06-30", "2026-03-31"
+    ]
 
 
 def test_live_shareholder_reconcile_uses_latest_f10_fields_without_series():
@@ -201,3 +205,60 @@ def test_live_shareholder_reconcile_uses_latest_f10_fields_without_series():
     assert out["latest_count"] == 430616
     assert out["change_pct"] == pytest.approx(8.36)
     assert out["yoy_pct"] == pytest.approx(19.23)
+
+
+
+@pytest.mark.asyncio
+async def test_shareholder_detail_returns_full_dated_history_and_deduplicated_periods(monkeypatch):
+    detail = pd.DataFrame({
+        "股东户数统计截止日": [
+            date(2025, 12, 31), date(2026, 3, 31),
+            date(2026, 3, 31), date(2026, 6, 30), date(2026, 9, 30)
+        ],
+        "股东户数公告日期": [
+            date(2026, 1, 25), date(2026, 4, 20),
+            date(2026, 4, 23), date(2026, 7, 20), date(2026, 10, 20)
+        ],
+        "股东户数-本次": [100000, 90000, 92000, 110000, 130000],
+        "股东户数-上次": [115000, 100000, 100000, 92000, 110000],
+        "股东户数-增减比例": [-13.04, -10., -8., 19.56, 18.18],
+    })
+    monkeypatch.setattr(shareholder.ak, "stock_zh_a_gdhs_detail_em",
+                        lambda symbol: detail.copy())
+    out = await shareholder.get_shareholder_count_trend(
+        "SH600938", as_of=date(2026, 8, 1),
+    )
+    assert out["latest_count"] == 110000
+    assert out["available_at"] == "2026-07-20"
+    assert [p["period"] for p in out["series"]] == [
+        "2026-06-30", "2026-03-31", "2025-12-31"
+    ]
+    assert out["series"][1]["holders"] == 92000
+    assert out["series"][1]["published_at"] == "2026-04-23"
+    assert all(p["available_at"] <= "2026-08-01" for p in out["series"])
+
+
+def test_live_holder_reconciliation_keeps_older_dated_history_in_price_comparison():
+    primary = {
+        "source_mode": "detail_history",
+        "period": "2026-09-30", "latest_count": 96000,
+        "change_pct": -4.0,
+        "series": [
+            {"period": "2026-09-30", "holders": 96000, "published_at": "2026-10-12"},
+            {"period": "2026-06-30", "holders": 100000, "published_at": "2026-07-20"}
+        ],
+    }
+    f10 = {"facts": {"holder_count_series": [
+        {"period": "2026-06-30", "holders": 99999, "price": 12.6},
+        {"period": "2026-03-31", "holders": 110000, "price": 10.2},
+        {"period": "2025-12-31", "holders": 122000, "price": 9.1},
+    ]}}
+    out = shareholder.reconcile_live_shareholder_trend(primary, f10)
+    assert out["latest_count"] == 96000
+    assert out["source_mode"] == "detail_history"
+    assert [p["period"] for p in out["series"]] == [
+        "2026-09-30", "2026-06-30", "2026-03-31", "2025-12-31"
+    ]
+    # Dated detail record takes priority over undated F10 for same period.
+    assert out["series"][1]["holders"] == 100000
+    assert out["series"][1]["published_at"] == "2026-07-20"
