@@ -4,7 +4,17 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const src=fs.readFileSync(process.argv[2],'utf8');
 const prefix=src.split("document.getElementById('submitBtn').addEventListener")[0];
-const ctx=vm.createContext({Date,console,document:{}});
+const document={
+  createElement(){
+    let text='';
+    return {
+      set textContent(v){text=String(v);},
+      get innerHTML(){return text.replaceAll('&','&amp;').replaceAll('<','&lt;')
+        .replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');},
+    };
+  },
+};
+const ctx=vm.createContext({Date,console,document});
 vm.runInContext(prefix,ctx,{timeout:8000});
 
 const base={
