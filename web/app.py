@@ -2087,7 +2087,7 @@ function renderDashboardCharts(report) {
   const pb=numericOrNull(val.pb);
   const roe=numericOrNull(val.roe_pct);
   const cashRatio=numericOrNull(facts.cash_to_profit_ratio);
-  let html='<section class="dashboard-charts"><h3>数据概览与维度图谱</h3>'+
+  let html='<section class="dashboard-charts" id="report-charts"><h3>数据概览与维度图谱</h3>'+
     '<p class="section-caption">图表仅展示当前报告真实返回的数据，不对缺失年份插值，也不自动将半年ROE年化。</p>';
   html+=renderInvestmentStyleStrip(report.valuation_model);
   html+='<div class="metric-strip">'+
@@ -2131,7 +2131,7 @@ function renderIssuerCapitalSection(report) {
   const reconciled=data.reconciled_ownership_not_additional_sales || [];
   if(!sales.length&&!issuances.length&&!buybacks.length)return '';
   const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('zh-CN'):'暂缺';
-  let html='<section class="research-panel capital-flow-section">'+
+  let html='<section class="research-panel capital-flow-section" id="report-capital">'+
     '<h3>股东减持、融资与回购</h3>'+
     '<p class="section-caption">把卖方变现、公司融资和回购分开看，均以公司正式公告为准。</p>'+
     '<div style="overflow-x:auto"><table class="investor-band-table">'+
@@ -2180,12 +2180,12 @@ function renderDimensionAnalysisSection(summary) {
     // Never repeat the top-line thesis under a second fake research heading.
     return '';
   }
-  let html = '<section class="research-panel research-narrative">' +
+  let html = '<section class="research-panel research-narrative" id="report-dimensions">' +
     '<h3>多维度分析</h3>' +
     '<p class="section-caption">从公司经营、股价、资金和行业环境等方面逐项判断。</p>';
   order.forEach(([key, label], idx) => {
     const detail = String(analyses[key] || '').trim();
-    html += '<article class="analysis-entry">' +
+    html += '<article class="analysis-entry" id="report-dimension-' + key + '">' +
       '<h4><span class="analysis-index">' + String(idx + 1).padStart(2, '0') +
       '</span>' + escapeHtml(label) + '</h4>' +
       '<div class="analysis-prose">' +
@@ -2287,7 +2287,7 @@ function renderInvestorReference(model) {
   const earningsScenarios=earnings.scenarios || [];
   const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(2):'暂缺';
   if(!dividend.years&&!pb.median_pb&&!norm.annual_roe_years&&!scenarios.length&&!earningsScenarios.length)return '';
-  let html='<div class="investor-reference" style="margin-top:16px;">'+
+  let html='<div class="investor-reference" id="report-investor-reference" style="margin-top:16px;">'+
     '<h4>投资者长期回报情景</h4>'+
     '<p class="section-caption">先看可持续ROE、留存转化和现金股息，再单独讨论估值变化。'+
     '不是按统一的股息率阈值倒推目标价；全部价格仅为有条件的敏感性计算。</p>';
@@ -2599,9 +2599,50 @@ function activateIndustryValuationLab(report) {
   recalculate();
 }
 
+
+// Build links only for section IDs that are present in this particular report.
+// Conditional modules (capital flows, long-run returns, ROE model, old cached
+// reports without 12 dimensions) must never produce dead anchors.
+function renderReportToc(reportHtml) {
+  const present=id=>reportHtml.includes('id="'+id+'"');
+  const chapters=[
+    ['report-verdict','投资结论'],
+    ['report-charts','数据概览与维度图谱'],
+    ['report-capital','股东减持、融资与回购'],
+    ['report-dimensions','多维度分析'],
+    ['industryValuationLab','行业估值与市场环境'],
+    ['report-investor-reference','投资者长期回报情景'],
+    ['roe-discount-lab','ROE · 增长 · 贴现率估值'],
+  ].filter(([id])=>present(id));
+  const dimensions=[
+    ['management','管理层'],['fundamentals','经营基本面'],
+    ['rd','研发能力'],['chip_flow','筹码与资金'],
+    ['price_position','股价位置'],['cycle_position','行业周期'],
+    ['policy_geopolitics','政策与国际形势'],
+    ['retail_sentiment','市场情绪'],['shareholder_returns','股东回报'],
+    ['growth_elasticity','成长弹性'],['a_share_structure','A股资金结构'],
+    ['risk_quality','财务质量与尾部风险'],
+  ].filter(([key])=>present('report-dimension-'+key));
+  if(!chapters.length)return '';
+  const entry=([id,label])=>
+    '<li><a href="#'+id+'"><span>'+escapeHtml(label)+
+    '</span><span class="toc-arrow" aria-hidden="true">↗</span></a></li>';
+  let html='<nav class="report-toc" id="report-toc" aria-label="报告目录">'+
+    '<div class="toc-heading"><div><span class="toc-eyebrow">CONTENTS · 研究导览</span>'+
+    '<h3>报告目录</h3></div><span class="toc-count">'+chapters.length+' 个章节</span></div>'+
+    '<ol class="toc-chapters">'+chapters.map(entry).join('')+'</ol>';
+  if(dimensions.length){
+    html+='<details class="toc-subsections"><summary>展开 '+
+      dimensions.length+' 项分析子目录</summary>'+
+      '<ol>'+dimensions.map(([key,label])=>entry(['report-dimension-'+key,label])).join('')+
+      '</ol></details>';
+  }
+  return html+'</nav>';
+}
+
 function renderResult(report) {
   const el = document.getElementById('result');
-  let html = '<h2>' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
+  let html = '<h2 id="report-top">' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
   const isHistorical = report.research_mode === 'historical';
   if (isHistorical) {
     html += '<div class="historical-banner"><b>历史研究</b> ｜ 截止日 ' +
@@ -2635,7 +2676,7 @@ function renderResult(report) {
 
   const summary = report.summary || {};
   const stanceClass = 'stance-' + (summary.stance || 'neutral');
-  html += '<section class="result-summary"><h3>投资结论</h3>';
+  html += '<section class="result-summary" id="report-verdict"><h3>投资结论</h3>';
   html += '<div class="verdict-line"><span class="stance-badge ' + stanceClass + '">' +
     stanceLabel(summary.stance) + '</span>';
   if (summary.company_quality_stance) {
@@ -2671,6 +2712,13 @@ function renderResult(report) {
   html += renderDimensionAnalysisSection(summary);
   html += renderIndustryValuationLab(report);
 
+  // Insert the TOC after report metadata but before the first research section.
+  // Scan *rendered* markup so missing/legacy modules are omitted automatically.
+  const chapterStart=html.indexOf('<section class="result-summary"');
+  if(chapterStart>=0){
+    const toc=renderReportToc(html);
+    html=html.slice(0,chapterStart)+toc+html.slice(chapterStart);
+  }
   el.innerHTML = html;
   activateIndustryValuationLab(report);
   if(typeof activateRoeDiscountLab==='function')activateRoeDiscountLab(report.valuation_model);
