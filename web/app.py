@@ -2191,7 +2191,7 @@ function renderIssuerCapitalSection(report) {
 function renderDimensionAnalysisSection(summary) {
   const analyses = (summary || {}).dimension_analyses || {};
   const order = [
-    ['management','管理层'], ['fundamentals','经营基本面'],
+    ['management','管理层与接班传承'], ['fundamentals','经营基本面'],
     ['rd','研发能力'], ['chip_flow','筹码与资金'],
     ['price_position','股价位置'], ['cycle_position','行业周期'],
     ['policy_geopolitics','政策与国际形势'], ['retail_sentiment','市场情绪'],
@@ -2644,7 +2644,7 @@ function renderReportToc(reportHtml) {
     ['roe-discount-lab','ROE · 增长 · 贴现率估值'],
   ].filter(([id])=>present(id));
   const dimensions=[
-    ['management','管理层'],['fundamentals','经营基本面'],
+    ['management','管理层与接班传承'],['fundamentals','经营基本面'],
     ['rd','研发能力'],['chip_flow','筹码与资金'],
     ['price_position','股价位置'],['cycle_position','行业周期'],
     ['policy_geopolitics','政策与国际形势'],
