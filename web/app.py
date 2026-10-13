@@ -2432,6 +2432,34 @@ function renderInvestmentStyleStrip(model) {
         '不是相同的比较口径，不能直接把这两个百分数相减得到该涨跌差。</p>';
     }
   }
+  const causes=(Array.isArray(style.causal_drivers)?style.causal_drivers:[]).filter(
+    item=>item && item.evidence_status==='private_research_hypothesis' &&
+      typeof item.mechanism==='string' && item.mechanism.trim()).slice(0,4);
+  html+='<div class="style-why"><h5>为什么出现这种风格变化？</h5>';
+  if(causes.length){
+    html+='<p class="section-caption">以下是从历史投资研究中提炼的可能驱动，仍需市场数据验证，'
+      +'并非已经查实的资金净流入或交易指令。</p>';
+    html+='<ol class="style-cause-list">'+causes.map(item=>
+      '<li><div class="style-cause-mechanism">'+escapeHtml(item.mechanism)+'</div>'+
+      '<details><summary>成立条件、反向解释与核验办法</summary>'+
+      '<p><b>成立条件：</b>'+escapeHtml(item.conditions||'尚未核实')+'</p>'+
+      '<p><b>可能的反向解释：</b>'+escapeHtml(item.alternative||'尚未核实')+'</p>'+
+      '<p><b>需要核验：</b>'+escapeHtml(item.verification||'尚无资料')+'</p>'+
+      '</details></li>'
+    ).join('')+'</ol>';
+  } else if(style.causal_knowledge_status==='no_matching_distilled_knowledge' ||
+            style.causal_knowledge_status==='knowledge_available_unresolved'){
+    html+='<p class="section-caption">本次没有匹配且已经完成提炼的市场机制观点；'
+      +'可能是相关帖子或直播尚未入库、提炼未完成，也可能确无适用解释。'
+      +'目前只能确认相对涨跌，不能凭指数表现编造资金转向的原因。</p>';
+  } else if(style.causal_knowledge_status==='historical_method_not_available'){
+    html+='<p class="section-caption">历史研究模式未使用后来的知识提炼方法，'
+      +'不追溯添加当时未核验的解释。</p>';
+  } else {
+    html+='<p class="section-caption">当前报告尚未提供经过核验边界处理的因果解释；'
+      +'请重新生成报告，或检查后台知识提炼是否成功。</p>';
+  }
+  html+='</div>';
   events.slice(0,2).forEach(e=>{
     html+='<p><b>市场事件：</b>'+escapeHtml(e.headline||'')+
       '（'+escapeHtml(e.date||'')+'）'+
