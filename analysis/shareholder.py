@@ -24,6 +24,7 @@ akshare 接口均以不带市场前缀的 6 位数字代码为入参。
 import logging
 import time
 from datetime import date, datetime
+from math import isfinite
 from typing import Dict, List, Optional, Tuple
 
 import akshare as ak
@@ -297,7 +298,7 @@ async def get_shareholder_count_trend(
                 raw_pct = latest_rows.iloc[-1].get("股东户数-增减比例")
                 try:
                     parsed = float(raw_pct)
-                    if __import__("math").isfinite(parsed):
+                    if isfinite(parsed):
                         change_pct = round(parsed, 3)
                 except (ValueError, TypeError):
                     pass
