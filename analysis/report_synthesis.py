@@ -46,6 +46,9 @@ from analysis.company_valuation_knowledge import (
 from analysis.investment_method_distiller import (
     compile_investment_methods, investment_manager_prompt,
 )
+from analysis.market_style_reasons import (
+    build_market_style_reasons, market_style_reasons_prompt_block,
+)
 
 
 _PROCESS_TERM_RE = re.compile(r"六查|第[一二三四五六七八九十\d]+步|检查项\d*")
@@ -237,6 +240,32 @@ async def _generate_summary(
     context = getattr(inputs, "position_risk", None)
     if context:
         prompt += "\n\n" + position_risk_prompt_block(context)
+
+    # Integrate the private corpus as a causal hypothesis, not mere index stats.
+    style = (getattr(inputs, 'valuation_model_result', None) or {}).get('style_context')
+    if isinstance(style, dict):
+        historical = getattr(inputs, 'research_mode', '') == 'historical'
+        if historical and as_of and as_of < '2026-10-13':
+            style['causal_knowledge_status'] = 'historical_method_not_available'
+            style['causal_drivers'] = []
+        else:
+            reasons = await build_market_style_reasons(
+                getattr(inputs, 'knowledge_excerpts', None) or [],
+                as_of=as_of, market_context=getattr(inputs, 'market_context', None),
+                industry=str(getattr(getattr(inputs, 'research_profile', None),
+                                     'industry', '') or ''),
+            )
+            style['causal_knowledge_status'] = reasons['status']
+            style['causal_drivers'] = reasons['drivers']
+            # Counts are internal diagnostics; never expose sources to the UI.
+            style['private_excerpt_count'] = reasons['private_excerpt_count']
+            style['private_transcript_count'] = reasons['private_transcript_count']
+            utils.logger.info(
+                '[analysis.report] 市场风格因果知识覆盖 usable=%d, transcript=%d, drivers=%d, status=%s',
+                reasons['private_excerpt_count'], reasons['private_transcript_count'],
+                len(reasons['drivers']), reasons['status'],
+            )
+        prompt += '\n\n' + market_style_reasons_prompt_block(style)
 
     # Subjective investment methods are synthesized from private knowledge,
     # then anonymized and checked before entering the final report model.
