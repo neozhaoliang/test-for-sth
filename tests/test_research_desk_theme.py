@@ -100,3 +100,23 @@ def test_stock_shortcuts_use_native_buttons_and_keep_existing_hooks():
     assert '<button type="button" class="stock-chip"' in html
     assert 'el.querySelectorAll(\'.stock-chip\')' in html
     assert "chip.addEventListener('click'" in html
+
+
+def test_wechat_style_reading_column_applies_to_entire_page_without_wide_breakout():
+    css = (ROOT / "web" / "research_desk.css").read_text(encoding="utf-8")
+    html = _document()
+    # Header, search, financial report, and crawler sit in the same shell.
+    assert html.index('<main class="app-shell">') < html.index('<header class="hero-header">')
+    assert html.index('<div id="result"></div>') < html.index('<div class="crawl-section">')
+    assert html.index('</main>') > html.index('<p class="disclaimer">')
+    assert "max-width:840px" in css
+    assert "width:min(calc(100% - 48px),840px)" in css
+    assert "width:min(calc(100% - 36px),840px)" in css
+    assert "1380px" not in css
+    # Two KPI columns and full-width charts/ROE calculator instead of squeezing
+    # unrelated dashboard panels side by side in a 840px article column.
+    assert "#result .metric-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }" in css
+    assert "#result .chart-grid { grid-template-columns:minmax(0,1fr); }" in css
+    assert "#result .lab-layout { grid-template-columns:minmax(0,1fr); }" in css
+    assert "#result .lab-result { position:static; }" in css
+    assert "@media(max-width:420px)" in css
