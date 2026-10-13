@@ -2087,7 +2087,7 @@ function renderDashboardCharts(report) {
   const pb=numericOrNull(val.pb);
   const roe=numericOrNull(val.roe_pct);
   const cashRatio=numericOrNull(facts.cash_to_profit_ratio);
-  let html='<section class="dashboard-charts"><h3>数据概览与维度图谱</h3>'+
+  let html='<section class="dashboard-charts" id="report-charts"><h3>数据概览与维度图谱</h3>'+
     '<p class="section-caption">图表仅展示当前报告真实返回的数据，不对缺失年份插值，也不自动将半年ROE年化。</p>';
   html+=renderInvestmentStyleStrip(report.valuation_model);
   html+='<div class="metric-strip">'+
@@ -2131,7 +2131,7 @@ function renderIssuerCapitalSection(report) {
   const reconciled=data.reconciled_ownership_not_additional_sales || [];
   if(!sales.length&&!issuances.length&&!buybacks.length)return '';
   const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('zh-CN'):'暂缺';
-  let html='<section class="research-panel capital-flow-section">'+
+  let html='<section class="research-panel capital-flow-section" id="report-capital">'+
     '<h3>股东减持、融资与回购</h3>'+
     '<p class="section-caption">把卖方变现、公司融资和回购分开看，均以公司正式公告为准。</p>'+
     '<div style="overflow-x:auto"><table class="investor-band-table">'+
@@ -2180,12 +2180,12 @@ function renderDimensionAnalysisSection(summary) {
     // Never repeat the top-line thesis under a second fake research heading.
     return '';
   }
-  let html = '<section class="research-panel research-narrative">' +
+  let html = '<section class="research-panel research-narrative" id="report-dimensions">' +
     '<h3>多维度分析</h3>' +
     '<p class="section-caption">从公司经营、股价、资金和行业环境等方面逐项判断。</p>';
   order.forEach(([key, label], idx) => {
     const detail = String(analyses[key] || '').trim();
-    html += '<article class="analysis-entry">' +
+    html += '<article class="analysis-entry" id="report-dimension-' + key + '">' +
       '<h4><span class="analysis-index">' + String(idx + 1).padStart(2, '0') +
       '</span>' + escapeHtml(label) + '</h4>' +
       '<div class="analysis-prose">' +
@@ -2287,7 +2287,7 @@ function renderInvestorReference(model) {
   const earningsScenarios=earnings.scenarios || [];
   const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(2):'暂缺';
   if(!dividend.years&&!pb.median_pb&&!norm.annual_roe_years&&!scenarios.length&&!earningsScenarios.length)return '';
-  let html='<div class="investor-reference" style="margin-top:16px;">'+
+  let html='<div class="investor-reference" id="report-investor-reference" style="margin-top:16px;">'+
     '<h4>投资者长期回报情景</h4>'+
     '<p class="section-caption">先看可持续ROE、留存转化和现金股息，再单独讨论估值变化。'+
     '不是按统一的股息率阈值倒推目标价；全部价格仅为有条件的敏感性计算。</p>';
@@ -2383,25 +2383,29 @@ function renderInvestmentStyleStrip(model) {
       (style.style_window==='20 trading days'?'近20个交易日':'年内')+'涨跌差'+
       escapeHtml(String(style.dividend_minus_growth_ytd_pp))+'个百分点';
   html+=' <span class="section-caption">'+escapeHtml(style.style_observed_as_of||'')+'</span></p>';
+  // A percentage needs a number, not a bar chart whose long labels overlap
+  // inside the article-width report. These may use source-specific windows;
+  // never silently treat their difference as the separate style-spread index.
   const red=Number(style.dividend_index_return_pct), growth=Number(style.growth_index_mean_return_pct);
   if(style.dividend_index_return_pct!==null && style.dividend_index_return_pct!==undefined &&
      style.growth_index_mean_return_pct!==null && style.growth_index_mean_return_pct!==undefined &&
      Number.isFinite(red) && Number.isFinite(growth)) {
-    const zero=240, span=180;
-    const max=Math.max(5,Math.abs(red),Math.abs(growth));
-    let bars='<svg viewBox="0 0 540 90" width="100%" role="img" aria-label="红利指数与科技成长指数的相对表现">';
-    bars+='<line x1="'+zero+'" y1="8" x2="'+zero+'" y2="70" stroke="#899bb5" stroke-width="1"/>';
-    [[red,21,'上证红利','#d65c67'],[growth,53,'科创50/创业板平均','#607fbd']].forEach(row=>{
-      const [v,y,title,color]=row, w=span*Math.abs(v)/max;
-      const x=v>=0?zero:zero-w;
-      bars+='<text x="2" y="'+(y+10)+'" fill="#53627c" font-size="12">'+title+'</text>';
-      bars+='<rect x="'+x.toFixed(1)+'" y="'+y+'" width="'+w.toFixed(1)+
-        '" height="12" rx="3" fill="'+color+'"/>';
-      bars+='<text x="'+(v>=0?x+w+5:x-5).toFixed(1)+'" y="'+(y+10)+
-        '" text-anchor="'+(v>=0?'start':'end')+'" font-size="11" fill="#334b70">'+
-        (v>0?'+':'')+v.toFixed(2)+'%</text>';
-    });
-    html+=bars+'</svg>';
+    const fmtPct=v=>(v>0?'+':'')+v.toFixed(2)+'%';
+    const tone=v=>v>0?'style-return-up':v<0?'style-return-down':'style-return-flat';
+    const returns=[['上证红利',red],['科创50／创业板平均',growth]];
+    html+='<div class="style-return-list" role="group" aria-label="主要指数涨跌幅">'+
+      returns.map(([name,value])=>
+        '<div class="style-return-row"><span class="style-return-name">'+
+        escapeHtml(name)+'</span><strong class="style-return-value '+tone(value)+'">'+
+        fmtPct(value)+'</strong></div>'
+      ).join('')+'</div>';
+    const spread=Number(style.dividend_minus_growth_ytd_pp);
+    if(style.dividend_minus_growth_ytd_pp!==null &&
+       style.dividend_minus_growth_ytd_pp!==undefined && Number.isFinite(spread) &&
+       Math.abs(spread-(red-growth))>0.11) {
+      html+='<p class="section-caption style-return-note">上方相对涨跌差与两项指数涨跌幅'+
+        '不是相同的比较口径，不能直接把这两个百分数相减得到该涨跌差。</p>';
+    }
   }
   events.slice(0,2).forEach(e=>{
     html+='<p><b>市场事件：</b>'+escapeHtml(e.headline||'')+
@@ -2414,7 +2418,7 @@ function renderInvestmentStyleStrip(model) {
     const pct=Number(style.stock_20d_pct);
     html+='<p><b>本股近20个交易日：</b>'+
       (pct>0?'+':'')+pct.toFixed(2)+'%（'+
-      escapeHtml(style.stock_20d_as_of||'日期不明')+'），可对照上图判断是否已跟随红利风格上涨。</p>';
+      escapeHtml(style.stock_20d_as_of||'日期不明')+'），可与上述市场风格和指数数据比较。</p>';
   }
   html+='<p class="section-caption">市场资金偏好与公司的长期盈利价值是两回事；'
      +'判断个股需同时看价格位置、实际派息、经营利润和指数相对走势。</p></div>';
@@ -2599,9 +2603,50 @@ function activateIndustryValuationLab(report) {
   recalculate();
 }
 
+
+// Build links only for section IDs that are present in this particular report.
+// Conditional modules (capital flows, long-run returns, ROE model, old cached
+// reports without 12 dimensions) must never produce dead anchors.
+function renderReportToc(reportHtml) {
+  const present=id=>reportHtml.includes('id="'+id+'"');
+  const chapters=[
+    ['report-verdict','投资结论'],
+    ['report-charts','数据概览与维度图谱'],
+    ['report-capital','股东减持、融资与回购'],
+    ['report-dimensions','多维度分析'],
+    ['industryValuationLab','行业估值与市场环境'],
+    ['report-investor-reference','投资者长期回报情景'],
+    ['roe-discount-lab','ROE · 增长 · 贴现率估值'],
+  ].filter(([id])=>present(id));
+  const dimensions=[
+    ['management','管理层'],['fundamentals','经营基本面'],
+    ['rd','研发能力'],['chip_flow','筹码与资金'],
+    ['price_position','股价位置'],['cycle_position','行业周期'],
+    ['policy_geopolitics','政策与国际形势'],
+    ['retail_sentiment','市场情绪'],['shareholder_returns','股东回报'],
+    ['growth_elasticity','成长弹性'],['a_share_structure','A股资金结构'],
+    ['risk_quality','财务质量与尾部风险'],
+  ].filter(([key])=>present('report-dimension-'+key));
+  if(!chapters.length)return '';
+  const entry=([id,label])=>
+    '<li><a href="#'+id+'"><span>'+escapeHtml(label)+
+    '</span><span class="toc-arrow" aria-hidden="true">↗</span></a></li>';
+  let html='<nav class="report-toc" id="report-toc" aria-label="报告目录">'+
+    '<div class="toc-heading"><div><span class="toc-eyebrow">CONTENTS · 研究导览</span>'+
+    '<h3>报告目录</h3></div><span class="toc-count">'+chapters.length+' 个章节</span></div>'+
+    '<ol class="toc-chapters">'+chapters.map(entry).join('')+'</ol>';
+  if(dimensions.length){
+    html+='<details class="toc-subsections"><summary>展开 '+
+      dimensions.length+' 项分析子目录</summary>'+
+      '<ol>'+dimensions.map(([key,label])=>entry(['report-dimension-'+key,label])).join('')+
+      '</ol></details>';
+  }
+  return html+'</nav>';
+}
+
 function renderResult(report) {
   const el = document.getElementById('result');
-  let html = '<h2>' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
+  let html = '<h2 id="report-top">' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
   const isHistorical = report.research_mode === 'historical';
   if (isHistorical) {
     html += '<div class="historical-banner"><b>历史研究</b> ｜ 截止日 ' +
@@ -2635,7 +2680,7 @@ function renderResult(report) {
 
   const summary = report.summary || {};
   const stanceClass = 'stance-' + (summary.stance || 'neutral');
-  html += '<section class="result-summary"><h3>投资结论</h3>';
+  html += '<section class="result-summary" id="report-verdict"><h3>投资结论</h3>';
   html += '<div class="verdict-line"><span class="stance-badge ' + stanceClass + '">' +
     stanceLabel(summary.stance) + '</span>';
   if (summary.company_quality_stance) {
@@ -2671,6 +2716,13 @@ function renderResult(report) {
   html += renderDimensionAnalysisSection(summary);
   html += renderIndustryValuationLab(report);
 
+  // Insert the TOC after report metadata but before the first research section.
+  // Scan *rendered* markup so missing/legacy modules are omitted automatically.
+  const chapterStart=html.indexOf('<section class="result-summary"');
+  if(chapterStart>=0){
+    const toc=renderReportToc(html);
+    html=html.slice(0,chapterStart)+toc+html.slice(chapterStart);
+  }
   el.innerHTML = html;
   activateIndustryValuationLab(report);
   if(typeof activateRoeDiscountLab==='function')activateRoeDiscountLab(report.valuation_model);

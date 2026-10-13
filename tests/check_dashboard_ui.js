@@ -84,7 +84,7 @@ ctx.renderResult(report);
 const html=nodes.result.innerHTML;
 assert.equal(html.split('<h3>投资结论</h3>').length-1,1);
 assert.equal(html.split('DIRECT_CONCLUSION_ONCE').length-1,1);
-assert.equal(html.split('多维度分析').length-1,1);
+assert.equal(html.split('<h3>多维度分析</h3>').length-1,1);
 keys.forEach(k=>assert.equal(html.split('UNIQUE_DETAIL_'+k.toUpperCase()+'_END').length-1,1));
 for(const forbidden of [
   '证据质量','报告合同校验通过','研究审查',

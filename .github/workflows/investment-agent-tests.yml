@@ -143,6 +143,8 @@ jobs:
 
       - name: Verify industry-specific valuation UI and no-target-price safeguards
         run: node tests/check_industry_valuation_ui.js /tmp/investment-webui.js
+          node tests/check_report_toc_ui.js /tmp/investment-webui.js
+          node tests/check_style_returns_ui.js /tmp/investment-webui.js
 
       - name: Verify ROE growth discount interactive valuation
         run: |
@@ -413,5 +415,7 @@ jobs:
           node --check /tmp/investment-dashboard.js
           node tests/check_dashboard_ui.js /tmp/investment-dashboard.js
           node tests/check_industry_valuation_ui.js /tmp/investment-dashboard.js
+          node tests/check_report_toc_ui.js /tmp/investment-dashboard.js
+          node tests/check_style_returns_ui.js /tmp/investment-dashboard.js
           node --check web/roe_discount.js
           node tests/check_roe_discount_ui.js
