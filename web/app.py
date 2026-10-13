@@ -450,11 +450,19 @@ async def roe_discount_javascript() -> Response:
     return Response(source, media_type="application/javascript")
 
 
+@app.get("/assets/research_desk.css")
+async def research_desk_stylesheet() -> Response:
+    """Local dashboard theme: self-hosted, with no browser font or CDN requirement."""
+    css = Path(__file__).with_name("research_desk.css").read_text(encoding="utf-8")
+    return Response(css, media_type="text/css", headers={"Cache-Control": "no-cache"})
+
+
 _INDEX_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>股票投资助手</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>股票投资助手 · Research Desk</title>
 <style>
   body { font-family: -apple-system, "Microsoft YaHei", sans-serif; max-width: 800px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
   header { margin-bottom: 24px; }
@@ -649,15 +657,26 @@ _INDEX_HTML = """<!DOCTYPE html>
   }
   @media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto !important; transition:none !important; } }
 </style>
+<link rel="stylesheet" href="/assets/research_desk.css">
 </head>
 <body>
-<header>
-  <span class="eyebrow">EVIDENCE-FIRST · INVESTMENT RESEARCH</span>
-  <h1>股票投资助手 <span style="font-weight:400;color:#c2d1ff;">/ Research Desk</span></h1>
-  <p>用长期经营数据与可追溯证据研究公司价值。行业、筹码、现金流、估值和反方论据，尽量交给图表与计算来说话。</p>
+<main class="app-shell">
+<header class="hero-header">
+  <div class="hero-copy">
+    <span class="eyebrow">EVIDENCE-FIRST · INVESTMENT RESEARCH</span>
+    <h1>股票投资助手 <span>/ Research Desk</span></h1>
+    <p>从真实经营与财务数据出发，研究公司价值、现金流、周期与风险。区分已核实的事实、主观判断和估值假设。</p>
+  </div>
+  <div class="hero-aside" aria-label="研究原则">
+    <span>RESEARCH PRINCIPLE</span>
+    <strong>经营价值优先</strong>
+    <small>长期视角 · 证据约束 · 情景推演</small>
+  </div>
 </header>
+<section class="control-deck" aria-label="股票研究入口">
+  <div class="deck-heading"><h2>开始研究</h2><p>输入证券代码或简称，生成完整研究报告</p></div>
 <div class="search-bar">
-  <input id="stockCode" placeholder="股票代码或名称，如 SH603408 / 洛阳钼业" />
+  <input id="stockCode" aria-label="股票代码或名称" autocomplete="off" placeholder="股票代码或名称，如 SH603408 / 洛阳钼业" />
   <button id="submitBtn">分析</button>
 </div>
 <div class="research-options">
@@ -682,7 +701,8 @@ _INDEX_HTML = """<!DOCTYPE html>
   <p>常用股票 (点击可快速填入分析):</p>
   <div id="stockChips"></div>
 </div>
-<div id="status"></div>
+</section>
+<div id="status" role="status" aria-live="polite"></div>
 <div id="result"></div>
 <div id="radarTip" style="display:none;position:fixed;z-index:10;max-width:260px;padding:6px 10px;background:#333;color:#fff;font-size:12px;border-radius:4px;pointer-events:none;"></div>
 
@@ -721,6 +741,7 @@ _INDEX_HTML = """<!DOCTYPE html>
 </div>
 
 <p class="disclaimer">以上内容基于历史数据与 AI 生成，仅供参考，不构成投资建议。</p>
+</main>
 
 <script>
 let pollTimer = null;
@@ -744,7 +765,7 @@ const WATCHLIST = [
 function renderWatchlist() {
   const el = document.getElementById('stockChips');
   el.innerHTML = WATCHLIST.map(s =>
-    '<span class="stock-chip" data-code="' + s.code + '">' + s.name + ' (' + s.code + ')</span>'
+    '<button type="button" class="stock-chip" data-code="' + s.code + '">' + s.name + ' (' + s.code + ')</button>'
   ).join('');
   el.querySelectorAll('.stock-chip').forEach(chip => {
     chip.addEventListener('click', () => {
