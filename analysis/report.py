@@ -25,11 +25,13 @@ import asyncio
 import os
 import re
 import time
+from datetime import date, timedelta
 from typing import Dict, List, Optional
 
 from analysis.a_share_structure import get_a_share_structure
 from analysis.candidates import find_candidates
-from analysis.chip_position import assess_chip_price_context
+from analysis.chip_position import assess_chip_price_context, align_holder_price_observations
+from backtest.price_source import get_price_history
 from analysis.position_risk import validated_quote_or_close
 from analysis.commodity import get_cycle_commodity_signal, get_rmb_trend_signal
 from analysis.freight import get_container_freight_signal
@@ -383,9 +385,38 @@ async def generate_report(
             stock_code, local_case["status"],
         )
 
+    # Dated holder history and stock daily closes are both already available
+    # from existing sources. Compare actual pairs at each disclosed holder
+    # period, NOT today's price to an unrelated old headcount.
+    aligned_holders = []
+    recorded = (shareholder_trend or {}).get("series") or []
+    if len(recorded) >= 2:
+        periods = sorted(
+            [day for item in recorded
+             if (day := str(item.get("period") or "")[:10])
+             and len(day) == 10 and day[4] == "-"]
+        )
+        if periods:
+            try:
+                start_day = date.fromisoformat(periods[0]) - timedelta(days=10)
+                latest_price_day = (market_context or {}).get("stock") or {}
+                end_day = (request.as_of if historical_mode else
+                           date.fromisoformat(latest_price_day.get("latest_date") or
+                                               date.today().isoformat()))
+                daily = await get_price_history(stock_code, start_day, end=end_day)
+                aligned_holders = align_holder_price_observations(
+                    shareholder_trend, daily,
+                    as_of=str(request.as_of) if historical_mode else None,
+                )
+            except (ValueError, TypeError, KeyError) as exc:
+                utils.logger.warning(
+                    "[analysis.report] 股东户数与历史价格对齐失败 (%s): %s",
+                    stock_code, exc,
+                )
     chip_price_context = assess_chip_price_context(
         market_context, shareholder_trend,
         as_of=str(request.as_of) if historical_mode else None,
+        price_holder_series=aligned_holders,
     )
 
     # Issuer-authored source facts: unlike investor discussion this can support

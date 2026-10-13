@@ -33,6 +33,7 @@ _PUBLIC_MODEL_FIELDS = frozenset((
 _PRIVATE_STYLE_KEYS = frozenset((
     "kol_style_hypotheses", "investment_principles", "knowledge_excerpts",
     "source_posts", "raw_posts", "original_posts", "candidate_views",
+    "private_excerpt_count", "private_transcript_count",
 ))
 # Last-resort guards for source identifiers and examples previously leaked
 # by legacy reports even after the original corpus was removed.
@@ -242,6 +243,32 @@ def public_stock_report(raw: Mapping[str, Any]) -> dict:
         if isinstance(style, dict):
             for field in _PRIVATE_STYLE_KEYS:
                 style.pop(field, None)
+            # Allow only reviewed, unidentifiable cause hypotheses.
+            safe_drivers = []
+            for item in (style.get("causal_drivers") or [])[:4]:
+                if not isinstance(item, dict):
+                    continue
+                fields = ("mechanism", "conditions", "alternative", "verification")
+                raw_texts = {k: str(item.get(k) or "")[:400] for k in fields}
+                checked = {
+                    k: _safe_prose(v, names, cases, excerpts, target)
+                    for k, v in raw_texts.items()
+                }
+                if not all(checked.values()):
+                    continue
+                if any(checked[k] != raw_texts[k] for k in fields):
+                    continue  # Do not show a partly redacted causal argument.
+                checked["evidence_status"] = "private_research_hypothesis"
+                safe_drivers.append(checked)
+            style["causal_drivers"] = safe_drivers
+            allowed_states = (
+                "distilled_hypotheses", "keyword_grounded_fallback",
+                "knowledge_available_unresolved",
+                "no_matching_distilled_knowledge",
+                "historical_method_not_available",
+            )
+            if style.get("causal_knowledge_status") not in allowed_states:
+                style["causal_knowledge_status"] = "unknown"
     summary = out.get("summary")
     if isinstance(summary, dict):
         for key in ("core_counter_evidence", "invalidation_condition", "risk_notes"):

@@ -34,7 +34,7 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
@@ -43,6 +43,7 @@ from analysis.knowledge_base import (
     invalidate_cache as invalidate_knowledge_base_cache,
 )
 from analysis.realtime_price import resolve_stock_code
+from analysis.stock_suggest import search_stocks, warm_stock_catalog
 from analysis.report import generate_report
 from analysis.public_report import public_stock_report
 from analysis.research_context import (
@@ -70,6 +71,7 @@ async def _preload_knowledge_base() -> None:
     # 后台提炼 (含雪球用户发帖来源, 首次要逐条过 LLM, 会持续一段时间);
     # 不阻塞服务启动, 提炼完成的条目逐批进入缓存
     asyncio.create_task(ensure_knowledge_base_loaded())
+    asyncio.create_task(warm_stock_catalog())
 
 
 class AnalyzeRequest(BaseModel):
@@ -141,6 +143,15 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     }
     asyncio.create_task(_run_analysis(task_id, stock_code, research_request))
     return AnalyzeResponse(task_id=task_id)
+
+
+@app.get("/api/stocks/suggest")
+async def suggest_stocks(
+    q: str = Query(default="", max_length=80),
+    limit: int = Query(default=8, ge=1, le=15),
+) -> Dict:
+    """Autocomplete listed A-share names/codes; bounded, public-only response."""
+    return await search_stocks(q, limit)
 
 
 @app.get("/api/research/time-capabilities")
@@ -457,6 +468,13 @@ async def research_desk_stylesheet() -> Response:
     return Response(css, media_type="text/css", headers={"Cache-Control": "no-cache"})
 
 
+@app.get("/assets/stock_autocomplete.js")
+async def stock_autocomplete_javascript() -> Response:
+    """Lightweight local autocomplete, no external search or CDN dependencies."""
+    source = Path(__file__).with_name("stock_autocomplete.js").read_text(encoding="utf-8")
+    return Response(source, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+
+
 _INDEX_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -676,7 +694,14 @@ _INDEX_HTML = """<!DOCTYPE html>
 <section class="control-deck" aria-label="股票研究入口">
   <div class="deck-heading"><h2>开始研究</h2><p>输入证券代码或简称，生成完整研究报告</p></div>
 <div class="search-bar">
-  <input id="stockCode" aria-label="股票代码或名称" autocomplete="off" placeholder="股票代码或名称，如 SH603408 / 洛阳钼业" />
+  <div class="stock-search-field">
+    <input id="stockCode" aria-label="股票代码或名称" role="combobox"
+      aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"
+      aria-controls="stockSuggestions" autocomplete="off"
+      placeholder="输入股票名称或代码，如 中国海油 / 600938" />
+    <div id="stockSuggestions" class="stock-suggestions"
+      role="listbox" aria-label="股票匹配结果" hidden></div>
+  </div>
   <button id="submitBtn">分析</button>
 </div>
 <div class="research-options">
@@ -1002,7 +1027,9 @@ function renderFundamentalsBlock(f) {
       '<div class="credibility-note">应收或存货增速长期显著高于营收时，需要进一步解释回款质量、渠道压货或库存积压；单一期不能独立定性。</div></div>';
   }
 
-  const series = x.holder_count_series || [];
+  const series = (x.holder_count_series || []).filter(p=>
+    p && numericOrNull(p.holders)>0 && numericOrNull(p.price)>0)
+    .sort((a,b)=>String(a.period).localeCompare(String(b.period)));
   if (series.length >= 2) {
     html += '<div style="margin-top:6px"><b>股东户数 vs 同期股价 (判断股价暴涨是否伴随筹码派发):</b><br>' +
       renderHolderChart(series.slice(0, 8)) + '</div>';
@@ -1757,16 +1784,13 @@ function renderHolderChart(series) {
     '<circle cx="' + (padL + 168) + '" cy="16" r="4.5" fill="#d97706"/>' +
     '<text x="' + (padL + 180) + '" y="20">股价 (首期=100)</text></g>';
 
-  const table = '<table style="border-collapse:collapse;font-size:12px;margin-top:6px;"><tr>' +
-    '<td style="padding:2px 6px;color:#666;">期间</td>' +
-    series.map(p => '<td style="padding:2px 8px;border-left:1px solid #eee;color:#666;text-align:center;">' +
-      escapeHtml(String(p.period).slice(0, 10)) + '</td>').join('') + '</tr><tr>' +
-    '<td style="padding:2px 6px;color:#666;">股东户数</td>' +
-    series.map(p => '<td style="padding:2px 8px;border-left:1px solid #eee;text-align:center;">' +
-      p.holders + '</td>').join('') + '</tr><tr>' +
-    '<td style="padding:2px 6px;color:#666;">股价(元)</td>' +
-    series.map(p => '<td style="padding:2px 8px;border-left:1px solid #eee;text-align:center;">' +
-      p.price + '</td>').join('') + '</tr></table>';
+  const table = '<div class="chip-holder-table"><table><thead><tr><th>统计截止日</th>'+
+    '<th>股东户数</th><th>收盘价（元）</th><th>价格日期</th></tr></thead><tbody>'+
+    series.map(p=>'<tr><td>'+escapeHtml(String(p.period).slice(0,10))+
+      '</td><td>'+Number(p.holders).toLocaleString('zh-CN')+'</td><td>'+
+      Number(p.price).toFixed(2)+'</td><td>'+
+      escapeHtml(String(p.price_date||p.period).slice(0,10))+
+      '</td></tr>').join('')+'</tbody></table></div>';
 
   return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" style="max-width:100%;"' +
     ' role="img" aria-label="股东户数与同期股价走势 (首期=100 指数化)">' +
@@ -2056,7 +2080,30 @@ function renderIndustryBreadthChart(industry) {
 }
 
 function renderChipPositionChart(context) {
-  if(!context || numericOrNull(context.position_52w_pct)===null) return '';
+  if(!context) return '';
+  const aligned=(Array.isArray(context.price_holder_series)?context.price_holder_series:[])
+    .filter(p=>p && /^\d{4}-\d{2}-\d{2}$/.test(String(p.period||'')) &&
+      numericOrNull(p.holders)>0 && numericOrNull(p.price)>0)
+    .sort((a,b)=>String(a.period).localeCompare(String(b.period)));
+  if(aligned.length>=2){
+    const first=aligned[0],last=aligned[aligned.length-1];
+    const changePct=(v1,v2)=>((Number(v2)/Number(v1)-1)*100);
+    const hp=changePct(first.holders,last.holders);
+    const pp=changePct(first.price,last.price);
+    const signed=v=>(v>0?'+':'')+v.toFixed(2)+'%';
+    return '<div class="chip-history-summary">'+
+      '<div><span>区间股价变化</span><strong>'+signed(pp)+'</strong></div>'+
+      '<div><span>区间股东户数变化</span><strong>'+signed(hp)+'</strong></div></div>'+
+      '<p class="section-caption">已披露股东户数与对应统计截止日之前最近交易日的实际收盘价，'+
+      '区间 '+escapeHtml(first.period)+'—'+escapeHtml(last.period)+
+      '；按首期=100指数化，仅展示真实配对日期，不插值、不将股东户数当作散户精确人数。</p>'+
+      renderHolderChart(aligned)+
+      '<p class="section-caption">仅凭股东户数变化无法证明机构派发或吸筹。'+
+      '价格是未经复权的日收盘价，跨分红、送转、拆股需另作复权比较。</p>';
+  }
+  if(numericOrNull(context.position_52w_pct)===null)
+    return '<p class="section-caption">尚未取得至少两个有披露依据的股东统计期与同期实际收盘价配对；'+
+      '不能凭空画出股东人数或股价趋势。</p>';
   const p=Math.max(0,Math.min(100,Number(context.position_52w_pct)));
   const change=numericOrNull(context.holder_change_pct);
   const status=context.status === 'contextualized';
@@ -2107,7 +2154,7 @@ function renderDashboardCharts(report) {
     renderSentimentMixChart(report.sentiment));
   html+=chartTile('行业上涨与下跌家数','同一交易时点的行业广度，不能独立当作投资结论',
     renderIndustryBreadthChart(report.industry_comparison));
-  html+=chartTile('股价位置 × 筹码分散','先看52周位置，再看股东户数增减；低位散户多不单独扣分',
+  html+=chartTile('股价位置 × 筹码分散','真实历史收盘价与已披露股东户数按截止日对齐；需区分户数变化、股价变化与机构买卖',
     renderChipPositionChart(report.chip_price_context));
   html+=chartTile('历史估值区间','PE(TTM)历史序列，失真区间将按原图分位裁剪',
     renderValuationHistoryChart((report.valuation_history || {}).history_monthly || []));
@@ -2166,7 +2213,7 @@ function renderIssuerCapitalSection(report) {
 function renderDimensionAnalysisSection(summary) {
   const analyses = (summary || {}).dimension_analyses || {};
   const order = [
-    ['management','管理层'], ['fundamentals','经营基本面'],
+    ['management','管理层与接班传承'], ['fundamentals','经营基本面'],
     ['rd','研发能力'], ['chip_flow','筹码与资金'],
     ['price_position','股价位置'], ['cycle_position','行业周期'],
     ['policy_geopolitics','政策与国际形势'], ['retail_sentiment','市场情绪'],
@@ -2371,9 +2418,24 @@ function renderInvestmentStyleStrip(model) {
   const style=(model||{}).style_context || {};
   if(style.status!=='observed')return '';
   const events=style.dated_market_events || [];
-  const label=style.style_regime==='dividend_leading'?'红利资产相对走强':
+  const redObserved=(style.dividend_index_return_pct===null ||
+    style.dividend_index_return_pct===undefined)?null:Number(style.dividend_index_return_pct);
+  const growthObserved=(style.growth_index_mean_return_pct===null ||
+    style.growth_index_mean_return_pct===undefined)?null:Number(style.growth_index_mean_return_pct);
+  let label=style.style_regime==='dividend_leading'?'红利资产相对走强':
     style.style_regime==='growth_leading'?'成长资产相对走强':
     style.style_regime==='mixed'?'风格相对收益不明显':'指数数据不足，关注最新市场事件';
+  if(Number.isFinite(redObserved) && Number.isFinite(growthObserved) &&
+     style.style_regime==='dividend_leading') {
+    if(redObserved<.5 && growthObserved<-2)
+      label='科技成长回撤，红利相对抗跌';
+    else if(redObserved<0 && growthObserved<redObserved)
+      label='市场普跌，红利跌幅相对较小';
+    else if(redObserved>0 && growthObserved>0)
+      label='红利与成长同涨，红利涨幅更大';
+    else if(redObserved>=.5 && growthObserved<0)
+      label='红利上涨，科技成长回撤';
+  }
   let html='<div class="style-insight"><h4>当前市场在交易什么？</h4><p><b>'+
     escapeHtml(label)+'</b>';
   if(style.dividend_minus_growth_ytd_pp!==null &&
@@ -2399,6 +2461,10 @@ function renderInvestmentStyleStrip(model) {
         escapeHtml(name)+'</span><strong class="style-return-value '+tone(value)+'">'+
         fmtPct(value)+'</strong></div>'
       ).join('')+'</div>';
+    if(Math.abs(red)<0.5 && growth< -2) {
+      html+='<p class="style-performance-reading"><b>先看现象：</b>这段相对领先主要来自科技成长的明显回撤，'+
+        '红利指数本身接近持平；相对抗跌不等于已经证实资金持续净流入红利。</p>';
+    }
     const spread=Number(style.dividend_minus_growth_ytd_pp);
     if(style.dividend_minus_growth_ytd_pp!==null &&
        style.dividend_minus_growth_ytd_pp!==undefined && Number.isFinite(spread) &&
@@ -2407,6 +2473,34 @@ function renderInvestmentStyleStrip(model) {
         '不是相同的比较口径，不能直接把这两个百分数相减得到该涨跌差。</p>';
     }
   }
+  const causes=(Array.isArray(style.causal_drivers)?style.causal_drivers:[]).filter(
+    item=>item && item.evidence_status==='private_research_hypothesis' &&
+      typeof item.mechanism==='string' && item.mechanism.trim()).slice(0,4);
+  html+='<div class="style-why"><h5>为什么出现这种风格变化？</h5>';
+  if(causes.length){
+    html+='<p class="section-caption">以下是从历史投资研究中提炼的可能驱动，仍需市场数据验证，'
+      +'并非已经查实的资金净流入或交易指令。</p>';
+    html+='<ol class="style-cause-list">'+causes.map(item=>
+      '<li><div class="style-cause-mechanism">'+escapeHtml(item.mechanism)+'</div>'+
+      '<details><summary>成立条件、反向解释与核验办法</summary>'+
+      '<p><b>成立条件：</b>'+escapeHtml(item.conditions||'尚未核实')+'</p>'+
+      '<p><b>可能的反向解释：</b>'+escapeHtml(item.alternative||'尚未核实')+'</p>'+
+      '<p><b>需要核验：</b>'+escapeHtml(item.verification||'尚无资料')+'</p>'+
+      '</details></li>'
+    ).join('')+'</ol>';
+  } else if(style.causal_knowledge_status==='no_matching_distilled_knowledge' ||
+            style.causal_knowledge_status==='knowledge_available_unresolved'){
+    html+='<p class="section-caption">本次没有匹配且已经完成提炼的市场机制观点；'
+      +'可能是相关帖子或直播尚未入库、提炼未完成，也可能确无适用解释。'
+      +'目前只能确认相对涨跌，不能凭指数表现编造资金转向的原因。</p>';
+  } else if(style.causal_knowledge_status==='historical_method_not_available'){
+    html+='<p class="section-caption">历史研究模式未使用后来的知识提炼方法，'
+      +'不追溯添加当时未核验的解释。</p>';
+  } else {
+    html+='<p class="section-caption">当前报告尚未提供经过核验边界处理的因果解释；'
+      +'请重新生成报告，或检查后台知识提炼是否成功。</p>';
+  }
+  html+='</div>';
   events.slice(0,2).forEach(e=>{
     html+='<p><b>市场事件：</b>'+escapeHtml(e.headline||'')+
       '（'+escapeHtml(e.date||'')+'）'+
@@ -2619,7 +2713,7 @@ function renderReportToc(reportHtml) {
     ['roe-discount-lab','ROE · 增长 · 贴现率估值'],
   ].filter(([id])=>present(id));
   const dimensions=[
-    ['management','管理层'],['fundamentals','经营基本面'],
+    ['management','管理层与接班传承'],['fundamentals','经营基本面'],
     ['rd','研发能力'],['chip_flow','筹码与资金'],
     ['price_position','股价位置'],['cycle_position','行业周期'],
     ['policy_geopolitics','政策与国际形势'],
@@ -2879,6 +2973,7 @@ document.getElementById('copyLogBtn').addEventListener('click', async () => {
 });
 </script>
 <script src="/assets/roe_discount.js"></script>
+<script src="/assets/stock_autocomplete.js"></script>
 </body>
 </html>
 """

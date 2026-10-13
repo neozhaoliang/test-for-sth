@@ -14,6 +14,8 @@ import re
 from datetime import date, datetime
 from typing import Dict, Iterable, List, Optional
 
+from analysis.succession_risk import build_succession_evidence
+
 
 _NEGATIVE_GOV_RE = re.compile(r"立案|处罚|警示|违规|调查|问询|谴责|处分|诉讼|仲裁")
 _INSIDER_REDUCTION_RE = re.compile(r"减持|减持计划|减持股份")
@@ -314,6 +316,11 @@ def build_management_capital_record(
     primary_reductions = _primary_matches(primary_evidence, _INSIDER_REDUCTION_RE)
     primary_governance_negatives = _primary_matches(primary_evidence, _NEGATIVE_GOV_RE)
     primary_refinancing = _primary_matches(primary_evidence, _REFINANCING_RE)
+    succession = build_succession_evidence(
+        primary_evidence=primary_evidence,
+        executive_profile=executive_profile,
+        as_of=as_of,
+    )
 
     alignment = {
         "chairman": executive_profile.get("chairman"),
@@ -350,6 +357,7 @@ def build_management_capital_record(
             refinancing_history=refinancing_history,
             primary_evidence=primary_evidence,
         ),
+        "succession": succession,
         "recent_insider_reduction_events": primary_reductions[:8],
         "recent_governance_negative_events": primary_governance_negatives[:8],
         "recent_primary_refinancing_events": primary_refinancing[:8],

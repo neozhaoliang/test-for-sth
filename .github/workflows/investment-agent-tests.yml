@@ -145,6 +145,8 @@ jobs:
         run: node tests/check_industry_valuation_ui.js /tmp/investment-webui.js
           node tests/check_report_toc_ui.js /tmp/investment-webui.js
           node tests/check_style_returns_ui.js /tmp/investment-webui.js
+          node --check web/stock_autocomplete.js
+          node tests/check_stock_autocomplete_ui.js
 
       - name: Verify ROE growth discount interactive valuation
         run: |
@@ -168,9 +170,11 @@ jobs:
             tests/test_valuation_engine.py \
             tests/test_valuation_industry_models.py \
             tests/test_investor_reference_style.py \
+            tests/test_market_style_reasons.py \
             tests/test_investor_return_decomposition.py \
             tests/test_roe_discount_valuation.py \
             tests/test_research_desk_theme.py \
+            tests/test_stock_suggest.py \
             tests/test_company_valuation_knowledge.py \
             tests/test_public_report_privacy.py \
             tests/test_issuer_business.py \
@@ -193,6 +197,7 @@ jobs:
             tests/test_fundamentals_consistency.py \
             tests/test_601919_consistency.py \
             tests/test_management_capital.py \
+            tests/test_succession_risk.py \
             tests/test_macro_rates.py \
             tests/test_commodity_cycle.py \
             tests/test_a_share_structure.py \
@@ -417,5 +422,7 @@ jobs:
           node tests/check_industry_valuation_ui.js /tmp/investment-dashboard.js
           node tests/check_report_toc_ui.js /tmp/investment-dashboard.js
           node tests/check_style_returns_ui.js /tmp/investment-dashboard.js
+          node --check web/stock_autocomplete.js
+          node tests/check_stock_autocomplete_ui.js
           node --check web/roe_discount.js
           node tests/check_roe_discount_ui.js

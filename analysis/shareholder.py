@@ -24,6 +24,7 @@ akshare 接口均以不带市场前缀的 6 位数字代码为入参。
 import logging
 import time
 from datetime import date, datetime
+from math import isfinite
 from typing import Dict, List, Optional, Tuple
 
 import akshare as ak
@@ -194,8 +195,33 @@ def reconcile_live_shareholder_trend(
             current_period,
             f10_period,
         )
-        return f10
-    return shareholder_trend
+        primary, supplementary = f10, shareholder_trend
+    else:
+        primary, supplementary = shareholder_trend, f10
+
+    # Retain *both* dated historical trajectories rather than losing the
+    # price/holder comparison when the newest count comes from a different API.
+    # Official dated detail rows win in a collision; live-only F10 has no
+    # disclosure date and is never used by the historical/as-of path.
+    by_period = {}
+    for candidate in (supplementary, primary):
+        for item in candidate.get("series") or []:
+            period = _coerce_date(item.get("period"))
+            try:
+                count = int(item.get("holders"))
+            except (ValueError, TypeError):
+                continue
+            if period is not None and count > 0:
+                by_period[period.isoformat()] = {
+                    **item, "period": period.isoformat(), "holders": count,
+                }
+    if len(by_period) >= 2:
+        merged = dict(primary)
+        merged["series"] = [
+            by_period[k] for k in sorted(by_period, reverse=True)[:16]
+        ]
+        return merged
+    return primary
 
 async def get_shareholder_count_trend(
     stock_code: str,
@@ -236,21 +262,63 @@ async def get_shareholder_count_trend(
                 by=["股东户数公告日期", "股东户数统计截止日"],
                 ascending=[True, True],
             )
-            row = rows.iloc[-1]
-            change_pct = row.get("股东户数-增减比例")
-            if change_pct is not None and change_pct == change_pct:
-                disclosure_date = _coerce_date(row.get("股东户数公告日期"))
-                period_date = _coerce_date(row.get("股东户数统计截止日"))
-                return {
-                    "latest_count": int(row["股东户数-本次"]),
-                    "change_pct": float(change_pct),
-                    "trend": "increasing" if float(change_pct) > 0 else "decreasing",
-                    "as_of": period_date.isoformat() if period_date else str(row.get("股东户数统计截止日") or ""),
-                    "period": period_date.isoformat() if period_date else None,
-                    "published_at": disclosure_date.isoformat() if disclosure_date else None,
-                    "available_at": disclosure_date.isoformat() if disclosure_date else None,
-                    "source_mode": "detail_history",
+            observations = {}
+            for _, observation in rows.iterrows():
+                period = _coerce_date(observation.get("股东户数统计截止日"))
+                published = _coerce_date(observation.get("股东户数公告日期"))
+                try:
+                    count = int(float(observation.get("股东户数-本次")))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if period is None or count <= 0 or published is None:
+                    continue
+                # By period choose last disclosure already public by cutoff.
+                observations[period.isoformat()] = {
+                    "period": period.isoformat(), "holders": count,
+                    "published_at": published.isoformat(),
+                    "available_at": published.isoformat(),
+                    "source": "detail_history",
                 }
+            history = [
+                observations[k] for k in sorted(observations, reverse=True)[:16]
+            ]
+            if not history:
+                return None
+            latest = history[0]
+            # Some AKShare versions omit the change-ratio field although the
+            # historical headcounts remain perfectly usable. Compute from
+            # consecutive *distinct* disclosed periods instead of discarding.
+            change_pct = None
+            latest_rows = rows[
+                rows["股东户数统计截止日"].apply(
+                    lambda x: _coerce_date(x) == _coerce_date(latest["period"])
+                )
+            ]
+            if not latest_rows.empty:
+                raw_pct = latest_rows.iloc[-1].get("股东户数-增减比例")
+                try:
+                    parsed = float(raw_pct)
+                    if isfinite(parsed):
+                        change_pct = round(parsed, 3)
+                except (ValueError, TypeError):
+                    pass
+            if change_pct is None and len(history) >= 2 and history[1]["holders"]:
+                change_pct = round(
+                    (latest["holders"] / history[1]["holders"] - 1) * 100, 3
+                )
+            return {
+                "latest_count": latest["holders"],
+                "change_pct": change_pct,
+                "trend": ("increasing" if change_pct is not None and change_pct > 0
+                          else "decreasing" if change_pct is not None and change_pct < 0
+                          else "stable" if change_pct == 0 else "unknown"),
+                "as_of": latest["period"],
+                "period": latest["period"],
+                "published_at": latest["published_at"],
+                "available_at": latest["available_at"],
+                "source_mode": "detail_history",
+                "series": history,
+            }
 
     if as_of is not None:
         # Historical mode must fail closed.  Today's latest snapshot would leak future info.

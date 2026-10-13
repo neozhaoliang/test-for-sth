@@ -211,3 +211,46 @@ def test_distill_token_override_is_bounded(monkeypatch):
     assert knowledge_base._distill_max_tokens() == 16384
     monkeypatch.setenv("BACKTEST_DISTILL_MAX_TOKENS", "999999")
     assert knowledge_base._distill_max_tokens() == 65536
+
+
+
+def test_long_livestream_knowledge_samples_market_cause_from_second_half():
+    from analysis import knowledge_base as kb
+    first = "聊天的日常记录和天气情况。"*650
+    middle = "其他谈话并不涉及股票。"*300
+    driver = ("国债收益率与险资的配置需求变化，会使可持续股息和"
+              "科技成长估值的相对吸引力重新定价。") * 6
+    transcript = first + middle + driver
+    raw = {"source": "bili_laomujiang_transcript", "content": transcript}
+    sampled = kb._prepare_distill_content(raw)
+    assert len(transcript) > kb._MAX_DISTILL_CHARS
+    assert len(sampled) <= kb._MAX_DISTILL_CHARS
+    assert "国债收益率" in sampled
+    assert sampled.startswith(transcript[:500])
+    other = kb._prepare_distill_content({"source": "xueqiu_test", "content": transcript})
+    assert other == transcript[:kb._MAX_DISTILL_CHARS]
+
+
+def test_bounded_distillation_reserves_slots_for_style_and_livestream():
+    from analysis import knowledge_base as kb
+    latest = [
+        {"cache_key": f"generic:{i}", "timestamp": 9000-i,
+         "source": "other", "title": "公司产能最新进展", "content": "产品扩产的观察"}
+        for i in range(30)
+    ]
+    transcript = {
+        "cache_key": "video:test", "timestamp": 500,
+        "source": "bili_laomujiang_transcript",
+        "title": "直播问答", "content": "利率变化导致长线资金重新考虑股息资产的配置"
+    }
+    prior = {
+        "cache_key": "style:test", "timestamp": 400,
+        "source": "xueqiu_test", "title": "高低切",
+        "content": "当科技估值高涨，公募可能调仓到红利领域"
+    }
+    selected = kb._select_distill_batch(latest + [transcript, prior], 16)
+    assert len(selected) == 16
+    assert len({x["cache_key"] for x in selected}) == 16
+    assert transcript in selected
+    assert prior in selected
+    assert len(kb._select_distill_batch(latest[:2], 16)) == 2
