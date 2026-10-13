@@ -77,6 +77,14 @@ def test_pit_does_not_annualize_roe_or_use_premature_year_end():
         profitability_trend=trend, as_of="2026-03-15")
     assert [x["year"] for x in lab["roe_observations"]] == [2023, 2024]
     assert lab["defaults"]["roe_pct"] is None
+    april = build_roe_discount_lab(
+        valuation={"nav_per_share": 10},
+        profitability_trend=trend, as_of="2026-04-15")
+    assert [x["year"] for x in april["roe_observations"]] == [2023, 2024]
+    may = build_roe_discount_lab(
+        valuation={"nav_per_share": 10},
+        profitability_trend=trend, as_of="2026-05-01")
+    assert [x["year"] for x in may["roe_observations"]] == [2023, 2024, 2025]
 
 
 def test_missing_book_does_not_substitute_quote():
