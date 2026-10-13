@@ -148,7 +148,7 @@ def build_roe_discount_lab(*, valuation=None, profitability_trend=None,
             continue
         # Period end alone does not prove publication: last full calendar year
         # may be not yet published at the requested as-of date.
-        if d.year == cutoff.year or (d.year == cutoff.year-1 and cutoff.month < 4):
+        if d.year == cutoff.year or (d.year == cutoff.year-1 and cutoff.month < 5):
             continue
         r = number(row.get("roe_pct"))
         e = number(row.get("eps_yuan"))
