@@ -638,3 +638,37 @@ body, input, select, textarea, button { font-family:inherit; }
 @media(max-width:420px) {
   .stock-suggestions { max-height:280px; }
 }
+
+
+/* Why-this-style explanatory module: clear, article-width causal reasoning. */
+.style-insight .style-why {
+  margin:17px 0 15px;
+  padding:18px 20px;
+  border:1px solid #d8e4f5;
+  border-radius:12px;
+  background:linear-gradient(145deg,#f7faff,#fff);
+}
+.style-why h5 { margin:0 0 10px;color:#234477;font-size:15px;font-weight:800; }
+.style-why > .section-caption { margin:0 0 13px;line-height:1.7; }
+.style-why ol.style-cause-list {
+  padding:0 0 0 20px;
+  margin:0;
+  list-style:decimal;
+}
+.style-why .style-cause-list > li {
+  padding:0 0 13px 5px;
+  line-height:1.8;
+}
+.style-why .style-cause-list > li + li {
+  border-top:1px dashed #e3eaf4;
+  padding-top:12px;
+}
+.style-why .style-cause-list > li:last-child { padding-bottom:0; }
+.style-why .style-cause-list > li::marker { color:#4774b6;font-weight:800; }
+.style-why .style-cause-mechanism { color:#293f60;font-size:13px;font-weight:650; }
+.style-why details { margin-top:5px; }
+.style-why summary { color:#4d6c9a;font-size:12px;cursor:pointer; }
+.style-why details p { margin:6px 0;font-size:12px;color:#60718c;line-height:1.75; }
+@media(max-width:530px) {
+  .style-insight .style-why { padding:14px 15px; }
+}
