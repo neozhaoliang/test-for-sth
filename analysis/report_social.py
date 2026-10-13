@@ -32,6 +32,26 @@ from model.m_analysis import CandidateOpinion, KnowledgeExcerpt
 
 logger = logging.getLogger("MediaCrawler")
 
+def _retain_market_causal_sources(
+    selected: List[KnowledgeExcerpt], all_excerpts: List[KnowledgeExcerpt],
+) -> List[KnowledgeExcerpt]:
+    """Don't let a company-ticker relevance ranking erase market *why* evidence.
+
+    Treat this as source recall only, NOT as proof or a generated conclusion.
+    Preserve a bounded set of previously distilled, dated Bili/post opinions.
+    """
+    from analysis.market_style_reasons import _select_sources
+    seen = {(e.source, e.title, e.published_at) for e in selected}
+    for item in _select_sources(all_excerpts, date.today(), limit=10):
+        key = (item.source, item.title, item.published_at)
+        if key not in seen:
+            selected.append(item)
+            seen.add(key)
+    return selected
+
+
+
+
 _MAX_LATEST_POSTS = 5
 _MAX_HISTORICAL_THESIS = 5
 _MIN_CORROBORATING_RECORDS = 2
@@ -299,7 +319,7 @@ async def filter_relevant_knowledge(
                 if key not in existing:
                     selected.append(entry)
                     existing.add(key)
-        return selected
+        return _retain_market_causal_sources(selected, knowledge_excerpts)
 
     kept = {
         i for i in parsed
@@ -329,7 +349,7 @@ async def filter_relevant_knowledge(
             if key not in seen:
                 selected.append(entry)
                 seen.add(key)
-    return selected
+    return _retain_market_causal_sources(selected, knowledge_excerpts)
 
 
 async def collect_live_social_context(
