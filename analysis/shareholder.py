@@ -194,8 +194,33 @@ def reconcile_live_shareholder_trend(
             current_period,
             f10_period,
         )
-        return f10
-    return shareholder_trend
+        primary, supplementary = f10, shareholder_trend
+    else:
+        primary, supplementary = shareholder_trend, f10
+
+    # Retain *both* dated historical trajectories rather than losing the
+    # price/holder comparison when the newest count comes from a different API.
+    # Official dated detail rows win in a collision; live-only F10 has no
+    # disclosure date and is never used by the historical/as-of path.
+    by_period = {}
+    for candidate in (supplementary, primary):
+        for item in candidate.get("series") or []:
+            period = _coerce_date(item.get("period"))
+            try:
+                count = int(item.get("holders"))
+            except (ValueError, TypeError):
+                continue
+            if period is not None and count > 0:
+                by_period[period.isoformat()] = {
+                    **item, "period": period.isoformat(), "holders": count,
+                }
+    if len(by_period) >= 2:
+        merged = dict(primary)
+        merged["series"] = [
+            by_period[k] for k in sorted(by_period, reverse=True)[:16]
+        ]
+        return merged
+    return primary
 
 async def get_shareholder_count_trend(
     stock_code: str,
@@ -236,6 +261,28 @@ async def get_shareholder_count_trend(
                 by=["股东户数公告日期", "股东户数统计截止日"],
                 ascending=[True, True],
             )
+            observations = {}
+            for _, observation in rows.iterrows():
+                period = _coerce_date(observation.get("股东户数统计截止日"))
+                published = _coerce_date(observation.get("股东户数公告日期"))
+                try:
+                    count = int(float(observation.get("股东户数-本次")))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if period is None or count <= 0 or published is None:
+                    continue
+                # By period choose last disclosure already public by cutoff.
+                observations[period.isoformat()] = {
+                    "period": period.isoformat(), "holders": count,
+                    "published_at": published.isoformat(),
+                    "available_at": published.isoformat(),
+                    "source": "detail_history",
+                }
+            history = [
+                observations[k] for k in sorted(observations, reverse=True)[:16]
+            ]
+            if not history:
+                return None
             row = rows.iloc[-1]
             change_pct = row.get("股东户数-增减比例")
             if change_pct is not None and change_pct == change_pct:
@@ -250,6 +297,7 @@ async def get_shareholder_count_trend(
                     "published_at": disclosure_date.isoformat() if disclosure_date else None,
                     "available_at": disclosure_date.isoformat() if disclosure_date else None,
                     "source_mode": "detail_history",
+                    "series": history,
                 }
 
     if as_of is not None:
