@@ -353,7 +353,7 @@ _REPAIR_REQUIREMENTS = (
 )
 
 _DIMENSION_LABELS = {
-    "management": "管理层",
+    "management": "管理层与接班传承",
     "fundamentals": "基本面",
     "rd": "研发能力",
     "chip_flow": "筹码",
