@@ -55,7 +55,8 @@ _DISTILL_PROMPT = """以下是一篇投资相关的直播文字稿/专栏原文�
 请你只提炼其中能够用于未来分析其他股票的投资知识，以及对特定时期/行业有明确背景约束的市场经验。
 包括但不限于: 投资哲学、估值、筹码博弈、资金面、A股风格切换、公募/险资/ETF行为、政策偏好、
 宏观与周期、行业与个股风险。忽略闲聊、寒暄、自我介绍和无法泛化的情绪表达。
-如果原文几乎没有任何投资相关内容，直接返回空字符串。
+如果原文几乎没有任何可提炼的投资内容，必须只输出 __NO_INVESTMENT_KNOWLEDGE__ 这个标记，
+不要返回空字符串，也不要输出解释。
 
 每条知识必须尽量写清四部分，缺失就写“未说明”:
 【原则】作者实际表达的规则或判断框架，不要替作者拔高成定律。
@@ -76,6 +77,15 @@ _DISTILL_PROMPT = """以下是一篇投资相关的直播文字稿/专栏原文�
 
 _MAX_DISTILL_CHARS = 9000  # 原文超长时截断，避免单次 LLM 调用过大
 _DISTILL_CONCURRENCY = 3
+_NO_KNOWLEDGE_MARKER = "__NO_INVESTMENT_KNOWLEDGE__"
+
+
+def _distill_max_tokens() -> int:
+    """Configurable output cap, with a safe default and a bounded range."""
+    try:
+        return max(8192, min(65536, int(os.getenv("BACKTEST_DISTILL_MAX_TOKENS", "16384"))))
+    except (TypeError, ValueError):
+        return 16384
 
 # 原文中疑似提示注入的行 (直播文字稿里可能混入弹幕/观众文本)。只匹配强信号，
 # 避免误删正常投资内容 (如"你现在是满仓还是空仓"这类口语不会命中)。
@@ -316,7 +326,9 @@ async def _distill_one(raw: Dict) -> str:
             f"[knowledge_base] {raw.get('entry_id')} 原文剔除疑似注入文本 {dropped} 行: {raw.get('title', '')[:40]}"
         )
     prompt = _DISTILL_PROMPT.format(title=raw["title"], content=content)
-    result = await call_text(prompt, max_tokens=8192)
+    result = await call_text(prompt, max_tokens=_distill_max_tokens())
+    if (result or "").strip() == _NO_KNOWLEDGE_MARKER:
+        return _NO_KNOWLEDGE_MARKER
     distilled = _strip_self_intro((result or "").strip())
     if len(distilled) < len((result or "").strip()):
         logger.warning(
@@ -333,7 +345,8 @@ async def _distill_missing(raws: List[Dict], cache: Dict[str, Dict]) -> Dict[str
         content_hash = _content_hash(raw["content"])
         cached = cache.get(key)
         if (cached and cached.get("content_hash") == content_hash
-                and (cached.get("distilled") or "").strip()):
+                and ((cached.get("distilled") or "").strip()
+                     or cached.get("skipped_no_relevant_knowledge") is True)):
             continue
         to_distill.append({**raw, "cache_key": key, "content_hash": content_hash})
 
@@ -376,9 +389,15 @@ async def _distill_missing(raws: List[Dict], cache: Dict[str, Dict]) -> Dict[str
     results = await asyncio.gather(*(_run(raw) for raw in to_distill))
     updated = dict(cache)
     for rec in results:
-        if not (rec.get("distilled") or "").strip():
-            logger.warning("[knowledge_base] article distillation returned empty; "
-                           "not caching and will retry on future runs")
+        if rec.get("distilled") == _NO_KNOWLEDGE_MARKER:
+            # Explicit model classification is an intentional negative result:
+            # cache it to avoid paying for the same unrelated post forever.
+            rec["distilled"] = ""
+            rec["skipped_no_relevant_knowledge"] = True
+        elif not (rec.get("distilled") or "").strip():
+            # Missing final text is NOT a validated no-knowledge classification.
+            logger.warning("[knowledge_base] article distillation failed to return "
+                           "text; not caching and will retry on future runs")
             continue
         updated[rec["cache_key"]] = rec
         _append_distill_cache(rec)
@@ -415,7 +434,7 @@ def load_cached_entries() -> List[KnowledgeEntry]:
         if rec.get("content_hash") != _content_hash(raw["content"]):
             continue
         distilled = _strip_self_intro(rec.get("distilled", "") or "")
-        if not distilled:
+        if not distilled or distilled == _NO_KNOWLEDGE_MARKER:
             continue
         entries.append(
             KnowledgeEntry(
@@ -469,6 +488,8 @@ async def ensure_loaded() -> List[KnowledgeEntry]:
         # 读取时也剥一次开头非要点段落: 旧缓存里可能存有早先蒸馏时混入的
         # 模型自报家门文本 (蒸馏模型行为异常导致)，不重蒸馏也能清理掉。
         distilled = _strip_self_intro(rec.get("distilled", "") or "")
+        if not distilled or distilled == _NO_KNOWLEDGE_MARKER:
+            continue
         if len(distilled) < len(rec.get("distilled", "") or ""):
             logger.warning(
                 f"[knowledge_base] {raw['entry_id']} 缓存条目剥离开头非要点段落: {raw['title'][:40]}"

@@ -65,7 +65,20 @@ async def _call_llm_raw(prompt: str, max_tokens: int) -> Optional[str]:
     return text
 
 
-async def _call_llm_raw_ex(prompt: str, max_tokens: int) -> tuple:
+def _is_deepseek_endpoint() -> bool:
+    """Do not send DeepSeek-only thinking switches to native Claude endpoints."""
+    from urllib.parse import urlsplit
+
+    endpoint = os.environ.get("ANTHROPIC_BASE_URL", "")
+    try:
+        return (urlsplit(endpoint).hostname or "").lower() == "api.deepseek.com"
+    except ValueError:
+        return False
+
+
+async def _call_llm_raw_ex(
+    prompt: str, max_tokens: int, *, disable_thinking: bool = False,
+) -> tuple:
     """
     调用 LLM，返回 (原始文本, stop_reason)。调用异常时返回 (None, None)。
 
@@ -75,29 +88,39 @@ async def _call_llm_raw_ex(prompt: str, max_tokens: int) -> tuple:
     注意只取 text 块——推理模型的响应里还有 thinking 块，它不是答案。
     """
     client = _get_client()
+    request = {
+        "model": _MODEL,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    # DeepSeek's Anthropic-compatible API supports disabling thinking.
+    # Avoid it for simple knowledge extraction; native Claude models have
+    # different compatibility requirements and are left untouched.
+    if disable_thinking and _is_deepseek_endpoint():
+        request["thinking"] = {"type": "disabled"}
     try:
-        async with client.messages.stream(
-            model=_MODEL,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        ) as stream:
+        async with client.messages.stream(**request) as stream:
             response = await stream.get_final_message()
         raw_text = "".join(
             block.text for block in response.content if getattr(block, "type", "") == "text"
         )
         stop_reason = getattr(response, "stop_reason", None)
         if not raw_text.strip():
-            # 推理模型把预算全烧在思考上时会返回纯 thinking 响应。若不打这一行，
-            # 上层只会看到 "len=0 解析失败"，完全看不出真正原因是预算耗尽。
             thinking_chars = sum(
                 len(getattr(b, "thinking", "") or "")
                 for b in response.content
                 if getattr(b, "type", "") == "thinking"
             )
-            utils.logger.error(
-                f"[llm_client._call_llm_raw] 无 text 块 (stop_reason={stop_reason}, "
-                f"max_tokens={max_tokens}, thinking={thinking_chars}字符) —— "
-                f"通常是思考耗尽预算，需提高 max_tokens"
+            if stop_reason == "max_tokens":
+                detail = "输出预算耗尽；如有必要，可增大 max_tokens"
+            elif stop_reason == "end_turn":
+                detail = "模型正常结束但未生成正文；不属于 token 上限耗尽"
+            else:
+                detail = "未获得正文，需核查提供商响应"
+            utils.logger.warning(
+                "[llm_client._call_llm_raw] 无 text 块 "
+                "(stop_reason=%s, max_tokens=%d, thinking=%d字符, model=%s)：%s",
+                stop_reason, max_tokens, thinking_chars, _MODEL, detail,
             )
     except Exception as e:
         utils.logger.error(f"[llm_client._call_llm_raw] LLM call failed: {e}")
@@ -437,27 +460,37 @@ async def call_analysis_with_tools(
 
 
 async def call_text(prompt: str, max_tokens: int = 2048) -> Optional[str]:
-    """Generate free-form text; retry once when reasoning exhausts output budget.
+    """Get complete text for extraction, including DeepSeek thinking-only replies.
 
-    Both reasoning and final prose consume Anthropic-compatible max_tokens.
-    This path is used by article distillation and must not silently cache an
-    empty result when DeepSeek spends the entire cap on thinking.
+    Unlike max_tokens, end_turn with no text is NOT output-budget exhaustion.
+    On DeepSeek, short text-extraction requests skip unnecessary thinking.
+    Both failure forms get at most one bounded retry; never cache a partial
+    or empty provider result as an investment fact.
     """
-    raw_text, stop_reason = await _call_llm_raw_ex(prompt, max_tokens)
-    if stop_reason == "max_tokens":
-        retry_limit = max(16384, max_tokens * 2)
-        utils.logger.warning(
-            "[llm_client.call_text] generation truncated at max_tokens=%d "
-            "(text_chars=%d); retrying once with max_tokens=%d",
-            max_tokens, len(raw_text or ""), retry_limit,
-        )
-        retried, retry_reason = await _call_llm_raw_ex(prompt, retry_limit)
-        if retried and retry_reason != "max_tokens":
-            return retried
-        utils.logger.warning(
-            "[llm_client.call_text] retry did not yield a complete response "
-            "(stop_reason=%s); leaving item unprocessed",
-            retry_reason,
-        )
+    async def attempt(limit: int) -> tuple:
+        if _is_deepseek_endpoint():
+            return await _call_llm_raw_ex(prompt, limit, disable_thinking=True)
+        return await _call_llm_raw_ex(prompt, limit)
+
+    raw_text, reason = await attempt(max_tokens)
+    if raw_text and reason != "max_tokens":
+        return raw_text
+    # Transport failure already logged. Let the next scheduled batch retry.
+    if raw_text is None and reason is None:
         return None
-    return raw_text or None
+    retry_limit = min(65536, max(16384, max_tokens * 2))
+    utils.logger.warning(
+        "[llm_client.call_text] empty/truncated final answer "
+        "(stop_reason=%s, text_chars=%d, max_tokens=%d); "
+        "retrying once at max_tokens=%d",
+        reason, len(raw_text or ""), max_tokens, retry_limit,
+    )
+    retried, retry_reason = await attempt(retry_limit)
+    if retried and retry_reason != "max_tokens":
+        return retried
+    utils.logger.warning(
+        "[llm_client.call_text] retry produced no complete text "
+        "(stop_reason=%s); deferring source without fabricating content",
+        retry_reason,
+    )
+    return None
