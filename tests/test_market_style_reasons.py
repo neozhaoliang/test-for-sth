@@ -177,3 +177,22 @@ def test_public_api_rejects_named_source_in_market_driver():
     }
     result=public_stock_report(data)
     assert result["valuation_model"]["style_context"]["causal_drivers"]==[]
+
+
+
+def test_postfilter_preserves_market_causal_posts_even_when_stock_match_ignores_them():
+    from analysis.report_social import _retain_market_causal_sources
+
+    old = entry(
+        "当公募抱团科技高位估值受质疑时，资金可能调仓红利；需要分析资产配置变化。",
+        published="2024-05-08", source="bili_laomujiang_transcript",
+    )
+    focused = entry(
+        "当前公司的真实分红要与现金流对照，不能仅凭上涨追高。",
+        published="2026-10-05", source="xueqiu_source_a",
+    )
+    selected = _retain_market_causal_sources([focused], [old, focused])
+    assert old in selected
+    assert selected.count(old) == 1
+    assert focused in selected
+    assert len(selected) == 2
