@@ -36,6 +36,10 @@ assert.ok(markup.includes('>-5.69%</strong>'));
 assert.ok(markup.includes('style-return-up'));
 assert.ok(markup.includes('style-return-down'));
 assert.ok(markup.includes('style-return-row'));
+assert.ok(markup.includes('科技成长回撤，红利相对抗跌'));
+assert.ok(markup.includes('这段相对领先主要来自科技成长的明显回撤'));
+assert.ok(markup.includes('相对抗跌不等于已经证实资金持续净流入红利'));
+
 assert.ok(markup.includes('涨跌差9.71个百分点'));
 assert.ok(markup.includes('不是相同的比较口径'));
 assert.ok(!markup.includes('<svg'));
