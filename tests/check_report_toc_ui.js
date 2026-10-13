@@ -44,8 +44,8 @@ const base={
 
 function verify(html){
   assert.ok(html.indexOf('id="report-toc"') < html.indexOf('id="report-verdict"'));
-  const hrefs=[...html.matchAll(/href="#(report-[A-Za-z0-9-]+|industryValuationLab|roe-discount-lab)"/g)].map(x=>x[1]);
-  const ids=[...html.matchAll(/id="(report-[A-Za-z0-9-]+|industryValuationLab|roe-discount-lab)"/g)].map(x=>x[1]);
+  const hrefs=[...html.matchAll(/href="#(report-[A-Za-z0-9_-]+|industryValuationLab|roe-discount-lab)"/g)].map(x=>x[1]);
+  const ids=[...html.matchAll(/id="(report-[A-Za-z0-9_-]+|industryValuationLab|roe-discount-lab)"/g)].map(x=>x[1]);
   assert.equal(ids.length,new Set(ids).size,'target IDs must be unique');
   for(const id of hrefs){
     assert.equal(ids.filter(x=>x===id).length,1,'dead TOC link '+id);
