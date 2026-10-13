@@ -316,10 +316,97 @@ def _rewrite_distill_cache(records: List[Dict]) -> None:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
+_STYLE_DISTILL_SIGNAL = re.compile(
+    r"红利|高股息|股息率|科技|成长|风格切换|高低切|公募|机构调仓|"
+    r"利率|国债|债券|险资|基金|ETF|风险偏好|估值|轮动|避险", re.I,
+)
+
+
+def _select_distill_batch(pending: List[Dict], limit: int = 16) -> List[Dict]:
+    """Reserve part of a bounded extraction batch for market-causal research.
+
+    A fresh livestream about dividends should not get starved by many newer
+    generic single-stock posts. The remaining slots still follow recency.
+    """
+    if len(pending) <= limit:
+        return list(pending)
+    ordered = sorted(
+        pending, key=lambda r: (
+            r.get("timestamp", 0),
+            int(bool(re.search(r"估值|现金流|ROE|市净率|市盈率|利润",
+                               str(r.get("content") or ""), re.I))),
+        ),
+        reverse=True,
+    )
+    style_hits = [
+        r for r in ordered
+        if _STYLE_DISTILL_SIGNAL.search(
+            str(r.get("title") or "") + " " +
+            str(r.get("content") or "")[:15000]
+        )
+    ]
+    transcript_hits = [
+        r for r in style_hits
+        if "transcript" in str(r.get("source") or "").lower()
+    ]
+    chosen = []
+    selected = set()
+    def take(entries: List[Dict], cap: int) -> None:
+        for row in entries:
+            if len(chosen) >= cap:
+                break
+            key = row["cache_key"]
+            if key not in selected:
+                selected.add(key)
+                chosen.append(row)
+
+    # Two transcript slots and up to six style-theory slots per report.
+    take(transcript_hits, min(limit, 2))
+    take(style_hits, min(limit, 6))
+    take(ordered, limit)
+    return chosen
+
+
+def _prepare_distill_content(raw: Dict) -> str:
+    """Preserve thematic windows from across a long livestream, not only start.
+
+    Transcript paragraphs can contain unrelated introductions for >9K chars.
+    Select several distinct, chronological contexts near relevant concepts.
+    This is a lossy evidence sampling step, not a new factual assertion.
+    """
+    content = str(raw.get("content") or "")
+    if len(content) <= _MAX_DISTILL_CHARS:
+        return content
+    if "transcript" not in str(raw.get("source") or "").lower():
+        return content[:_MAX_DISTILL_CHARS]
+    positions = [m.start() for m in _STYLE_DISTILL_SIGNAL.finditer(content)]
+    if not positions:
+        return content[:_MAX_DISTILL_CHARS]
+    # Spread windows across the full transcript instead of selecting all early.
+    spread = [
+        positions[round(i * (len(positions) - 1) / min(11, len(positions) - 1))]
+        for i in range(min(12, len(positions)))
+    ]
+    windows = [(0, min(len(content), 1500))]
+    for pos in spread:
+        windows.append((max(0, pos - 260), min(len(content), pos + 400)))
+    windows.sort()
+    merged = []
+    for lo, hi in windows:
+        if merged and lo <= merged[-1][1] + 60:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    # Truncate to the same strict byte-size budget as the old extraction.
+    return "\n[中间内容省略；以下保留不同时间段的原文节选]\n".join(
+        content[lo:hi] for lo, hi in merged
+    )[:_MAX_DISTILL_CHARS]
+
+
 async def _distill_one(raw: Dict) -> str:
     from backtest.llm_client import call_text
 
-    content = raw["content"][:_MAX_DISTILL_CHARS]
+    content = _prepare_distill_content(raw)
     content, dropped = _strip_raw_injection(content)
     if dropped:
         logger.warning(
@@ -360,16 +447,10 @@ async def _distill_missing(raws: List[Dict], cache: Dict[str, Dict]) -> Dict[str
     # separately, directly and with an as-of guard.
     budget = 16
     if len(to_distill) > budget:
-        to_distill.sort(
-            key=lambda item: (
-                item.get("timestamp", 0),
-                int(bool(re.search(r"估值|现金流|ROE|市净率|市盈率|利润", item.get("content", ""), re.I))),
-            ),
-            reverse=True,
-        )
-        logger.info("[knowledge_base] %d new entries; distilling only %d this run",
+        logger.info("[knowledge_base] %d new entries; distilling only %d this run; "
+                    "reserve market-theory and livestream excerpts",
                     len(to_distill), budget)
-        to_distill = to_distill[:budget]
+        to_distill = _select_distill_batch(to_distill, budget)
 
     logger.info(f"[knowledge_base] 需要提炼 {len(to_distill)} 条知识库条目 (新增/内容变化)")
     semaphore = asyncio.Semaphore(_DISTILL_CONCURRENCY)
