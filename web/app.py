@@ -2396,9 +2396,24 @@ function renderInvestmentStyleStrip(model) {
   const style=(model||{}).style_context || {};
   if(style.status!=='observed')return '';
   const events=style.dated_market_events || [];
-  const label=style.style_regime==='dividend_leading'?'红利资产相对走强':
+  const redObserved=(style.dividend_index_return_pct===null ||
+    style.dividend_index_return_pct===undefined)?null:Number(style.dividend_index_return_pct);
+  const growthObserved=(style.growth_index_mean_return_pct===null ||
+    style.growth_index_mean_return_pct===undefined)?null:Number(style.growth_index_mean_return_pct);
+  let label=style.style_regime==='dividend_leading'?'红利资产相对走强':
     style.style_regime==='growth_leading'?'成长资产相对走强':
     style.style_regime==='mixed'?'风格相对收益不明显':'指数数据不足，关注最新市场事件';
+  if(Number.isFinite(redObserved) && Number.isFinite(growthObserved) &&
+     style.style_regime==='dividend_leading') {
+    if(redObserved<.5 && growthObserved<-2)
+      label='科技成长回撤，红利相对抗跌';
+    else if(redObserved<0 && growthObserved<redObserved)
+      label='市场普跌，红利跌幅相对较小';
+    else if(redObserved>0 && growthObserved>0)
+      label='红利与成长同涨，红利涨幅更大';
+    else if(redObserved>=.5 && growthObserved<0)
+      label='红利上涨，科技成长回撤';
+  }
   let html='<div class="style-insight"><h4>当前市场在交易什么？</h4><p><b>'+
     escapeHtml(label)+'</b>';
   if(style.dividend_minus_growth_ytd_pp!==null &&
@@ -2424,6 +2439,10 @@ function renderInvestmentStyleStrip(model) {
         escapeHtml(name)+'</span><strong class="style-return-value '+tone(value)+'">'+
         fmtPct(value)+'</strong></div>'
       ).join('')+'</div>';
+    if(Math.abs(red)<0.5 && growth< -2) {
+      html+='<p class="style-performance-reading"><b>先看现象：</b>这段相对领先主要来自科技成长的明显回撤，'+
+        '红利指数本身接近持平；相对抗跌不等于已经证实资金持续净流入红利。</p>';
+    }
     const spread=Number(style.dividend_minus_growth_ytd_pp);
     if(style.dividend_minus_growth_ytd_pp!==null &&
        style.dividend_minus_growth_ytd_pp!==undefined && Number.isFinite(spread) &&
