@@ -508,12 +508,19 @@ async def call_text(prompt: str, max_tokens: int = 2048) -> Optional[str]:
     # Transport failure already logged. Let the next scheduled batch retry.
     if raw_text is None and reason is None:
         return None
+    effective = _effective_max_tokens(max_tokens)
+    if reason == "max_tokens" and effective >= _DEEPSEEK_ABSOLUTE_MAX_TOKENS and _is_deepseek_endpoint():
+        utils.logger.warning(
+            "[llm_client.call_text] 已达到DeepSeek 384K最大输出预算，"
+            "不再重复发起无法增加预算的截断请求"
+        )
+        return None
     retry_limit = min(65536, max(16384, max_tokens * 2))
     utils.logger.warning(
         "[llm_client.call_text] empty/truncated final answer "
         "(stop_reason=%s, text_chars=%d, max_tokens=%d); "
         "retrying once at max_tokens=%d",
-        reason, len(raw_text or ""), max_tokens, retry_limit,
+        reason, len(raw_text or ""), effective, _effective_max_tokens(retry_limit),
     )
     retried, retry_reason = await attempt(retry_limit)
     if retried and retry_reason != "max_tokens":
