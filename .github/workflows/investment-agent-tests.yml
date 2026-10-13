@@ -168,6 +168,7 @@ jobs:
             tests/test_investor_reference_style.py \
             tests/test_investor_return_decomposition.py \
             tests/test_roe_discount_valuation.py \
+            tests/test_research_desk_theme.py \
             tests/test_company_valuation_knowledge.py \
             tests/test_public_report_privacy.py \
             tests/test_issuer_business.py \
