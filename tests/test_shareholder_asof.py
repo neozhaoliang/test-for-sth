@@ -262,3 +262,21 @@ def test_live_holder_reconciliation_keeps_older_dated_history_in_price_compariso
     # Dated detail record takes priority over undated F10 for same period.
     assert out["series"][1]["holders"] == 100000
     assert out["series"][1]["published_at"] == "2026-07-20"
+
+
+
+@pytest.mark.asyncio
+async def test_missing_provider_ratio_still_uses_two_actual_reported_counts(monkeypatch):
+    historical = pd.DataFrame({
+        "股东户数统计截止日": [date(2026, 3, 31), date(2026, 6, 30)],
+        "股东户数公告日期": [date(2026, 4, 25), date(2026, 7, 22)],
+        "股东户数-本次": [100000, 125000],
+        "股东户数-增减比例": [float("nan"), float("nan")],
+    })
+    monkeypatch.setattr(shareholder.ak, "stock_zh_a_gdhs_detail_em",
+                        lambda symbol: historical.copy())
+    result = await shareholder.get_shareholder_count_trend("SH600938")
+    assert result["latest_count"] == 125000
+    assert result["change_pct"] == 25.0
+    assert result["trend"] == "increasing"
+    assert len(result["series"]) == 2
