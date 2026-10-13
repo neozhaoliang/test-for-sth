@@ -34,7 +34,7 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
@@ -43,6 +43,7 @@ from analysis.knowledge_base import (
     invalidate_cache as invalidate_knowledge_base_cache,
 )
 from analysis.realtime_price import resolve_stock_code
+from analysis.stock_suggest import search_stocks, warm_stock_catalog
 from analysis.report import generate_report
 from analysis.public_report import public_stock_report
 from analysis.research_context import (
@@ -70,6 +71,7 @@ async def _preload_knowledge_base() -> None:
     # 后台提炼 (含雪球用户发帖来源, 首次要逐条过 LLM, 会持续一段时间);
     # 不阻塞服务启动, 提炼完成的条目逐批进入缓存
     asyncio.create_task(ensure_knowledge_base_loaded())
+    asyncio.create_task(warm_stock_catalog())
 
 
 class AnalyzeRequest(BaseModel):
@@ -141,6 +143,15 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     }
     asyncio.create_task(_run_analysis(task_id, stock_code, research_request))
     return AnalyzeResponse(task_id=task_id)
+
+
+@app.get("/api/stocks/suggest")
+async def suggest_stocks(
+    q: str = Query(default="", max_length=80),
+    limit: int = Query(default=8, ge=1, le=15),
+) -> Dict:
+    """Autocomplete listed A-share names/codes; bounded, public-only response."""
+    return await search_stocks(q, limit)
 
 
 @app.get("/api/research/time-capabilities")
@@ -457,6 +468,13 @@ async def research_desk_stylesheet() -> Response:
     return Response(css, media_type="text/css", headers={"Cache-Control": "no-cache"})
 
 
+@app.get("/assets/stock_autocomplete.js")
+async def stock_autocomplete_javascript() -> Response:
+    """Lightweight local autocomplete, no external search or CDN dependencies."""
+    source = Path(__file__).with_name("stock_autocomplete.js").read_text(encoding="utf-8")
+    return Response(source, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+
+
 _INDEX_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -676,7 +694,14 @@ _INDEX_HTML = """<!DOCTYPE html>
 <section class="control-deck" aria-label="股票研究入口">
   <div class="deck-heading"><h2>开始研究</h2><p>输入证券代码或简称，生成完整研究报告</p></div>
 <div class="search-bar">
-  <input id="stockCode" aria-label="股票代码或名称" autocomplete="off" placeholder="股票代码或名称，如 SH603408 / 洛阳钼业" />
+  <div class="stock-search-field">
+    <input id="stockCode" aria-label="股票代码或名称" role="combobox"
+      aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"
+      aria-controls="stockSuggestions" autocomplete="off"
+      placeholder="输入股票名称或代码，如 中国海油 / 600938" />
+    <div id="stockSuggestions" class="stock-suggestions"
+      role="listbox" aria-label="股票匹配结果" hidden></div>
+  </div>
   <button id="submitBtn">分析</button>
 </div>
 <div class="research-options">
@@ -2879,6 +2904,7 @@ document.getElementById('copyLogBtn').addEventListener('click', async () => {
 });
 </script>
 <script src="/assets/roe_discount.js"></script>
+<script src="/assets/stock_autocomplete.js"></script>
 </body>
 </html>
 """
