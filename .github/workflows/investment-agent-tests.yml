@@ -196,6 +196,7 @@ jobs:
             tests/test_fundamentals_consistency.py \
             tests/test_601919_consistency.py \
             tests/test_management_capital.py \
+            tests/test_succession_risk.py \
             tests/test_macro_rates.py \
             tests/test_commodity_cycle.py \
             tests/test_a_share_structure.py \
