@@ -37,7 +37,8 @@ body {
   text-rendering:optimizeLegibility;
 }
 body, input, select, textarea, button { font-family:inherit; }
-.app-shell { width:min(100% - 56px,1380px); margin-inline:auto; padding:27px 0 52px; }
+/* WeChat Official Account-style reading column: one centered page, not a dashboard stretched across the monitor. */
+.app-shell { width:min(calc(100% - 48px),840px); max-width:840px; margin-inline:auto; padding:27px 0 52px; }
 .app-shell > * { min-width:0; }
 .app-shell :is(h1,h2,h3,h4) { line-height:1.4; letter-spacing:-.018em; }
 .app-shell :is(input,button,select,textarea) { font-size:14px; }
@@ -356,13 +357,27 @@ body, input, select, textarea, button { font-family:inherit; }
 .crawl-section pre { padding:15px 17px;border-radius:11px;line-height:1.65; }
 .disclaimer { margin:24px 0 0;padding:13px 0 0;border-top:1px solid #dce5f1;font-size:11px;text-align:center; }
 
+/* Article-width composition, including on desktop monitors.
+   Wide dashboard grids become readable vertical sections inside the column. */
+.hero-aside { display:none; }
+.app-shell > header.hero-header { min-height:0; }
+#result .metric-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
+#result .chart-grid { grid-template-columns:minmax(0,1fr); }
+#result .lab-layout { grid-template-columns:minmax(0,1fr); }
+#result .lab-result { position:static; }
+#result .investor-band-table { width:100%; }
+#result .investor-reference { max-width:100%; }
+#result :is(.analysis-prose,.verdict-summary,.evidence-block) {
+  line-height:1.9;
+}
+
 /* Text should reflow rather than forcing a horizontal page scroll. */
 .app-shell :is(.research-options,.result-summary,.valuation-lab,.evidence-section,.crawl-section) { min-width:0; }
 .app-shell :is(p,pre) { overflow-wrap:anywhere; }
 #result .investor-band-table th { white-space:normal; }
 
 @media(max-width:1100px) {
-  .app-shell { width:min(100% - 40px,1380px); }
+  .app-shell { width:min(calc(100% - 36px),840px); }
   .hero-aside { flex-basis:205px; }
   #result .metric-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
   #result .lab-layout { grid-template-columns:minmax(0,1fr); }
