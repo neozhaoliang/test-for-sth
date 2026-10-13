@@ -170,3 +170,88 @@ def test_only_exact_deepseek_host_enables_provider_specific_request(monkeypatch)
     assert llm._is_deepseek_endpoint()
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com.attacker.invalid")
     assert not llm._is_deepseek_endpoint()
+
+
+def test_deepseek_initial_token_budget_uses_published_384k_max(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic")
+    monkeypatch.delenv("BACKTEST_LLM_MAX_TOKENS", raising=False)
+    assert llm._effective_max_tokens(1024) == 393216
+    assert llm._effective_max_tokens(2048) == 393216
+    assert llm._effective_max_tokens(16384) == 393216
+
+
+def test_deepseek_env_override_and_hard_cap(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic")
+    monkeypatch.setenv("BACKTEST_LLM_MAX_TOKENS", "65536")
+    assert llm._effective_max_tokens(1024) == 65536
+    assert llm._effective_max_tokens(131072) == 131072
+    monkeypatch.setenv("BACKTEST_LLM_MAX_TOKENS", "999999")
+    assert llm._effective_max_tokens(2048) == 393216
+    monkeypatch.setenv("BACKTEST_LLM_MAX_TOKENS", "broken")
+    assert llm._effective_max_tokens(1024) == 393216
+
+
+def test_native_anthropic_token_budget_is_unchanged(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+    monkeypatch.setenv("BACKTEST_LLM_MAX_TOKENS", "393216")
+    assert llm._effective_max_tokens(1024) == 1024
+    assert llm._effective_max_tokens(8192) == 8192
+
+
+@pytest.mark.asyncio
+async def test_deepseek_json_first_attempt_uses_max_tokens_with_no_redundant_retry(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic")
+    monkeypatch.delenv("BACKTEST_LLM_MAX_TOKENS", raising=False)
+    calls = []
+
+    async def fake_response(prompt, max_tokens):
+        calls.append(max_tokens)
+        return '{"valid": true}', "end_turn"
+
+    monkeypatch.setattr(llm, "_call_llm_raw_ex", fake_response)
+    result, reason = await llm.call_json_ex("return a JSON object", max_tokens=1024)
+    assert result == {"valid": True}
+    assert reason == "end_turn"
+    assert calls == [393216]
+
+
+@pytest.mark.asyncio
+async def test_at_deepseek_max_truncated_json_is_not_retried_at_lower_budget(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic")
+    monkeypatch.delenv("BACKTEST_LLM_MAX_TOKENS", raising=False)
+    calls = []
+
+    async def fake_response(prompt, max_tokens):
+        calls.append(max_tokens)
+        return "", "max_tokens"
+
+    monkeypatch.setattr(llm, "_call_llm_raw_ex", fake_response)
+    parsed, reason = await llm.call_json_ex("return JSON", max_tokens=1024)
+    assert parsed is None
+    assert reason == "max_tokens"
+    assert calls == [393216]
+
+
+@pytest.mark.asyncio
+async def test_tool_messages_use_deepseek_max_budget(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic")
+    monkeypatch.delenv("BACKTEST_LLM_MAX_TOKENS", raising=False)
+    seen = []
+
+    class FakeStream:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def get_final_message(self):
+            return SimpleNamespace(content=[], stop_reason="end_turn")
+    class FakeMessages:
+        def stream(self, **kwargs):
+            seen.append(kwargs)
+            return FakeStream()
+
+    monkeypatch.setattr(llm, "_get_client", lambda: SimpleNamespace(messages=FakeMessages()))
+    await llm.call_analysis_with_tools(
+        "summary", tools=[], required_tool_names=[], submit_tool_name="submit",
+        max_rounds=1, max_tokens=16384)
+    assert seen[0]["max_tokens"] == 393216
