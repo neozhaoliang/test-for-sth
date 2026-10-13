@@ -158,3 +158,56 @@ async def test_old_empty_cache_is_reprocessed_after_model_budget_fix(monkeypatch
     result = await knowledge_base._distill_missing([raw], old)
     assert result["test:lost"]["distilled"] == "【机制】用现金流验证净利润。"
     assert len(appended) == 1
+
+
+@pytest.mark.asyncio
+async def test_explicit_no_investment_marker_is_negative_cached(monkeypatch):
+    raw = {
+        "source": "bili", "entry_id": "offtopic", "title": "生活趣事",
+        "content": "这是一段不涉及投资的旅行记录",
+        "timestamp": _ts(2026, 10, 13),
+    }
+    saved = []
+    processed = []
+
+    async def no_knowledge(item):
+        processed.append(item["entry_id"])
+        return knowledge_base._NO_KNOWLEDGE_MARKER
+
+    monkeypatch.setattr(knowledge_base, "_distill_one", no_knowledge)
+    monkeypatch.setattr(knowledge_base, "_append_distill_cache", saved.append)
+    cache = await knowledge_base._distill_missing([raw], {})
+    assert len(saved) == 1
+    assert cache["bili:offtopic"]["distilled"] == ""
+    assert cache["bili:offtopic"]["skipped_no_relevant_knowledge"] is True
+    cache = await knowledge_base._distill_missing([raw], cache)
+    assert processed == ["offtopic"]
+
+
+@pytest.mark.asyncio
+async def test_distill_request_uses_16k_default_and_explicit_none_marker(monkeypatch):
+    import backtest.llm_client as llm
+
+    calls = []
+    async def fake(prompt, max_tokens):
+        calls.append((prompt, max_tokens))
+        return knowledge_base._NO_KNOWLEDGE_MARKER
+
+    monkeypatch.setattr(llm, "call_text", fake)
+    monkeypatch.delenv("BACKTEST_DISTILL_MAX_TOKENS", raising=False)
+    out = await knowledge_base._distill_one({
+        "entry_id": "no", "title": "旅游",
+        "content": "今天的天气十分晴朗",
+    })
+    assert out == knowledge_base._NO_KNOWLEDGE_MARKER
+    assert calls[0][1] == 16384
+    assert knowledge_base._NO_KNOWLEDGE_MARKER in calls[0][0]
+
+
+def test_distill_token_override_is_bounded(monkeypatch):
+    monkeypatch.setenv("BACKTEST_DISTILL_MAX_TOKENS", "32768")
+    assert knowledge_base._distill_max_tokens() == 32768
+    monkeypatch.setenv("BACKTEST_DISTILL_MAX_TOKENS", "not-a-number")
+    assert knowledge_base._distill_max_tokens() == 16384
+    monkeypatch.setenv("BACKTEST_DISTILL_MAX_TOKENS", "999999")
+    assert knowledge_base._distill_max_tokens() == 65536
