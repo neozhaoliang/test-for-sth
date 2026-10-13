@@ -283,22 +283,41 @@ async def get_shareholder_count_trend(
             ]
             if not history:
                 return None
-            row = rows.iloc[-1]
-            change_pct = row.get("股东户数-增减比例")
-            if change_pct is not None and change_pct == change_pct:
-                disclosure_date = _coerce_date(row.get("股东户数公告日期"))
-                period_date = _coerce_date(row.get("股东户数统计截止日"))
-                return {
-                    "latest_count": int(row["股东户数-本次"]),
-                    "change_pct": float(change_pct),
-                    "trend": "increasing" if float(change_pct) > 0 else "decreasing",
-                    "as_of": period_date.isoformat() if period_date else str(row.get("股东户数统计截止日") or ""),
-                    "period": period_date.isoformat() if period_date else None,
-                    "published_at": disclosure_date.isoformat() if disclosure_date else None,
-                    "available_at": disclosure_date.isoformat() if disclosure_date else None,
-                    "source_mode": "detail_history",
-                    "series": history,
-                }
+            latest = history[0]
+            # Some AKShare versions omit the change-ratio field although the
+            # historical headcounts remain perfectly usable. Compute from
+            # consecutive *distinct* disclosed periods instead of discarding.
+            change_pct = None
+            latest_rows = rows[
+                rows["股东户数统计截止日"].apply(
+                    lambda x: _coerce_date(x) == _coerce_date(latest["period"])
+                )
+            ]
+            if not latest_rows.empty:
+                raw_pct = latest_rows.iloc[-1].get("股东户数-增减比例")
+                try:
+                    parsed = float(raw_pct)
+                    if __import__("math").isfinite(parsed):
+                        change_pct = round(parsed, 3)
+                except (ValueError, TypeError):
+                    pass
+            if change_pct is None and len(history) >= 2 and history[1]["holders"]:
+                change_pct = round(
+                    (latest["holders"] / history[1]["holders"] - 1) * 100, 3
+                )
+            return {
+                "latest_count": latest["holders"],
+                "change_pct": change_pct,
+                "trend": ("increasing" if change_pct is not None and change_pct > 0
+                          else "decreasing" if change_pct is not None and change_pct < 0
+                          else "stable" if change_pct == 0 else "unknown"),
+                "as_of": latest["period"],
+                "period": latest["period"],
+                "published_at": latest["published_at"],
+                "available_at": latest["available_at"],
+                "source_mode": "detail_history",
+                "series": history,
+            }
 
     if as_of is not None:
         # Historical mode must fail closed.  Today's latest snapshot would leak future info.
