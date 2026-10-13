@@ -2082,7 +2082,7 @@ function renderIndustryBreadthChart(industry) {
 function renderChipPositionChart(context) {
   if(!context) return '';
   const aligned=(Array.isArray(context.price_holder_series)?context.price_holder_series:[])
-    .filter(p=>p && /^\\d{4}-\\d{2}-\\d{2}$/.test(String(p.period||'')) &&
+    .filter(p=>p && /^\d{4}-\d{2}-\d{2}$/.test(String(p.period||'')) &&
       numericOrNull(p.holders)>0 && numericOrNull(p.price)>0)
     .sort((a,b)=>String(a.period).localeCompare(String(b.period)));
   if(aligned.length>=2){
