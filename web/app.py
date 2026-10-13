@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from analysis.knowledge_base import (
@@ -441,6 +441,13 @@ async def crawled_users() -> List[Dict]:
 @app.get("/", response_class=HTMLResponse)
 async def index() -> str:
     return _INDEX_HTML
+
+
+@app.get("/assets/roe_discount.js")
+async def roe_discount_javascript() -> Response:
+    """Serve the standalone, versioned-by-repo interactive pricing engine."""
+    source = Path(__file__).with_name("roe_discount.js").read_text(encoding="utf-8")
+    return Response(source, media_type="application/javascript")
 
 
 _INDEX_HTML = """<!DOCTYPE html>
@@ -2447,6 +2454,7 @@ function renderIndustryValuationLab(report) {
       '<div id="sector-sensitivity"></div></div></div>';
   }
   if(calc.status==='calculated')html+=renderInvestorReference(model);
+  if(typeof renderRoeDiscountLab==='function')html+=renderRoeDiscountLab(model);
   const independent=model.cross_checks || [];
   if(independent.some(x=>x.status==='calculated')) {
     html+='<div class="evidence-block" style="margin-top:16px;"><b>独立模型交叉检验</b><ul>'+
@@ -2644,6 +2652,7 @@ function renderResult(report) {
 
   el.innerHTML = html;
   activateIndustryValuationLab(report);
+  if(typeof activateRoeDiscountLab==='function')activateRoeDiscountLab(report.valuation_model);
   attachRadarTooltips();
 }
 
@@ -2796,6 +2805,7 @@ document.getElementById('copyLogBtn').addEventListener('click', async () => {
   setTimeout(() => { btn.textContent = '复制全部日志'; }, 1500);
 });
 </script>
+<script src="/assets/roe_discount.js"></script>
 </body>
 </html>
 """

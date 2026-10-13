@@ -317,6 +317,7 @@ def industry_model_prompt_block(model: dict) -> str:
         f"历史PB中枢={reference.get('historical_pb_anchor')}；"
         f"跨周期ROE/盈利收益率={reference.get('normalized_earnings')}；"
         f"本公司历史EPS×历史PE敏感性（不是目标价）={reference.get('earnings_power')}；"
+        f"经营数据独立ROE-增长-贴现率估值实验室（不得用股价拟合、折现率为用户输入）={reference.get('roe_discount_lab')}；"
         f"明确的假设={reference.get('key_assumptions')}。"
     )
     lines.append(style_investment_prompt_block(model.get("style_context")))
