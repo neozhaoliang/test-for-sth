@@ -9,7 +9,7 @@ vm.runInContext(src,ctx,{timeout:5000});
 
 const priced=ctx.roeDiscountCompute(10,20,5,10);
 assert.ok(priced);
-assert.equal(priced.steady,30);
+assert.ok(Math.abs(priced.steady-30)<1e-9);
 assert.equal(priced.payoutPct,75);
 assert.ok(priced.finite>10&&priced.finite<30);
 assert.equal(ctx.roeDiscountCompute(10,15,10,10),null);
@@ -27,7 +27,6 @@ const model={investor_reference:{roe_discount_lab:{
 const html=ctx.renderRoeDiscountLab(model);
 for(const id of ['roe-roe','roe-growth','roe-discount','roe-price','roe-band','roe-reset'])
   assert.ok(html.includes(id),'missing control '+id);
-assert.ok(html.includes('不是根据股价测算') || html.includes('不是根据股价测算')===false);
 assert.ok(html.includes('10%只是演示输入'));
 assert.ok(!html.includes('双木林叔'));
 assert.ok(!html.includes('陈chensir'));
