@@ -65,10 +65,9 @@ def test_no_duplicate_dom_ids_and_structural_html_tags_are_balanced():
     static_html = html.split("<script>", 1)[0]
     parser = _Structure()
     parser.feed(static_html)
-    # The static portion intentionally leaves html/body/main open for JS and
-    # the closing tags after script; validate the HTML around the script too.
+    # The static part closes main before the script; html/body close after it.
     assert parser.errors == []
-    assert parser.stack == ["html", "body", "main"]
+    assert parser.stack == ["html", "body"]
     assert len(parser.ids) == len(set(parser.ids))
 
 
