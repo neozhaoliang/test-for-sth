@@ -115,6 +115,7 @@ def assess_chip_price_context(
         "comparison_holder_change_pct": None,
         "comparison_start": None,
         "comparison_end": None,
+        "co_movement": None,
         "comparison_note": "仅使用已披露的股东户数以及对应报告期之前最近交易日的实际收盘价，不插值、不预测。",
         "position_band": "unknown",
         "holder_change_pct": None,
@@ -139,6 +140,19 @@ def assess_chip_price_context(
                 comparison_price_change_pct=round((last_price / first_price - 1) * 100, 2),
                 comparison_holder_change_pct=round((last_count / first_count - 1) * 100, 2),
             )
+            # Describes co-movement, not identity of trading parties or cause.
+            price_move = last_price / first_price - 1
+            holders_move = last_count / first_count - 1
+            if price_move > .005 and holders_move > .005:
+                result["co_movement"] = "价格与股东户数同时增加；高位时需结合换手及机构持仓核验是否存在筹码分散。"
+            elif price_move > .005 and holders_move < -.005:
+                result["co_movement"] = "价格上涨而股东户数减少；账户集中度提高，但不能据此断定机构吸筹。"
+            elif price_move < -.005 and holders_move > .005:
+                result["co_movement"] = "价格回撤而股东户数增加；可能存在账户分散，但不能确认谁在接盘。"
+            elif price_move < -.005 and holders_move < -.005:
+                result["co_movement"] = "价格与股东户数同时减少；不能据此判断风险已经出清。"
+            else:
+                result["co_movement"] = "价格或股东户数在比较区间内变化较小，趋势不明显。"
     if (low is None or high is None or current is None or not (0 < low < high)
             or latest is None or not low <= current <= high
             or (cutoff is not None and latest > cutoff)):
@@ -198,6 +212,12 @@ def render_chip_price_context(result: Optional[Dict]) -> str:
         f"配对区间={result.get('comparison_start')}至{result.get('comparison_end')}；"
         f"区间价格变化={result.get('comparison_price_change_pct')}%；"
         f"区间户数变化={result.get('comparison_holder_change_pct')}%。\n"
+        f"价量与户数同步性解释={result.get('co_movement') or '暂无足够配对数据'}。\n"
+        + "\n".join(
+            f"  {p.get('period')}: 户数={p.get('holders')}，"
+            f"收盘价={p.get('price')}元(交易日{p.get('price_date')})"
+            for p in (result.get('price_holder_series') or [])
+        ) + "\n"
         "配对价格是股东统计期末之前最近交易日收盘价（与真实股东披露时点不同），"
         "只陈述历史同步性，不推断机构买卖。\n"
         "注意：低位散户人数多不单独扣分；高位户数增加才触发谨慎核验，"
