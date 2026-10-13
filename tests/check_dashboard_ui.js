@@ -56,6 +56,27 @@ assert.ok(ctx.renderChipPositionChart({
     holder_change_pct:20,holder_period:'2026-09-30',
     holder_context:'high_price_more_holders_watch',
   }).includes('高位分散：待核验'));
+const aligned=ctx.renderChipPositionChart({
+  status:'contextualized',
+  position_52w_pct:40,
+  price_holder_series:[
+    {period:'2026-06-30',price_date:'2026-06-30',holders:100000,price:10},
+    {period:'2026-09-30',price_date:'2026-09-29',holders:120000,price:12},
+  ],
+});
+assert.ok(aligned.includes('区间股价变化'));
+assert.ok(aligned.includes('+20.00%'));
+assert.ok(aligned.includes('区间股东户数变化'));
+assert.ok(aligned.includes('2026-09-29'));
+assert.ok(aligned.includes('股东户数与同期股价走势'));
+assert.ok(aligned.includes('实际收盘价'));
+assert.ok(aligned.includes('<table>'));
+assert.ok(!aligned.includes('52周低位'));  // genuine history replaces gauge
+const insufficientHistory=ctx.renderChipPositionChart({
+  status:'insufficient_data',price_holder_series:[],
+});
+assert.ok(insufficientHistory.includes('尚未取得至少两个'));
+
 const dividends=ctx.renderDividendChart([{year:'2025',dividend_per_10:4,
   buyback_per_10:1,total_per_10:5,yield_pct:4}]);
 assert.ok(dividends.includes('回购不是现金分红'));
