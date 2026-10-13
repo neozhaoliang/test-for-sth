@@ -1027,7 +1027,9 @@ function renderFundamentalsBlock(f) {
       '<div class="credibility-note">应收或存货增速长期显著高于营收时，需要进一步解释回款质量、渠道压货或库存积压；单一期不能独立定性。</div></div>';
   }
 
-  const series = x.holder_count_series || [];
+  const series = (x.holder_count_series || []).filter(p=>
+    p && numericOrNull(p.holders)>0 && numericOrNull(p.price)>0)
+    .sort((a,b)=>String(a.period).localeCompare(String(b.period)));
   if (series.length >= 2) {
     html += '<div style="margin-top:6px"><b>股东户数 vs 同期股价 (判断股价暴涨是否伴随筹码派发):</b><br>' +
       renderHolderChart(series.slice(0, 8)) + '</div>';
@@ -1782,16 +1784,13 @@ function renderHolderChart(series) {
     '<circle cx="' + (padL + 168) + '" cy="16" r="4.5" fill="#d97706"/>' +
     '<text x="' + (padL + 180) + '" y="20">股价 (首期=100)</text></g>';
 
-  const table = '<table style="border-collapse:collapse;font-size:12px;margin-top:6px;"><tr>' +
-    '<td style="padding:2px 6px;color:#666;">期间</td>' +
-    series.map(p => '<td style="padding:2px 8px;border-left:1px solid #eee;color:#666;text-align:center;">' +
-      escapeHtml(String(p.period).slice(0, 10)) + '</td>').join('') + '</tr><tr>' +
-    '<td style="padding:2px 6px;color:#666;">股东户数</td>' +
-    series.map(p => '<td style="padding:2px 8px;border-left:1px solid #eee;text-align:center;">' +
-      p.holders + '</td>').join('') + '</tr><tr>' +
-    '<td style="padding:2px 6px;color:#666;">股价(元)</td>' +
-    series.map(p => '<td style="padding:2px 8px;border-left:1px solid #eee;text-align:center;">' +
-      p.price + '</td>').join('') + '</tr></table>';
+  const table = '<div class="chip-holder-table"><table><thead><tr><th>统计截止日</th>'+
+    '<th>股东户数</th><th>收盘价（元）</th><th>价格日期</th></tr></thead><tbody>'+
+    series.map(p=>'<tr><td>'+escapeHtml(String(p.period).slice(0,10))+
+      '</td><td>'+Number(p.holders).toLocaleString('zh-CN')+'</td><td>'+
+      Number(p.price).toFixed(2)+'</td><td>'+
+      escapeHtml(String(p.price_date||p.period).slice(0,10))+
+      '</td></tr>').join('')+'</tbody></table></div>';
 
   return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" style="max-width:100%;"' +
     ' role="img" aria-label="股东户数与同期股价走势 (首期=100 指数化)">' +
@@ -2081,7 +2080,30 @@ function renderIndustryBreadthChart(industry) {
 }
 
 function renderChipPositionChart(context) {
-  if(!context || numericOrNull(context.position_52w_pct)===null) return '';
+  if(!context) return '';
+  const aligned=(Array.isArray(context.price_holder_series)?context.price_holder_series:[])
+    .filter(p=>p && /^\\d{4}-\\d{2}-\\d{2}$/.test(String(p.period||'')) &&
+      numericOrNull(p.holders)>0 && numericOrNull(p.price)>0)
+    .sort((a,b)=>String(a.period).localeCompare(String(b.period)));
+  if(aligned.length>=2){
+    const first=aligned[0],last=aligned[aligned.length-1];
+    const changePct=(v1,v2)=>((Number(v2)/Number(v1)-1)*100);
+    const hp=changePct(first.holders,last.holders);
+    const pp=changePct(first.price,last.price);
+    const signed=v=>(v>0?'+':'')+v.toFixed(2)+'%';
+    return '<div class="chip-history-summary">'+
+      '<div><span>区间股价变化</span><strong>'+signed(pp)+'</strong></div>'+
+      '<div><span>区间股东户数变化</span><strong>'+signed(hp)+'</strong></div></div>'+
+      '<p class="section-caption">已披露股东户数与对应统计截止日之前最近交易日的实际收盘价，'+
+      '区间 '+escapeHtml(first.period)+'—'+escapeHtml(last.period)+
+      '；按首期=100指数化，仅展示真实配对日期，不插值、不将股东户数当作散户精确人数。</p>'+
+      renderHolderChart(aligned)+
+      '<p class="section-caption">仅凭股东户数变化无法证明机构派发或吸筹。'+
+      '价格是未经复权的日收盘价，跨分红、送转、拆股需另作复权比较。</p>';
+  }
+  if(numericOrNull(context.position_52w_pct)===null)
+    return '<p class="section-caption">尚未取得至少两个有披露依据的股东统计期与同期实际收盘价配对；'+
+      '不能凭空画出股东人数或股价趋势。</p>';
   const p=Math.max(0,Math.min(100,Number(context.position_52w_pct)));
   const change=numericOrNull(context.holder_change_pct);
   const status=context.status === 'contextualized';
@@ -2132,7 +2154,7 @@ function renderDashboardCharts(report) {
     renderSentimentMixChart(report.sentiment));
   html+=chartTile('行业上涨与下跌家数','同一交易时点的行业广度，不能独立当作投资结论',
     renderIndustryBreadthChart(report.industry_comparison));
-  html+=chartTile('股价位置 × 筹码分散','先看52周位置，再看股东户数增减；低位散户多不单独扣分',
+  html+=chartTile('股价位置 × 筹码分散','真实历史收盘价与已披露股东户数按截止日对齐；需区分户数变化、股价变化与机构买卖',
     renderChipPositionChart(report.chip_price_context));
   html+=chartTile('历史估值区间','PE(TTM)历史序列，失真区间将按原图分位裁剪',
     renderValuationHistoryChart((report.valuation_history || {}).history_monthly || []));
