@@ -672,3 +672,53 @@ body, input, select, textarea, button { font-family:inherit; }
 @media(max-width:530px) {
   .style-insight .style-why { padding:14px 15px; }
 }
+
+
+/* Stock-price versus published shareholder counts: genuine dated observations. */
+#result .chip-history-summary {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+  margin:5px 0 13px;
+}
+#result .chip-history-summary > div {
+  min-width:0;
+  padding:12px 15px;
+  background:#f4f7fc;
+  border:1px solid #e0e8f3;
+  border-radius:11px;
+}
+#result .chip-history-summary span {
+  display:block;
+  margin-bottom:4px;
+  font-size:12px;
+  color:#687992;
+}
+#result .chip-history-summary strong {
+  font-size:20px;
+  color:#243d66;
+  font-variant-numeric:tabular-nums;
+}
+#result .chip-holder-table {
+  overflow-x:auto;
+  max-width:100%;
+  margin-top:14px;
+  border:1px solid #e2eaf4;
+  border-radius:11px;
+}
+#result .chip-holder-table table {
+  min-width:430px;
+  margin:0;
+}
+#result .chip-holder-table :is(td,th) {
+  padding:9px 12px;
+  text-align:right;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+#result .chip-holder-table :is(td,th):first-child { text-align:left; }
+@media(max-width:480px) {
+  #result .chip-history-summary { gap:7px; }
+  #result .chip-history-summary > div { padding:11px; }
+  #result .chip-history-summary strong { font-size:17px; }
+}
