@@ -41,6 +41,9 @@ if _ROOT_ENV_PATH.exists():
 _MODEL = os.environ.get("BACKTEST_LLM_MODEL", "claude-sonnet-5")
 
 _RETRY_MAX_TOKENS = 24576
+# DeepSeek Flash / V4.1 published max output (thinking + final text).
+# Applies ONLY to api.deepseek.com, never to native Anthropic.
+_DEEPSEEK_ABSOLUTE_MAX_TOKENS = 393216
 
 _client: Optional[AsyncAnthropic] = None
 
@@ -76,6 +79,22 @@ def _is_deepseek_endpoint() -> bool:
         return False
 
 
+def _effective_max_tokens(requested: int) -> int:
+    """Expand DeepSeek generation budget up to its documented 384K ceiling.
+
+    On DeepSeek the env value is a minimum request budget. Non-DeepSeek
+    providers keep their explicitly requested values unchanged.
+    """
+    if not _is_deepseek_endpoint():
+        return requested
+    try:
+        configured = int(os.getenv("BACKTEST_LLM_MAX_TOKENS", "393216"))
+    except ValueError:
+        configured = _DEEPSEEK_ABSOLUTE_MAX_TOKENS
+    configured = max(1, min(_DEEPSEEK_ABSOLUTE_MAX_TOKENS, configured))
+    return min(_DEEPSEEK_ABSOLUTE_MAX_TOKENS, max(requested, configured))
+
+
 async def _call_llm_raw_ex(
     prompt: str, max_tokens: int, *, disable_thinking: bool = False,
 ) -> tuple:
@@ -88,6 +107,7 @@ async def _call_llm_raw_ex(
     注意只取 text 块——推理模型的响应里还有 thinking 块，它不是答案。
     """
     client = _get_client()
+    max_tokens = _effective_max_tokens(max_tokens)
     request = {
         "model": _MODEL,
         "max_tokens": max_tokens,
@@ -298,6 +318,7 @@ async def call_json_ex(
     repair_requirements 可传入对输出 schema 的要求 (如必含字段与取值枚举)，会附在
     修复提示里，避免模型"修复"出一个格式合法但字段缺失的结果。
     """
+    max_tokens = _effective_max_tokens(max_tokens)
     raw_text, stop_reason = await _call_llm_raw_ex(prompt, max_tokens)
     if raw_text is None:
         return None, stop_reason
@@ -314,11 +335,19 @@ async def call_json_ex(
         return parsed, stop_reason
 
     if stop_reason == "max_tokens":
+        retry_limit = max(max_tokens, _RETRY_MAX_TOKENS)
+        if retry_limit <= max_tokens:
+            utils.logger.warning(
+                "[llm_client.call_json_ex] 输出仍被截断，但已使用最高可用预算 "
+                "(max_tokens=%d)；停止相同提示词重试，避免重复计费",
+                max_tokens,
+            )
+            return None, stop_reason
         utils.logger.warning(
             f"[llm_client.call_json_ex] 输出被 max_tokens={max_tokens} 截断 "
-            f"(len={len(raw_text)})，用 {_RETRY_MAX_TOKENS} 重试一次"
+            f"(len={len(raw_text)})，用 {retry_limit} 重试一次"
         )
-        raw_text, stop_reason = await _call_llm_raw_ex(prompt, _RETRY_MAX_TOKENS)
+        raw_text, stop_reason = await _call_llm_raw_ex(prompt, retry_limit)
         if _is_model_refusal(raw_text):
             utils.logger.error(
                 f"[llm_client.call_json_ex] 增长预算重试后收到模型拒答 (model={_MODEL})",
@@ -393,6 +422,7 @@ async def call_analysis_with_tools(
     analyses: Dict[str, Any] = {}
     submit_input: Optional[Dict[str, Any]] = None
 
+    max_tokens = _effective_max_tokens(max_tokens)
     for _ in range(max_rounds):
         try:
             async with client.messages.stream(
@@ -478,12 +508,19 @@ async def call_text(prompt: str, max_tokens: int = 2048) -> Optional[str]:
     # Transport failure already logged. Let the next scheduled batch retry.
     if raw_text is None and reason is None:
         return None
+    effective = _effective_max_tokens(max_tokens)
+    if reason == "max_tokens" and effective >= _DEEPSEEK_ABSOLUTE_MAX_TOKENS and _is_deepseek_endpoint():
+        utils.logger.warning(
+            "[llm_client.call_text] 已达到DeepSeek 384K最大输出预算，"
+            "不再重复发起无法增加预算的截断请求"
+        )
+        return None
     retry_limit = min(65536, max(16384, max_tokens * 2))
     utils.logger.warning(
         "[llm_client.call_text] empty/truncated final answer "
         "(stop_reason=%s, text_chars=%d, max_tokens=%d); "
         "retrying once at max_tokens=%d",
-        reason, len(raw_text or ""), max_tokens, retry_limit,
+        reason, len(raw_text or ""), effective, _effective_max_tokens(retry_limit),
     )
     retried, retry_reason = await attempt(retry_limit)
     if retried and retry_reason != "max_tokens":
