@@ -63,7 +63,7 @@ async def test_core_research_refusal_returns_explicit_error_not_empty_report(mon
 async def test_text_distillation_retries_reasoning_only_token_exhaustion(monkeypatch):
     calls = []
 
-    async def fake_response(prompt, max_tokens):
+    async def fake_response(prompt, max_tokens, **kwargs):
         calls.append(max_tokens)
         if len(calls) == 1:
             return "", "max_tokens"  # all tokens consumed by thinking
@@ -79,7 +79,7 @@ async def test_text_distillation_retries_reasoning_only_token_exhaustion(monkeyp
 async def test_text_distillation_does_not_accept_partial_cutoff(monkeypatch):
     calls = []
 
-    async def fake_response(prompt, max_tokens):
+    async def fake_response(prompt, max_tokens, **kwargs):
         calls.append(max_tokens)
         return "只有半句话", "max_tokens"
 
@@ -93,7 +93,7 @@ async def test_text_distillation_does_not_accept_partial_cutoff(monkeypatch):
 async def test_text_distillation_does_not_retry_complete_response(monkeypatch):
     calls = []
 
-    async def fake_response(prompt, max_tokens):
+    async def fake_response(prompt, max_tokens, **kwargs):
         calls.append(max_tokens)
         return "提炼完成", "end_turn"
 
@@ -101,3 +101,72 @@ async def test_text_distillation_does_not_retry_complete_response(monkeypatch):
     result = await llm.call_text("提炼投资观点", max_tokens=8192)
     assert result == "提炼完成"
     assert calls == [8192]
+
+
+@pytest.mark.asyncio
+async def test_end_turn_thinking_only_retries_even_when_output_budget_is_not_exhausted(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic/v1")
+    calls = []
+
+    async def response(prompt, max_tokens, **kwargs):
+        calls.append((max_tokens, kwargs.get("disable_thinking")))
+        if len(calls) == 1:
+            return "", "end_turn"
+        return "【原则】投资必须有财报数据支撑。", "end_turn"
+
+    monkeypatch.setattr(llm, "_call_llm_raw_ex", response)
+    assert await llm.call_text("提炼投资观点", max_tokens=16384) == "【原则】投资必须有财报数据支撑。"
+    assert calls == [(16384, True), (32768, True)]
+
+
+@pytest.mark.asyncio
+async def test_normal_end_turn_empty_twice_yields_no_false_knowledge(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic/v1")
+    calls = []
+
+    async def response(prompt, max_tokens, **kwargs):
+        calls.append(max_tokens)
+        return "", "end_turn"
+
+    monkeypatch.setattr(llm, "_call_llm_raw_ex", response)
+    assert await llm.call_text("提炼投资观点", max_tokens=16384) is None
+    assert calls == [16384, 32768]
+
+
+@pytest.mark.asyncio
+async def test_deepseek_disables_thinking_for_text_extraction_but_not_claude(monkeypatch):
+    from types import SimpleNamespace
+
+    seen = []
+    class FakeStream:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+        async def get_final_message(self):
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="有用观点")],
+                stop_reason="end_turn",
+            )
+    class FakeMessages:
+        def stream(self, **params):
+            seen.append(params)
+            return FakeStream()
+
+    monkeypatch.setattr(llm, "_get_client",
+                        lambda: SimpleNamespace(messages=FakeMessages()))
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic/v1")
+    assert (await llm._call_llm_raw_ex(
+        "test", 16384, disable_thinking=True))[0] == "有用观点"
+    assert seen[-1]["thinking"] == {"type": "disabled"}
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+    assert (await llm._call_llm_raw_ex(
+        "test", 16384, disable_thinking=True))[0] == "有用观点"
+    assert "thinking" not in seen[-1]
+
+
+def test_only_exact_deepseek_host_enables_provider_specific_request(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic")
+    assert llm._is_deepseek_endpoint()
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com.attacker.invalid")
+    assert not llm._is_deepseek_endpoint()
