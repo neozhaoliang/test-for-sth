@@ -17,6 +17,7 @@ from analysis.evidence import ResearchQuality
 from analysis.knowledge_context import build_knowledge_hypotheses, format_knowledge_hypotheses
 from analysis.research_profile import ResearchProfile, profile_prompt_block
 from analysis.report_contract import _PROMPT_TEMPLATE
+from analysis.succession_risk import succession_prompt_block
 from model.m_analysis import CandidateOpinion, KnowledgeExcerpt
 
 
@@ -200,7 +201,7 @@ def _build_rd_block(
 
 def _build_management_capital_block(data: Optional[Dict]) -> str:
     if not data:
-        return "暂缺 (本次未能构建长期资本分配账本)"
+        return "暂缺 (本次未能构建长期资本分配账本)\n" + succession_prompt_block(None)
     lines: List[str] = []
     alignment = data.get("alignment") or {}
     parts = []
@@ -302,6 +303,7 @@ def _build_management_capital_block(data: Optional[Dict]) -> str:
 
     for note in data.get("notes") or []:
         lines.append(f"注: {note}")
+    lines.append(succession_prompt_block(data.get("succession")))
     lines.append(
         "口径说明: 这是一份事实账本，不等同于对个人品德的判断；"
         "管理层可信度只能从长期行为记录、利益绑定和经营兑现中谨慎推断。"
