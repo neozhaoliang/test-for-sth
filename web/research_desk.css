@@ -584,3 +584,57 @@ body, input, select, textarea, button { font-family:inherit; }
   .style-insight .style-return-name { font-size:13px; }
   .style-insight .style-return-value { font-size:18px; }
 }
+
+
+/* Search suggestions remain within the 840px article column, anchored below
+   the input without pushing the analyze button or report down. */
+.stock-search-field { position:relative;min-width:0;width:100%; }
+.stock-search-field #stockCode { width:100%; }
+.stock-suggestions {
+  position:absolute;
+  z-index:40;
+  top:calc(100% + 6px);
+  left:0;
+  right:0;
+  max-height:340px;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  border:1px solid #d5e1f2;
+  border-radius:12px;
+  background:#fff;
+  box-shadow:0 16px 38px rgba(30,53,91,.15);
+  padding:5px;
+}
+.stock-suggestions[hidden] { display:none !important; }
+.app-shell .stock-suggest-option {
+  width:100%;
+  min-height:43px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:9px 13px;
+  border:1px solid transparent;
+  border-radius:9px;
+  background:transparent;
+  color:#233a58;
+  text-align:left;
+  box-shadow:none;
+  cursor:pointer;
+  transition:background .12s,color .12s;
+}
+.app-shell .stock-suggest-option:hover,
+.app-shell .stock-suggest-option.active,
+.app-shell .stock-suggest-option[aria-selected="true"] {
+  background:#eef4ff;
+  border-color:#e0e9f9;
+  color:#244c97;
+  box-shadow:none;
+  transform:none;
+}
+.stock-suggest-name { min-width:0;font-size:13px;font-weight:750;overflow-wrap:anywhere; }
+.stock-suggest-code { flex-shrink:0;font-size:12px;color:#75849b;font-variant-numeric:tabular-nums; }
+.stock-suggest-message { padding:14px 12px;color:#6e7c90;font-size:12px;line-height:1.6; }
+@media(max-width:420px) {
+  .stock-suggestions { max-height:280px; }
+}
