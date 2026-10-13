@@ -37,7 +37,7 @@ async def test_exact_name_substring_code_prefix_and_suffix(monkeypatch):
     assert (await stock_suggest.search_stocks("sh600938"))["items"][0]["code"] == "SH600938"
     assert (await stock_suggest.search_stocks("紫金"))["items"][0]["code"] == "SH601899"
     assert (await stock_suggest.search_stocks("美的"))["items"][0]["code"] == "SZ000333"
-    assert any(item["name"] == "中国海油"\n               for item in (await stock_suggest.search_stocks("中海"))["items"])
+    assert any(item["name"] == "中国海油" for item in (await stock_suggest.search_stocks("中海"))["items"])
     # A full ticker and its corresponding exact name outrank fuzzy subsequences.
     assert (await stock_suggest.search_stocks("中国海洋"))["items"][0]["code"] == "SH600000"
     assert all(item["code"] != "BAD123" for item in exact["items"])
