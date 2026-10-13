@@ -2383,25 +2383,29 @@ function renderInvestmentStyleStrip(model) {
       (style.style_window==='20 trading days'?'近20个交易日':'年内')+'涨跌差'+
       escapeHtml(String(style.dividend_minus_growth_ytd_pp))+'个百分点';
   html+=' <span class="section-caption">'+escapeHtml(style.style_observed_as_of||'')+'</span></p>';
+  // A percentage needs a number, not a bar chart whose long labels overlap
+  // inside the article-width report. These may use source-specific windows;
+  // never silently treat their difference as the separate style-spread index.
   const red=Number(style.dividend_index_return_pct), growth=Number(style.growth_index_mean_return_pct);
   if(style.dividend_index_return_pct!==null && style.dividend_index_return_pct!==undefined &&
      style.growth_index_mean_return_pct!==null && style.growth_index_mean_return_pct!==undefined &&
      Number.isFinite(red) && Number.isFinite(growth)) {
-    const zero=240, span=180;
-    const max=Math.max(5,Math.abs(red),Math.abs(growth));
-    let bars='<svg viewBox="0 0 540 90" width="100%" role="img" aria-label="红利指数与科技成长指数的相对表现">';
-    bars+='<line x1="'+zero+'" y1="8" x2="'+zero+'" y2="70" stroke="#899bb5" stroke-width="1"/>';
-    [[red,21,'上证红利','#d65c67'],[growth,53,'科创50/创业板平均','#607fbd']].forEach(row=>{
-      const [v,y,title,color]=row, w=span*Math.abs(v)/max;
-      const x=v>=0?zero:zero-w;
-      bars+='<text x="2" y="'+(y+10)+'" fill="#53627c" font-size="12">'+title+'</text>';
-      bars+='<rect x="'+x.toFixed(1)+'" y="'+y+'" width="'+w.toFixed(1)+
-        '" height="12" rx="3" fill="'+color+'"/>';
-      bars+='<text x="'+(v>=0?x+w+5:x-5).toFixed(1)+'" y="'+(y+10)+
-        '" text-anchor="'+(v>=0?'start':'end')+'" font-size="11" fill="#334b70">'+
-        (v>0?'+':'')+v.toFixed(2)+'%</text>';
-    });
-    html+=bars+'</svg>';
+    const fmtPct=v=>(v>0?'+':'')+v.toFixed(2)+'%';
+    const tone=v=>v>0?'style-return-up':v<0?'style-return-down':'style-return-flat';
+    const returns=[['上证红利',red],['科创50／创业板平均',growth]];
+    html+='<div class="style-return-list" role="group" aria-label="主要指数涨跌幅">'+
+      returns.map(([name,value])=>
+        '<div class="style-return-row"><span class="style-return-name">'+
+        escapeHtml(name)+'</span><strong class="style-return-value '+tone(value)+'">'+
+        fmtPct(value)+'</strong></div>'
+      ).join('')+'</div>';
+    const spread=Number(style.dividend_minus_growth_ytd_pp);
+    if(style.dividend_minus_growth_ytd_pp!==null &&
+       style.dividend_minus_growth_ytd_pp!==undefined && Number.isFinite(spread) &&
+       Math.abs(spread-(red-growth))>0.11) {
+      html+='<p class="section-caption style-return-note">上方相对涨跌差与两项指数涨跌幅'+
+        '不是相同的比较口径，不能直接把这两个百分数相减得到该涨跌差。</p>';
+    }
   }
   events.slice(0,2).forEach(e=>{
     html+='<p><b>市场事件：</b>'+escapeHtml(e.headline||'')+
@@ -2414,7 +2418,7 @@ function renderInvestmentStyleStrip(model) {
     const pct=Number(style.stock_20d_pct);
     html+='<p><b>本股近20个交易日：</b>'+
       (pct>0?'+':'')+pct.toFixed(2)+'%（'+
-      escapeHtml(style.stock_20d_as_of||'日期不明')+'），可对照上图判断是否已跟随红利风格上涨。</p>';
+      escapeHtml(style.stock_20d_as_of||'日期不明')+'），可与上述市场风格和指数数据比较。</p>';
   }
   html+='<p class="section-caption">市场资金偏好与公司的长期盈利价值是两回事；'
      +'判断个股需同时看价格位置、实际派息、经营利润和指数相对走势。</p></div>';
