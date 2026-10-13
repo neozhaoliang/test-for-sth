@@ -75,3 +75,61 @@ def test_missing_or_invalid_price_range_does_not_assume_bottom(bad_market):
     r = assess_chip_price_context(bad_market, holders(20))
     assert r["status"] == "insufficient_data"
     assert r["holder_context"] == "unknown"
+
+
+
+def test_align_disclosed_holder_counts_to_previous_actual_trading_close():
+    import pandas as pd
+    from analysis.chip_position import align_holder_price_observations
+    # 2026-06-30 trading day; 2026-09-30 trading day. A deliberately
+    # different close on July 1 must never be backfilled into June.
+    prices = pd.DataFrame({
+        "date": ["2026-03-30","2026-06-30","2026-07-01","2026-09-30"],
+        "close": [10.0, 11.0, 15.0, 13.5],
+    })
+    shareholders = {"series":[
+        {"period":"2026-03-31","holders":10000,"available_at":"2026-04-29"},
+        {"period":"2026-06-30","holders":12000,"available_at":"2026-07-20"},
+        {"period":"2026-09-30","holders":16000,"available_at":"2026-10-12"},
+        {"period":"2026-12-31","holders":20000,"available_at":"2027-01-23"},
+    ]}
+    series=align_holder_price_observations(
+        shareholders, prices, as_of="2026-10-13")
+    assert [(x["period"],x["price"],x["price_date"],x["holders"]) for x in series] == [
+        ("2026-03-31",10.0,"2026-03-30",10000),
+        ("2026-06-30",11.0,"2026-06-30",12000),
+        ("2026-09-30",13.5,"2026-09-30",16000),
+    ]
+    report=assess_chip_price_context(market(13.5,"2026-10-13"),
+                                     {"as_of":"2026-09-30","change_pct":33.33},
+                                     price_holder_series=series)
+    assert report["comparison_start"]=="2026-03-31"
+    assert report["comparison_end"]=="2026-09-30"
+    assert report["comparison_price_change_pct"]==35.0
+    assert report["comparison_holder_change_pct"]==60.0
+    assert "配对=3期" in render_chip_price_context(report)
+
+
+def test_historical_holder_price_join_excludes_unpublished_and_unknown_disclosures():
+    import pandas as pd
+    from analysis.chip_position import align_holder_price_observations
+    df=pd.DataFrame({"date":["2024-03-29","2024-06-28","2024-09-30"],
+                     "close":[9.0,10.0,12.0]})
+    holder={"series":[
+       {"period":"2024-03-31","holders":200,"available_at":"2024-04-20"},
+       {"period":"2024-06-30","holders":250,"available_at":"2024-07-25"},
+       {"period":"2024-09-30","holders":280,"available_at":None},
+    ]}
+    pairs=align_holder_price_observations(holder,df,as_of="2024-07-20")
+    assert [p["period"] for p in pairs]==["2024-03-31"]
+    assert align_holder_price_observations(holder,df,as_of="2024-07-26")[-1]["price"]==10.0
+
+
+def test_price_gap_and_missing_close_never_generate_fake_points():
+    import pandas as pd
+    from analysis.chip_position import align_holder_price_observations
+    df=pd.DataFrame({"date":["2026-03-12","2026-06-30"],
+                     "close":[10.0,float("nan")]})
+    holder={"series":[{"period":"2026-03-31","holders":400},
+                      {"period":"2026-06-30","holders":500}]}
+    assert align_holder_price_observations(holder,df)==[]
