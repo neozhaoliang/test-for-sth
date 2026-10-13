@@ -12,6 +12,8 @@ from __future__ import annotations
 from datetime import date
 from math import isfinite
 from statistics import median
+
+from analysis.roe_discount_valuation import build_roe_discount_lab
 from typing import Any, Mapping, Optional, Sequence
 
 
@@ -87,6 +89,7 @@ def investor_reference_valuation(*, archetype: str, dividend_history=None,
         "dividend_scenarios": [], "historical_pb_anchor": None,
         "return_decomposition": None,
         "earnings_power": None,
+        "roe_discount_lab": None,
         "normalized_earnings": None, "key_assumptions": [],
         "warnings": [
             "历史股息收益率不等于未来总回报，不得使用通用固定股息率倒算内在价值。",
@@ -167,6 +170,12 @@ def investor_reference_valuation(*, archetype: str, dividend_history=None,
         book_per_share=book,
         historical_pb_anchor=result["historical_pb_anchor"],
         as_of=cutoff,
+    )
+    result["roe_discount_lab"] = build_roe_discount_lab(
+        valuation=valuation,
+        profitability_trend=profitability_trend,
+        valuation_assumption_context=valuation_assumption_context,
+        as_of=cutoff.isoformat(), archetype=archetype,
     )
     result["earnings_power"] = _company_earnings_power_sensitivity(
         archetype=archetype, profitability_trend=profitability_trend,
