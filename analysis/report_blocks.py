@@ -852,6 +852,11 @@ def _build_fundamentals_block(fundamentals: Optional[Dict]) -> str:
     source_label = "历史原始财报结构性事实" if fundamentals.get("point_in_time") else "同花顺 F10 结构性事实"
     lines = [f"{source_label} (来自公司定期报告原文，比率已由程序算好，直接引用即可):"]
     period_line = f"  财务数据期间 {facts.get('finance_period') or '未知'}"
+    if facts.get("cash_profit_source"):
+        period_line += (
+            f"；经营现金流/归母净利润按 {facts.get('cash_profit_period')} 同期"
+            "公司原始定期报告计算（不是F10稀疏变动科目表）"
+        )
     if fundamentals.get("concentration_period"):
         period_line += (
             f"；客户/供应商集中度期间 {fundamentals['concentration_period']}"
