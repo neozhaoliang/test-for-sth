@@ -225,3 +225,42 @@ def test_privacy_identifier_guard_preserves_ordinary_machine_tokens():
     assert public["valuation_model"]["style_context"]["style_regime"] == "dividend_leading"
     assert "ABCD123456789" not in public["summary"]["thesis_summary"]
     assert "机器标记" in public["summary"]["thesis_summary"]
+
+
+def test_public_thesis_drops_cross_dimension_review_appendix_but_keeps_thesis():
+    report = _report()
+    report["summary"]["thesis_summary"] = (
+        "紫金矿业是我愿意长期持有的公司：2026年上半年经营现金流555亿元，"
+        "但30.13元不是加仓价，PB 4.00并不便宜。企业质量看多，当前赔率中性。"
+        "跨维度重复因子只作为同一组底层事实计一次，不因估值/价格、"
+        "盈利/现金流、周期景气、分红/再融资等在多方向出现而重复加权；"
+        "筹码/资金面存在口径冲突，不作为方向性证据。"
+    )
+    public = public_stock_report(report)
+    thesis = public["summary"]["thesis_summary"]
+    assert thesis.endswith("企业质量看多，当前赔率中性。")
+    assert "经营现金流555亿元" in thesis
+    assert "30.13元" in thesis
+    assert "跨维度" not in thesis
+    assert "重复加权" not in thesis
+    assert "筹码/资金面存在口径冲突" not in thesis
+    assert public_stock_report(public) == public
+
+
+def test_public_review_guard_preserves_substantive_conflict_and_dimension_facts():
+    report = _report()
+    concrete = (
+        "交易所10月10日披露融资余额12亿元，而10月8日的统计值为11亿元，"
+        "时点不同，暂不能据此判断机构持续增仓。"
+    )
+    report["summary"]["thesis_summary"] = concrete
+    report["summary"]["dimension_analyses"]["chip_flow"] = (
+        "本股的融资余额仍需核验。"
+        "跨维度重复因子不能重复计分；"
+        + concrete
+    )
+    public = public_stock_report(report)
+    assert public["summary"]["thesis_summary"] == concrete
+    assert "跨维度" not in public["summary"]["dimension_analyses"]["chip_flow"]
+    assert concrete in public["summary"]["dimension_analyses"]["chip_flow"]
+    assert "本股的融资余额仍需核验。" in public["summary"]["dimension_analyses"]["chip_flow"]

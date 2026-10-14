@@ -81,14 +81,39 @@ def _akshare_symbol(code: str) -> str:
 
 
 def _fetch_from_akshare(code: str, start_date: str, end_date: str) -> pd.DataFrame:
-    # 用新浪财经接口 (stock_zh_a_daily)，东方财富的 stock_zh_a_hist 接口在部分网络环境下会被重置连接
-    symbol = _akshare_symbol(code)
-    df = ak.stock_zh_a_daily(symbol=symbol, start_date=start_date, end_date=end_date)
-    if df is None or df.empty:
-        return pd.DataFrame(columns=["date", "close"])
-    df = df[["date", "close"]].copy()
-    df["date"] = pd.to_datetime(df["date"]).dt.date.astype(str)
-    return df
+    """Unadjusted daily closes. Sina first; Eastmoney when Sina is unavailable.
+
+    Historical price joining must not silently fail just because one quote host
+    blocks or resets a connection in the current network environment.
+    """
+    try:
+        symbol = _akshare_symbol(code)
+        df = ak.stock_zh_a_daily(
+            symbol=symbol, start_date=start_date, end_date=end_date,
+        )
+        if df is not None and not df.empty:
+            out = df[["date", "close"]].copy()
+            out["date"] = pd.to_datetime(out["date"]).dt.date.astype(str)
+            return out
+    except Exception as exc:
+        logger.warning("[price_source] Sina daily unavailable for %s: %s", code, exc)
+
+    try:
+        df = ak.stock_zh_a_hist(
+            symbol="".join(ch for ch in code if ch.isdigit())[-6:],
+            period="daily", start_date=start_date, end_date=end_date,
+            adjust="",  # No forward/backward adjustment: dates use raw closes.
+        )
+        if df is not None and not df.empty:
+            out = df[["日期", "收盘"]].rename(
+                columns={"日期": "date", "收盘": "close"}
+            ).copy()
+            out["date"] = pd.to_datetime(out["date"]).dt.date.astype(str)
+            out["close"] = pd.to_numeric(out["close"], errors="coerce")
+            return out.dropna(subset=["date", "close"])
+    except Exception as exc:
+        logger.warning("[price_source] Eastmoney daily unavailable for %s: %s", code, exc)
+    return pd.DataFrame(columns=["date", "close"])
 
 
 def _write_cache_atomic(path: pathlib.Path, df: pd.DataFrame) -> None:
@@ -117,32 +142,38 @@ async def get_price_history(code: str, start: date, end: Optional[date] = None) 
                 logger.warning(f"[price_source] Failed to read cache for {code}: {e}")
                 cached = pd.DataFrame(columns=["date", "close"])
 
-        need_fetch = True
-        fetch_start = start
-        if not cached.empty:
+        # Coverage means *both* ends of the requested range. A cache whose
+        # latest date is recent can still miss the earlier observation periods
+        # needed for shareholder/price trend alignment.
+        windows = []
+        if cached.empty:
+            windows.append((start, end))
+        else:
+            cached_min = datetime.strptime(cached["date"].min(), "%Y-%m-%d").date()
             cached_max = datetime.strptime(cached["date"].max(), "%Y-%m-%d").date()
-            if cached_max >= end:
-                need_fetch = False
-            else:
-                fetch_start = cached_max + timedelta(days=1)
-
-        if need_fetch:
+            if cached_min > start:
+                windows.append((start, min(end, cached_min - timedelta(days=1))))
+            if cached_max < end:
+                windows.append((max(start, cached_max + timedelta(days=1)), end))
+        for fetch_start, fetch_end in windows:
+            if fetch_start > fetch_end:
+                continue
             try:
                 fresh = await asyncio.to_thread(
-                    _fetch_from_akshare,
-                    code,
+                    _fetch_from_akshare, code,
                     fetch_start.strftime("%Y%m%d"),
-                    end.strftime("%Y%m%d"),
+                    fetch_end.strftime("%Y%m%d"),
                 )
             except Exception as e:
-                logger.error(f"[price_source] akshare fetch failed for {code}: {e}")
-                fresh = pd.DataFrame(columns=["date", "close"])
-
-            if not fresh.empty:
-                merged = fresh if cached.empty else pd.concat([cached, fresh], ignore_index=True)
-                merged = merged.drop_duplicates(subset="date").sort_values("date")
-                await asyncio.to_thread(_write_cache_atomic, path, merged)
-                cached = merged
+                logger.error("[price_source] daily history fetch failed for %s: %s", code, e)
+                continue
+            if fresh is None or fresh.empty:
+                continue
+            cached = (fresh if cached.empty
+                      else pd.concat([cached, fresh], ignore_index=True))
+            cached = cached.drop_duplicates(subset="date").sort_values("date")
+        if not cached.empty and windows:
+            await asyncio.to_thread(_write_cache_atomic, path, cached)
 
     if cached.empty:
         return cached

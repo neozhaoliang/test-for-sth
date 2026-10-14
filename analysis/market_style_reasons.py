@@ -144,15 +144,17 @@ async def build_market_style_reasons(
         for e in selected[:8]
     ]
     prompt = (
-        "请从下列匿名化的既有投资经验中，提炼2至4条有关本轮红利与科技成长"
-        "相对表现的【原因机制】，而不只是复述指数涨跌。要保留原材料特有的"
-        "条件、资金来源、买卖动机和逻辑分歧；不能自己编造作者未提及的驱动因素。"
-        "区别两层：已观测到的指数相对表现不证明资金具体流向；文章/直播观点"
-        "是待验证机制而非成交数据或客观事实。"
-        "仅输出JSON数组，每条有 insight(一条完整因果链)、"
-        "use_when(需要怎样的市场条件才能成立)、"
-        "possible_mistake(另一种解释或失效条件)、"
-        "company_question(需要核实的指数/基金/行业数据)，四字段分别至少12字。"
+        "请从以下匿名化投资研究中，提炼2至3个能解释红利与科技成长相对表现的"
+        "不同原因。请像知乎上认真回答问题的投资研究者那样写，说人话，"
+        "一个原因讲清一个经济机制，不要写成审计报告或条件清单。"
+        "insight字段直接展示给普通读者：每条用1到2个短句，尽量控制在"
+        "35至75个汉字；先讲原因及其可能带来的表现，少用若则句式和"
+        "复杂术语。不能把同一资金迁移假设拆成多条凑数量。"
+        "其他三个字段只供后台审查，准确描述适用条件、可能错误和核实数据。"
+        "指数相对涨跌不代表资金已经转移；历史观点也不是成交事实。"
+        "不得编造原材料没有提到的驱动。"
+        "仅输出JSON数组，每条有insight、use_when、possible_mistake、"
+        "company_question四个字段，每字段至少12字。"
         "不能出现姓名、作者、账号、原帖标题、直播原句、URL、"
         "证券名称和代码、个人观点归属、其它公司的例子。"
         "没有具体因果线索时输出空数组，禁止泛泛填空或幻觉。"
@@ -166,13 +168,13 @@ async def build_market_style_reasons(
             prompt, max_tokens=4096,
             repair_requirements=(
                 "仅输出JSON数组，每条insight/use_when/possible_mistake/"
-                "company_question四个字段，不能含私人来源或股票案例。"
+                "company_question四个字段，不能含私人来源或股票案例。insight要像自然语言回答，不能写成长串若则条件。"
             ),
         )
     except Exception:
         pass  # A quote API failure must not silently invent a market explanation.
     validated = validate_method_output(generated, selected)
-    reasons = validated[:4] if validated else baseline
+    reasons = validated[:3] if validated else baseline[:3]
     return {
         "status": ("distilled_hypotheses" if validated else
                    "keyword_grounded_fallback" if baseline else
@@ -196,7 +198,9 @@ def market_style_reasons_prompt_block(context: Mapping | None) -> str:
     if not context:
         return "近期红利行情驱动原因尚无经过提炼的适用观点，不应猜测市场资金流向。"
     rows = [
-        "## 本轮市场风格为何变化（用于A股资金结构、股价位置及结论，不是单纯指数涨跌复述）",
+        "## 市场风格的可能原因（后台研究假设，不能当作资金流向事实）",
+        "仅在有相关当期市场数据时自然引用一两种解释；"
+        "不要照抄假设，也不要向读者展示成立条件、反向解释、核验办法等流程性栏目。",
     ]
     drivers = context.get("drivers") or []
     if not drivers:
@@ -204,13 +208,8 @@ def market_style_reasons_prompt_block(context: Mapping | None) -> str:
             "本次没有可转化为公司研究的知识库因果机制；"
             "不得假装已阅读缺失的直播/帖子，也不得把指数上涨等同于资金净流入。"
         )
-    for item in drivers[:4]:
-        rows.append(
-            "可能的驱动：" + item["mechanism"] +
-            "；成立条件：" + item["conditions"] +
-            "；相反解释：" + item["alternative"] +
-            "；验证资料：" + item["verification"]
-        )
+    for item in drivers[:3]:
+        rows.append("可供考虑的解释：" + item["mechanism"])
     rows.append(
         "这些是匿名化、已核对不含原帖的机制假设。必须与当期有日期的指数、"
         "基金申赎、公司现金分红和经营业绩区分；没有真实资金流数据，"

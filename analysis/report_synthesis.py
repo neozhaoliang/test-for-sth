@@ -36,6 +36,7 @@ from analysis.report_contract import (
     _VALID_STANCES,
 )
 from analysis.reviewer import ResearchReview, review_dimension_analyses
+from analysis.public_report import strip_internal_process_commentary
 from backtest.llm_client import call_analysis_with_tools, call_json_ex
 from model.m_analysis import CandidateOpinion, StructuredSummary, KnowledgeExcerpt
 from tools.utils import utils
@@ -68,7 +69,7 @@ def _scrub_process_terms(text: str, stock_code: str) -> str:
             f"[analysis.report] {stock_code} 摘要输出包含流程用语，已剔除 "
             f"{len(text.split(chr(10))) - len(kept)} 行"
         )
-    text = "\n".join(kept).strip()
+    text = strip_internal_process_commentary("\n".join(kept).strip())
     for en, zh in _ENUM_LABEL_MAP.items():
         # 中文与英文之间 \b 不生效 (中文也是 word 字符), 用 ASCII 字母边界
         text = re.sub(rf"(?<![A-Za-z]){en}(?![A-Za-z])", zh, text, flags=re.IGNORECASE)
@@ -86,7 +87,21 @@ async def _apply_review_to_draft(
         revised, _ = await call_json_ex(
             _REVIEW_SYNTHESIS_PROMPT.format(
                 draft_json=json.dumps(parsed, ensure_ascii=False),
-                review_json=json.dumps(review.model_dump(), ensure_ascii=False),
+                # Send *only actionable* flags; info-only duplicate labels and
+                # procedural messages are not evidence and invite verbatim
+                # copying into the reader's investment conclusion.
+                review_json=json.dumps({
+                    "possible_conflicts": [
+                        {"code": item.code, "factor": item.factor,
+                         "dimensions": item.dimensions}
+                        for item in review.possible_conflicts
+                    ],
+                    "weak_links": [
+                        {"code": item.code, "factor": item.factor,
+                         "dimensions": item.dimensions}
+                        for item in review.weak_links
+                    ],
+                }, ensure_ascii=False),
             ),
             max_tokens=4096,
             repair_requirements=_REPAIR_REQUIREMENTS,

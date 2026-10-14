@@ -1,5 +1,6 @@
 """Price location must condition interpretation of retail-holder dispersion."""
 import pytest
+import pandas as pd
 
 from analysis.chip_position import assess_chip_price_context, render_chip_price_context
 
@@ -133,3 +134,59 @@ def test_price_gap_and_missing_close_never_generate_fake_points():
     holder={"series":[{"period":"2026-03-31","holders":400},
                       {"period":"2026-06-30","holders":500}]}
     assert align_holder_price_observations(holder,df)==[]
+
+
+@pytest.mark.asyncio
+async def test_price_history_cache_backfills_earlier_date_range(tmp_path, monkeypatch):
+    """A fresh right-edge cache can be missing old quarters needed by the chart."""
+    from datetime import date
+    from backtest import price_source
+
+    cache = tmp_path / "SH601899.csv"
+    pd.DataFrame({
+        "date": ["2026-06-30", "2026-10-12"],
+        "close": [25.14, 31.10],
+    }).to_csv(cache, index=False)
+    calls = []
+
+    def fake_fetch(code, start, end):
+        calls.append((code, start, end))
+        return pd.DataFrame({
+            "date": ["2025-12-31", "2026-03-31"],
+            "close": [34.47, 32.72],
+        })
+
+    monkeypatch.setattr(price_source, "_cache_path", lambda code: cache)
+    monkeypatch.setattr(price_source, "_fetch_from_akshare", fake_fetch)
+
+    df = await price_source.get_price_history(
+        "SH601899", date(2025, 12, 21), date(2026, 10, 12)
+    )
+    assert calls == [("SH601899", "20251221", "20260629")]
+    assert list(df["date"]) == [
+        "2025-12-31", "2026-03-31", "2026-06-30", "2026-10-12",
+    ]
+    assert len(pd.read_csv(cache)) == 4
+
+
+def test_price_source_uses_unadjusted_eastmoney_daily_when_sina_down(monkeypatch):
+    from backtest import price_source
+
+    def broken_sina(**kwargs):
+        raise ConnectionResetError("Sina refused connection")
+
+    seen = {}
+    def working_em(**kwargs):
+        seen.update(kwargs)
+        return pd.DataFrame({
+            "日期": ["2026-03-31", "2026-06-30"],
+            "收盘": [32.72, 25.14],
+        })
+
+    monkeypatch.setattr(price_source.ak, "stock_zh_a_daily", broken_sina)
+    monkeypatch.setattr(price_source.ak, "stock_zh_a_hist", working_em)
+    prices = price_source._fetch_from_akshare("SH601899", "20260301", "20260630")
+    assert seen["symbol"] == "601899"
+    assert seen["adjust"] == ""
+    assert seen["period"] == "daily"
+    assert list(prices["close"]) == [32.72, 25.14]

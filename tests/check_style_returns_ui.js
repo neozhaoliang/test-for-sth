@@ -76,19 +76,20 @@ const reasons=ctx.renderInvestmentStyleStrip({style_context:{
     },
   ],
 }});
-assert.ok(reasons.includes('为什么出现这种风格变化？'));
+assert.ok(reasons.includes('为什么会这样？'));
 assert.ok(reasons.includes('成长股估值过高'));
 assert.ok(reasons.includes('长期国债收益率变化'));
-assert.ok(reasons.includes('成立条件、反向解释与核验办法'));
-assert.ok(reasons.includes('不是已经查实的资金净流入') ||
-          reasons.includes('并非已经查实的资金净流入'));
+assert.ok(!reasons.includes('成立条件、反向解释与核验办法'));
+assert.ok(!reasons.includes('<details'));
+assert.ok(reasons.includes('class="style-cause-item"'));
+assert.ok(reasons.includes('并不代表已证实资金从科技板块流向红利板块'));
 assert.ok(!reasons.includes('买股票的老木匠'));
 assert.ok(!reasons.includes('xueqiu.com'));
 const noKnowledge=ctx.renderInvestmentStyleStrip({style_context:{
   ...base,causal_knowledge_status:'no_matching_distilled_knowledge',
   causal_drivers:[],
 }});
-assert.ok(noKnowledge.includes('尚未入库') || noKnowledge.includes('提炼未完成'));
+assert.ok(noKnowledge.includes('背后的资金流向还缺少可靠证据'));
 assert.ok(!noKnowledge.includes('成长股估值过高'));
 const injected=ctx.renderInvestmentStyleStrip({style_context:{
   ...base,causal_knowledge_status:'distilled_hypotheses',

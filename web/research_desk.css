@@ -640,37 +640,46 @@ body, input, select, textarea, button { font-family:inherit; }
 }
 
 
-/* Why-this-style explanatory module: clear, article-width causal reasoning. */
+/* Article-like market explanation: one calm column, readable answers,
+   not a checklist of LLM conditions / opposing cases / verification steps. */
 .style-insight .style-why {
-  margin:17px 0 15px;
-  padding:18px 20px;
-  border:1px solid #d8e4f5;
-  border-radius:12px;
-  background:linear-gradient(145deg,#f7faff,#fff);
+  margin:18px 0 15px;
+  padding:16px 0 0;
+  border:0;
+  border-top:1px solid #e2e8f1;
+  border-radius:0;
+  background:transparent;
 }
-.style-why h5 { margin:0 0 10px;color:#234477;font-size:15px;font-weight:800; }
-.style-why > .section-caption { margin:0 0 13px;line-height:1.7; }
-.style-why ol.style-cause-list {
-  padding:0 0 0 20px;
+.style-why h5 {
+  margin:0 0 12px;
+  font-size:16px;
+  font-weight:700;
+  line-height:1.5;
+  color:#223b5c;
+}
+.style-why .style-cause-prose { display:flex;flex-direction:column;gap:12px; }
+.style-why .style-cause-item {
   margin:0;
-  list-style:decimal;
+  font-size:14px;
+  line-height:1.85;
+  color:#34445c;
+  font-weight:400;
+  overflow-wrap:anywhere;
 }
-.style-why .style-cause-list > li {
-  padding:0 0 13px 5px;
-  line-height:1.8;
+.style-why .style-cause-item strong {
+  font-size:inherit;
+  font-weight:650;
+  color:#223b5c;
 }
-.style-why .style-cause-list > li + li {
-  border-top:1px dashed #e3eaf4;
-  padding-top:12px;
+.style-why .style-cause-caveat {
+  margin:13px 0 0;
+  font-size:12px;
+  line-height:1.7;
+  color:#6a7a93;
 }
-.style-why .style-cause-list > li:last-child { padding-bottom:0; }
-.style-why .style-cause-list > li::marker { color:#4774b6;font-weight:800; }
-.style-why .style-cause-mechanism { color:#293f60;font-size:13px;font-weight:650; }
-.style-why details { margin-top:5px; }
-.style-why summary { color:#4d6c9a;font-size:12px;cursor:pointer; }
-.style-why details p { margin:6px 0;font-size:12px;color:#60718c;line-height:1.75; }
 @media(max-width:530px) {
-  .style-insight .style-why { padding:14px 15px; }
+  .style-insight .style-why { padding:14px 0 0; }
+  .style-why .style-cause-item { font-size:14px; }
 }
 
 

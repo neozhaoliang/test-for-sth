@@ -1748,7 +1748,8 @@ function renderDividendChart(data) {
 
 // 股东户数(柱,蓝) + 同期股价(线,橙) 走势图。两条序列都以首期=100 指数化、
 // 共用一条 y 轴 (避免双轴混标); 悬停显示原始数值, 图下附原始数据表。
-function renderHolderChart(series) {
+function renderHolderChart(series, priceSource='daily_close') {
+  const f10Reference = priceSource === 'ths_f10';
   const n = series.length;
   const W = 720, H = 250, padL = 52, padR = 16, padT = 30, padB = 36;
   const plotW = W - padL - padR, plotH = H - padT - padB;
@@ -1805,11 +1806,12 @@ function renderHolderChart(series) {
     '<text x="' + (padL + 180) + '" y="20">股价 (首期=100)</text></g>';
 
   const table = '<div class="chip-holder-table"><table><thead><tr><th>统计截止日</th>'+
-    '<th>股东户数</th><th>收盘价（元）</th><th>价格日期</th></tr></thead><tbody>'+
+    '<th>股东户数</th><th>'+(f10Reference?'F10参考股价（元）':'收盘价（元）')+
+    '</th><th>'+(f10Reference?'数据来源':'价格日期')+'</th></tr></thead><tbody>'+
     series.map(p=>'<tr><td>'+escapeHtml(String(p.period).slice(0,10))+
       '</td><td>'+Number(p.holders).toLocaleString('zh-CN')+'</td><td>'+
       Number(p.price).toFixed(2)+'</td><td>'+
-      escapeHtml(String(p.price_date||p.period).slice(0,10))+
+      (f10Reference?'同花顺F10':escapeHtml(String(p.price_date||p.period).slice(0,10)))+
       '</td></tr>').join('')+'</tbody></table></div>';
 
   return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" style="max-width:100%;"' +
@@ -2108,27 +2110,58 @@ function renderIndustryBreadthChart(industry) {
   ]);
 }
 
-function renderChipPositionChart(context) {
-  if(!context) return '';
-  const aligned=(Array.isArray(context.price_holder_series)?context.price_holder_series:[])
-    .filter(p=>p && /^\d{4}-\d{2}-\d{2}$/.test(String(p.period||'')) &&
+function renderChipPositionChart(context, report) {
+  const rawSeries=(context && Array.isArray(context.price_holder_series))
+    ? context.price_holder_series : [];
+  let aligned=rawSeries.filter(p=>p &&
+      /^\d{4}-\d{2}-\d{2}$/.test(String(p.period||'')) &&
       numericOrNull(p.holders)>0 && numericOrNull(p.price)>0)
     .sort((a,b)=>String(a.period).localeCompare(String(b.period)));
+  let f10Reference=false;
+
+  // For older live reports, chip_price_context can be completely absent even
+  // when the already-returned THS F10 holder/price comparison has multiple dates.
+  // Never use this live-only F10 data in historical point-in-time reports.
+  if(aligned.length<2 && report && report.research_mode!=='historical'){
+    const facts=((report.fundamentals||{}).facts||{});
+    const cutoff=String(report.as_of||'').slice(0,10);
+    const f10=(Array.isArray(facts.holder_count_series)?facts.holder_count_series:[])
+      .filter(p=>p && /^\d{4}-\d{2}-\d{2}$/.test(String(p.period||'')) &&
+        (!cutoff || String(p.period)<=cutoff) &&
+        numericOrNull(p.holders)>0 && numericOrNull(p.price)>0)
+      .map(p=>({period:p.period,holders:Number(p.holders),price:Number(p.price)}))
+      .sort((a,b)=>String(a.period).localeCompare(String(b.period)));
+    if(f10.length>=2){
+      aligned=f10;
+      f10Reference=true;
+    }
+  }
+
   if(aligned.length>=2){
     const first=aligned[0],last=aligned[aligned.length-1];
     const changePct=(v1,v2)=>((Number(v2)/Number(v1)-1)*100);
     const hp=changePct(first.holders,last.holders);
     const pp=changePct(first.price,last.price);
     const signed=v=>(v>0?'+':'')+v.toFixed(2)+'%';
+    const note=f10Reference
+      ? '股东户数与股价均来自同花顺F10历史对照；F10价格是该页面参考值，未由独立日线行情接口核验日期和复权口径，不宜当作精确收盘价。'
+      : '已披露股东户数与对应统计截止日之前最近交易日的实际收盘价。';
     return '<div class="chip-history-summary">'+
       '<div><span>区间股价变化</span><strong>'+signed(pp)+'</strong></div>'+
       '<div><span>区间股东户数变化</span><strong>'+signed(hp)+'</strong></div></div>'+
-      '<p class="section-caption">已披露股东户数与对应统计截止日之前最近交易日的实际收盘价，'+
-      '区间 '+escapeHtml(first.period)+'—'+escapeHtml(last.period)+
-      '；按首期=100指数化，仅展示真实配对日期，不插值、不将股东户数当作散户精确人数。</p>'+
-      renderHolderChart(aligned)+
+      '<p class="section-caption">'+note+' 区间 '+escapeHtml(first.period)+'—'+escapeHtml(last.period)+
+      '；按首期=100指数化，仅展示真实来源所列的日期，不插值、不将股东户数当作散户精确人数。</p>'+
+      renderHolderChart(aligned,f10Reference?'ths_f10':'daily_close')+
       '<p class="section-caption">仅凭股东户数变化无法证明机构派发或吸筹。'+
-      '价格是未经复权的日收盘价，跨分红、送转、拆股需另作复权比较。</p>';
+      (f10Reference?'F10股价口径与未复权日线可能不同，跨分红、送转、拆股须另作可比调整。':
+        '价格是未经复权的日收盘价，跨分红、送转、拆股需另作复权比较。')+'</p>';
+  }
+  if(!context){
+    const facts=((report||{}).fundamentals||{}).facts||{};
+    const holderPoints=Array.isArray(facts.holder_count_series)?facts.holder_count_series.length:0;
+    return '<p class="section-caption">本次报告缺少已核验的股价与股东户数配对数据'+
+      (holderPoints?'；F10返回 '+holderPoints+' 期股东记录，但未取得至少2期有股价的可比点':'；股东户数历史记录也暂缺')+
+      '。当前不编造走势图，请检查历史行情和股东数据接口。</p>';
   }
   if(numericOrNull(context.position_52w_pct)===null)
     return '<p class="section-caption">尚未取得至少两个有披露依据的股东统计期与同期实际收盘价配对；'+
@@ -2182,8 +2215,8 @@ function renderDashboardCharts(report) {
   html+='<div class="market-structure-lines" role="group" aria-label="市场情绪与行业广度">'+
     renderSentimentMixChart(report.sentiment)+
     renderIndustryBreadthChart(report.industry_comparison)+'</div>';
-  html+=chartTile('股价位置 × 筹码分散','真实历史收盘价与已披露股东户数按截止日对齐；需区分户数变化、股价变化与机构买卖',
-    renderChipPositionChart(report.chip_price_context));
+  html+=chartTile('股价位置 × 筹码分散','优先对齐真实收盘价与已披露股东户数；旧报告可显示标明来源的F10参考序列',
+    renderChipPositionChart(report.chip_price_context, report));
   html+=chartTile('历史估值区间','PE(TTM)历史序列，失真区间将按原图分位裁剪',
     renderValuationHistoryChart((report.valuation_history || {}).history_monthly || []));
   html+='</div></section>';
@@ -2442,6 +2475,40 @@ function renderInvestorReference(model) {
     '可能改变长期收益；不能把这些情景当作已核实的公司价值。</p></div>';
   return html;
 }
+// Give investors a readable explanation rather than the model's internal
+// four-field research checklist. Different hypotheses may describe the same
+// underlying mechanism, so keep only one example per theme in the short view.
+function readableStyleCauses(drivers) {
+  const themes=new Set(), result=[];
+  for(const item of (Array.isArray(drivers)?drivers:[])){
+    if(!item || item.evidence_status!=='private_research_hypothesis' ||
+       typeof item.mechanism!=='string') continue;
+    const explanation=item.mechanism.trim();
+    if(!explanation)continue;
+    const text=[explanation,item.conditions||''].join(' ');
+    let key='general', label='其他可能因素';
+    if(/游资|量化|高频|短线交易|换手|交易拥挤/.test(text)) {
+      key='trading'; label='短线交易';
+    } else if(/国债|债券收益率|利率变化|险资/.test(text)) {
+      key='rates'; label='利率与分红';
+    } else if(/股息|派息|分红现金流|红利.+基本面|现金回报/.test(text) &&
+              !/ETF发行|ETF供给/.test(text)){
+      key='dividend'; label='现金回报';
+    } else if(/ETF|公募|基金|调仓|存量资金|增量资金|资金迁移|资金再平衡/.test(text)){
+      key='allocation'; label='资金配置';
+    } else if(/科技|成长|估值|盈利预期/.test(text)){
+      key='valuation'; label='估值变化';
+    }
+    // Unclassified arguments remain distinct; do not discard different ideas.
+    const dedupeKey=key==='general'?'general_'+result.length:key;
+    if(themes.has(dedupeKey))continue;
+    themes.add(dedupeKey);
+    result.push({label,explanation});
+    if(result.length>=3)break;
+  }
+  return result;
+}
+
 function renderInvestmentStyleStrip(model) {
   const style=(model||{}).style_context || {};
   if(style.status!=='observed')return '';
@@ -2501,34 +2568,28 @@ function renderInvestmentStyleStrip(model) {
         '不是相同的比较口径，不能直接把这两个百分数相减得到该涨跌差。</p>';
     }
   }
-  const causes=(Array.isArray(style.causal_drivers)?style.causal_drivers:[]).filter(
-    item=>item && item.evidence_status==='private_research_hypothesis' &&
-      typeof item.mechanism==='string' && item.mechanism.trim()).slice(0,4);
-  html+='<div class="style-why"><h5>为什么出现这种风格变化？</h5>';
-  if(causes.length){
-    html+='<p class="section-caption">以下是从历史投资研究中提炼的可能驱动，仍需市场数据验证，'
-      +'并非已经查实的资金净流入或交易指令。</p>';
-    html+='<ol class="style-cause-list">'+causes.map(item=>
-      '<li><div class="style-cause-mechanism">'+escapeHtml(item.mechanism)+'</div>'+
-      '<details><summary>成立条件、反向解释与核验办法</summary>'+
-      '<p><b>成立条件：</b>'+escapeHtml(item.conditions||'尚未核实')+'</p>'+
-      '<p><b>可能的反向解释：</b>'+escapeHtml(item.alternative||'尚未核实')+'</p>'+
-      '<p><b>需要核验：</b>'+escapeHtml(item.verification||'尚无资料')+'</p>'+
-      '</details></li>'
-    ).join('')+'</ol>';
+  const causes=readableStyleCauses(style.causal_drivers);
+  html+='<section class="style-why" aria-label="市场风格的可能原因">'+
+    '<h5>为什么会这样？</h5>';
+  if(causes.length) {
+    html+='<div class="style-cause-prose">'+causes.map(item=>
+      '<p class="style-cause-item"><strong>'+escapeHtml(item.label)+'：</strong>'+
+      escapeHtml(item.explanation)+'</p>'
+    ).join('')+'</div>'+
+      '<p class="style-cause-caveat">这些是可能的解释，并不代表已证实资金从科技板块流向红利板块。'+
+      '判断是否真的调仓，还需要查看同期的基金份额和持仓变化。</p>';
   } else if(style.causal_knowledge_status==='no_matching_distilled_knowledge' ||
             style.causal_knowledge_status==='knowledge_available_unresolved'){
-    html+='<p class="section-caption">本次没有匹配且已经完成提炼的市场机制观点；'
-      +'可能是相关帖子或直播尚未入库、提炼未完成，也可能确无适用解释。'
-      +'目前只能确认相对涨跌，不能凭指数表现编造资金转向的原因。</p>';
+    html+='<p class="style-cause-caveat">指数的相对涨跌可以确认，背后的资金流向还缺少可靠证据。'+
+      '暂时不能断言资金正在从科技转向红利。</p>';
   } else if(style.causal_knowledge_status==='historical_method_not_available'){
-    html+='<p class="section-caption">历史研究模式未使用后来的知识提炼方法，'
-      +'不追溯添加当时未核验的解释。</p>';
+    html+='<p class="style-cause-caveat">当时的数据还不足以解释这轮风格变化，'+
+      '这里不使用后来获得的资料倒推原因。</p>';
   } else {
-    html+='<p class="section-caption">当前报告尚未提供经过核验边界处理的因果解释；'
-      +'请重新生成报告，或检查后台知识提炼是否成功。</p>';
+    html+='<p class="style-cause-caveat">暂时缺少足够的原因分析资料。'+
+      '可以先参考上方指数表现，不能仅凭涨跌猜测资金流向。</p>';
   }
-  html+='</div>';
+  html+='</section>';
   events.slice(0,2).forEach(e=>{
     html+='<p><b>市场事件：</b>'+escapeHtml(e.headline||'')+
       '（'+escapeHtml(e.date||'')+'）'+
