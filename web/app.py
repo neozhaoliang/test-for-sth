@@ -2110,6 +2110,78 @@ function renderIndustryBreadthChart(industry) {
   ]);
 }
 
+// Explain concurrent shareholder-count and price changes in normal
+// investor language. Holder counts describe accounts, NOT net institutional
+// flows. The comparison uses genuine matching reporting dates, never interpolation.
+function explainHolderPriceMovement(series) {
+  if(!Array.isArray(series) || series.length<2)return null;
+  const first=series[0],last=series[series.length-1];
+  const pct=(start,end)=>(Number(end)/Number(start)-1)*100;
+  const pricePct=pct(first.price,last.price);
+  const holderPct=pct(first.holders,last.holders);
+  if(!Number.isFinite(pricePct) || !Number.isFinite(holderPct))return null;
+  const signed=v=>(v>0?'+':'')+v.toFixed(2)+'%';
+  const direction=(p,h)=>{
+    const pUp=p>=5,pDown=p<=-5,hUp=h>=10,hDown=h<=-10;
+    if(pUp&&hUp)return {
+      status:'risk', headline:'上涨伴随明显增户，筹码分散风险上升',
+      explanation:'股价上涨时，持股账户却明显增多。这是筹码可能趋于分散的警示，后续上涨对买盘承接的要求更高。',
+      phase:'上涨增户',
+    };
+    if(pDown&&hUp)return {
+      status:'risk', headline:'股价下跌、股东户数大增，筹码趋于分散',
+      explanation:'股价下跌时，持股账户反而明显增多。这不能解释为筹码改善，反而提示账户分散和下跌承接压力。',
+      phase:'下跌增户',
+    };
+    if(pDown&&hDown)return {
+      status:'improve', headline:'下跌伴随明显减户，出现筹码集中迹象',
+      explanation:'股价回落期间，股东户数同步下降，说明持股账户的集中程度有所提高。这是筹码改善的线索，但不能证明抛压已经结束。',
+      phase:'下跌减户',
+    };
+    if(pUp&&hDown)return {
+      status:'improve', headline:'上涨同时减户，筹码集中迹象较明显',
+      explanation:'股价上涨而股东户数减少，持股账户趋于集中。这可能有利于筹码结构，但不能据此断定是机构持续吸筹。',
+      phase:'上涨减户',
+    };
+    if(hUp)return {
+      status:'watch', headline:'股东户数明显增多，但价格趋势不足以确认筹码恶化',
+      explanation:'股东户数增加提示账户趋于分散，不过同期股价变化不够显著，暂不把它直接视为高位派发。',
+      phase:'增户',
+    };
+    if(hDown)return {
+      status:'watch', headline:'股东户数明显减少，集中度有所提高',
+      explanation:'持股账户减少意味着集中度可能提高，但在价格缺乏明确趋势时，不宜简单认定为吸筹或触底。',
+      phase:'减户',
+    };
+    return {
+      status:'neutral', headline:'股东户数变化不大，暂未出现明显筹码信号',
+      explanation:'股价虽然可能波动，但股东户数并未出现足够明显的同步变化，当前更适合保持中性判断。',
+      phase:'中性',
+    };
+  };
+  const overall=direction(pricePct,holderPct);
+  let largest=null;
+  for(let i=1;i<series.length;i++){
+    const a=series[i-1],b=series[i];
+    const p=pct(a.price,b.price),h=pct(a.holders,b.holders);
+    if(!Number.isFinite(p)||!Number.isFinite(h))continue;
+    const stage=direction(p,h);
+    // A notable two-sided stage, not a single noisy quarter.
+    if(!(Math.abs(p)>=5 && Math.abs(h)>=10))continue;
+    const importance=Math.abs(p)+Math.abs(h);
+    if(!largest || importance>largest.importance) {
+      largest={start:a.period,end:b.period,pricePct:p,holderPct:h,
+        phase:stage.phase,importance};
+    }
+  }
+  const stageDescription=largest && series.length>2
+    ? '最明显的一段是 '+largest.start+' 至 '+largest.end+
+      '：股价 '+signed(largest.pricePct)+'，股东户数 '+signed(largest.holderPct)+
+      '，属于'+largest.phase+'。'
+    : '';
+  return {...overall,pricePct,holderPct,stageDescription,signed};
+}
+
 function renderChipPositionChart(context, report) {
   const rawSeries=(context && Array.isArray(context.price_holder_series))
     ? context.price_holder_series : [];
@@ -2138,23 +2210,25 @@ function renderChipPositionChart(context, report) {
   }
 
   if(aligned.length>=2){
+    const analysis=explainHolderPriceMovement(aligned);
     const first=aligned[0],last=aligned[aligned.length-1];
-    const changePct=(v1,v2)=>((Number(v2)/Number(v1)-1)*100);
-    const hp=changePct(first.holders,last.holders);
-    const pp=changePct(first.price,last.price);
-    const signed=v=>(v>0?'+':'')+v.toFixed(2)+'%';
     const note=f10Reference
-      ? '股东户数与股价均来自同花顺F10历史对照；F10价格是该页面参考值，未由独立日线行情接口核验日期和复权口径，不宜当作精确收盘价。'
-      : '已披露股东户数与对应统计截止日之前最近交易日的实际收盘价。';
-    return '<div class="chip-history-summary">'+
-      '<div><span>区间股价变化</span><strong>'+signed(pp)+'</strong></div>'+
-      '<div><span>区间股东户数变化</span><strong>'+signed(hp)+'</strong></div></div>'+
-      '<p class="section-caption">'+note+' 区间 '+escapeHtml(first.period)+'—'+escapeHtml(last.period)+
-      '；按首期=100指数化，仅展示真实来源所列的日期，不插值、不将股东户数当作散户精确人数。</p>'+
+      ? '价格使用同花顺F10参考值（不是独立行情接口核验的收盘价），结果仅作趋势观察。'
+      : '股价采用相应股东统计截止日前最近交易日的实际收盘价。';
+    return '<div class="chip-reading chip-reading-'+analysis.status+'">'+
+      '<h5>'+escapeHtml(analysis.headline)+'</h5>'+
+      '<p class="chip-reading-numbers">区间股价 <strong>'+analysis.signed(analysis.pricePct)+'</strong>'+
+      '<span class="chip-reading-separator">·</span> 股东户数 <strong>'+
+      analysis.signed(analysis.holderPct)+'</strong></p>'+
+      '<p>'+escapeHtml(analysis.explanation)+'</p>'+
+      (analysis.stageDescription?'<p>'+escapeHtml(analysis.stageDescription)+'</p>':'')+
+      '</div>'+
+      '<p class="section-caption chip-data-note">区间 '+escapeHtml(first.period)+'—'+
+      escapeHtml(last.period)+'。'+note+
+      ' 两项数据以首期=100展示，不插值；跨分红、送转或拆股时，价格需要复权后才能作严格比较。</p>'+
       renderHolderChart(aligned,f10Reference?'ths_f10':'daily_close')+
-      '<p class="section-caption">仅凭股东户数变化无法证明机构派发或吸筹。'+
-      (f10Reference?'F10股价口径与未复权日线可能不同，跨分红、送转、拆股须另作可比调整。':
-        '价格是未经复权的日收盘价，跨分红、送转、拆股需另作复权比较。')+'</p>';
+      '<p class="section-caption">股东户数是账户数量，不等于散户人数或持股数量；'+
+      '集中与分散只是结构线索，不能单凭这张图认定机构派发或吸筹。</p>';
   }
   if(!context){
     const facts=((report||{}).fundamentals||{}).facts||{};
@@ -2217,7 +2291,7 @@ function renderDashboardCharts(report) {
   html+='<div class="market-structure-lines" role="group" aria-label="市场情绪与行业广度">'+
     renderSentimentMixChart(report.sentiment)+
     renderIndustryBreadthChart(report.industry_comparison)+'</div>';
-  html+=chartTile('股价位置 × 筹码分散','优先对齐真实收盘价与已披露股东户数；旧报告可显示标明来源的F10参考序列',
+  html+=chartTile('股价与股东户数：筹码集中还是分散？','结合股价与已披露股东户数的变化，判断筹码结构的变化方向',
     renderChipPositionChart(report.chip_price_context, report));
   html+=chartTile('历史估值区间','PE(TTM)历史序列，失真区间将按原图分位裁剪',
     renderValuationHistoryChart((report.valuation_history || {}).history_monthly || []));
