@@ -60,7 +60,7 @@ _SENTENCE_BREAK = re.compile(r"(?<=[。！？；\n])")
 # Match only administrative phrases, rather than broad financial vocabulary:
 # investors still need to see *specific*, dated disagreements in the data.
 _INTERNAL_PROCESS_CLAUSE = re.compile(
-    r"^\\s*(?:"
+    r"^\s*(?:"
     r"跨(?:研究|分析)?维度.{0,24}(?:重复|因子|计分|加权|底层事实)|"
     r"(?:同一组?|相同)(?:底层)?事实.{0,36}(?:只计|一次|重复(?:计|加权))|"
     r"(?:重复因子|重复计分|重复加权|因子去重)|"
@@ -68,8 +68,8 @@ _INTERNAL_PROCESS_CLAUSE = re.compile(
     r")"
 )
 _GENERIC_REVIEW_CONFLICT = re.compile(
-    r"^\\s*(?:筹码\\s*[/／、与和]\\s*资金面|资金面\\s*[/／、与和]\\s*筹码)"
-    r"存在口径冲突[，,]?\\s*(?:不作为|不纳入)(?:当前)?方向性证据"
+    r"^\s*(?:筹码\s*[/／、与和]\s*资金面|资金面\s*[/／、与和]\s*筹码)"
+    r"存在口径冲突[，,]?\s*(?:不作为|不纳入)(?:当前)?方向性证据"
 )
 
 
@@ -83,7 +83,7 @@ def strip_internal_process_commentary(value: str) -> str:
     """
     if not value:
         return value
-    pieces = re.split(r"([。！？；;\\n])", value)
+    pieces = re.split(r"([。！？；;\n])", value)
     kept = []
     for index in range(0, len(pieces), 2):
         clause = pieces[index]
