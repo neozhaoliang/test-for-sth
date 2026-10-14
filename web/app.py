@@ -2137,7 +2137,7 @@ function renderDashboardCharts(report) {
   let html='<section class="dashboard-charts" id="report-charts"><h3>数据概览与维度图谱</h3>'+
     '<p class="section-caption">图表仅展示当前报告真实返回的数据，不对缺失年份插值，也不自动将半年ROE年化。</p>';
   html+=renderInvestmentStyleStrip(report.valuation_model);
-  html+='<div class="metric-strip">'+
+  html+='<div class="metric-strip primary-kpis" role="group" aria-label="股票主要财务指标">'+
     metricCard('参考股价',price===null?'暂缺':price.toFixed(2)+' 元',quote.quote_time || report.as_of || '报价时点未知')+
     metricCard('市净率 PB',pb===null?'暂缺':pb.toFixed(2)+' 倍',val.valuation_as_of || 'F10时点未知')+
     metricCard('F10 披露ROE',roe===null?'暂缺':roe.toFixed(2)+'%',val.valuation_as_of || '需注意报告期间')+
