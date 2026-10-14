@@ -266,7 +266,10 @@ async def _generate_summary(
         else:
             reasons = await build_market_style_reasons(
                 getattr(inputs, 'knowledge_excerpts', None) or [],
-                as_of=as_of, market_context=getattr(inputs, 'market_context', None),
+                # Exact style returns describe the outcome the hypothesis must explain.
+                # General market_context is a stock/index summary and does not contain
+                # the red-versus-growth pair; passing it left the model direction-blind.
+                as_of=as_of, market_context=style,
                 industry=str(getattr(getattr(inputs, 'research_profile', None),
                                      'industry', '') or ''),
             )
