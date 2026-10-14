@@ -180,7 +180,7 @@ assert.ok(legacyChipHtml.includes('<svg'));
 assert.ok(legacyChipHtml.includes('1,318,365'));
 assert.ok(legacyChipHtml.includes('同花顺F10'));
 assert.ok(legacyChipHtml.includes('F10参考股价'));
-assert.ok(legacyChipHtml.includes('未由独立日线行情接口核验'));
+assert.ok(legacyChipHtml.includes('不是独立行情接口核验的收盘价'));
 assert.ok(!legacyChipHtml.includes('已披露股东户数与对应统计截止日之前最近交易日的实际收盘价'));
 assert.ok(ctx.renderDashboardCharts(f10Legacy).includes('1,318,365'));
 // Historical replay must never backfill as-of charts from a live F10 webpage.
