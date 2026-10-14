@@ -196,3 +196,93 @@ def test_postfilter_preserves_market_causal_posts_even_when_stock_match_ignores_
     assert selected.count(old) == 1
     assert focused in selected
     assert len(selected) == 2
+
+
+def test_observed_style_detects_dividend_up_growth_down_and_rejects_wrong_direction():
+    from analysis.market_style_reasons import (
+        _observed_rotation, _conflicts_with_observed_style,
+    )
+    snapshot = {
+        "dividend_index_return_pct": 2.30,
+        "growth_index_mean_return_pct": -12.31,
+        "style_observed_as_of": "2026-10-13",
+    }
+    rotation = _observed_rotation(snapshot)
+    assert rotation == "dividend_up_growth_down"
+    # Actual wrong-way narratives reported by the user, not hypothetical QA prose.
+    assert _conflicts_with_observed_style(
+        "政策资金更偏科技，科技类指数基金批量发行带来被动买盘，"
+        "红利类产品供给偏少；科技估值被推高，传统红利相对承压。",
+        rotation,
+    )
+    assert _conflicts_with_observed_style(
+        "游资和量化让红利股短期波动被放大，涨快了容易回撤；"
+        "基本面没变，持有体验却变差，资金更愿追科技主题。",
+        rotation,
+    )
+    assert not _conflicts_with_observed_style(
+        "此前科技主题交易拥挤，如今成长板块回撤；高股息公司相对抗跌。",
+        rotation,
+    )
+    assert not _conflicts_with_observed_style(
+        "科技成长高估值被重新定价，红利资产在市场调整中相对抗跌。",
+        rotation,
+    )
+
+
+@pytest.mark.asyncio
+async def test_market_style_generation_uses_actual_returns_not_wrong_way_kb_summary(monkeypatch):
+    from analysis.market_style_reasons import build_market_style_reasons
+
+    prompts = []
+    wrong = [{
+        "insight": "政策资金更偏科技，科技类指数基金发行带来买盘，传统红利相对承压。",
+        "use_when": "高估值科技板块获得政策性资金配置的阶段观察这种机制。",
+        "possible_mistake": "科技股盈利兑现不佳或资金出逃时旧市场观点会失效。",
+        "company_question": "核验同期ETF份额变化与资金申赎以及真实持仓变动情况。",
+    }]
+    async def fake_call(prompt, **kwargs):
+        prompts.append(prompt)
+        return wrong, "end_turn"
+    monkeypatch.setattr("backtest.llm_client.call_json_ex", fake_call)
+    sources = [entry(
+        "政策性资金偏向科技，科技类ETF集中发行造成被动买入，"
+        "从前传统红利板块可能遭遇资金边缘化，基金增发改变配置结构。",
+        published="2026-10-01",
+    )]
+    snap = {
+        "dividend_index_return_pct": 2.30,
+        "growth_index_mean_return_pct": -12.31,
+        "style_window": "20 trading days",
+        "style_observed_as_of": "2026-10-13",
+    }
+    out = await build_market_style_reasons(
+        sources, as_of="2026-10-14", market_context=snap,
+    )
+    assert len(prompts) == 1
+    assert "2.3" in prompts[0] and "-12.31" in prompts[0]
+    assert "科技下跌" in prompts[0]
+    assert all("红利相对承压" not in d["mechanism"] for d in out["drivers"])
+    assert all("资金更愿追科技" not in d["mechanism"] for d in out["drivers"])
+
+
+@pytest.mark.asyncio
+async def test_market_style_keeps_genuine_growth_selloff_explanation(monkeypatch):
+    from analysis.market_style_reasons import build_market_style_reasons
+
+    suitable = [{
+        "insight": "科技成长板块前期估值较高，获利盘回吐带来估值收缩；"
+                   "在调整过程中，现金分红稳定的红利资产相对抗跌。",
+        "use_when": "科技板块在高估值和高预期下发生估值回撤的阶段使用。",
+        "possible_mistake": "若成长企业的盈利兑现好于预期，科技相对表现可能恢复。",
+        "company_question": "核验科技基金持仓、ETF份额和红利股现金派息覆盖情况。",
+    }]
+    async def fake_call(prompt, **kwargs):
+        return suitable, "end_turn"
+    monkeypatch.setattr("backtest.llm_client.call_json_ex", fake_call)
+    out = await build_market_style_reasons(data(), as_of="2026-10-13", market_context={
+        "dividend_index_return_pct": 2.30, "growth_index_mean_return_pct": -12.31,
+    })
+    assert out["status"] == "distilled_hypotheses"
+    assert len(out["drivers"]) == 1
+    assert "估值收缩" in out["drivers"][0]["mechanism"]
