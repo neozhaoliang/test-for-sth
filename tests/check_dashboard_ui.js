@@ -119,6 +119,42 @@ assert.ok(!historicalChip.includes('1,318,365'));
 assert.ok(historicalChip.includes('本次报告缺少已核验的股价与股东户数配对数据'));
 
 
+// Reader-facing market commentary should be prose, not an LLM review log.
+const longHypotheses=[
+  {mechanism:'若科技ETF集中发行而红利ETF供给有限，市场配置资金可能更向科技集中，使红利相对抗跌来自资金分配差异。',
+   conditions:'ETF持仓和相对表现均发生变化，仍需检验投资者到底买了什么。'},
+  {mechanism:'若跨境资金未流回国内，公募高成交仍可能是存量基金内部换仓，不能证明已经有更多投资资金。',
+   conditions:'需要观察公募申赎与持仓分解。'},
+  {mechanism:'若股息率相对国债收益率有吸引力，红利资产可能受到配置需求支撑。',
+   conditions:'需要对比国债收益率和实际派息。'},
+  {mechanism:'若游资量化交易变得活跃，短线换手会放大红利资产的波动。',
+   conditions:'需要核对真实的换手和流动性。'},
+].map(p=>({...p,evidence_status:'private_research_hypothesis'}));
+const whyHtml=ctx.renderInvestmentStyleStrip({style_context:{
+  status:'observed',style_regime:'dividend_leading',
+  style_observed_as_of:'2026-10-14',causal_drivers:longHypotheses,
+  dividend_index_return_pct:0.03,growth_index_mean_return_pct:-9.69,
+  causal_knowledge_status:'distilled_hypotheses',
+}});
+assert.equal((whyHtml.match(/class="style-cause-item"/g)||[]).length,3);
+assert.ok(whyHtml.includes('为什么会这样？'));
+assert.ok(whyHtml.includes('资金配置'));
+assert.ok(whyHtml.includes('利率与分红'));
+assert.ok(whyHtml.includes('短线交易'));
+assert.ok(!whyHtml.includes('<ol'));
+assert.ok(!whyHtml.includes('<details'));
+for(const internalHeading of ['成立条件、反向解释与核验办法','成立条件：','可能的反向解释：','需要核验：']){
+  assert.ok(!whyHtml.includes(internalHeading));
+}
+assert.equal((whyHtml.match(/并不代表已证实/g)||[]).length,1);
+assert.ok(whyHtml.includes('科技成长回撤，红利相对抗跌'));
+// An empty set of hypotheses must be explicit rather than invented.
+const whyEmpty=ctx.renderInvestmentStyleStrip({style_context:{
+  status:'observed',style_regime:'mixed',
+  causal_knowledge_status:'no_matching_distilled_knowledge',causal_drivers:[],
+}});
+assert.ok(whyEmpty.includes('背后的资金流向还缺少可靠证据'));
+
 const dividends=ctx.renderDividendChart([{year:'2025',dividend_per_10:4,
   buyback_per_10:1,total_per_10:5,yield_pct:4}]);
 assert.ok(dividends.includes('回购不是现金分红'));
