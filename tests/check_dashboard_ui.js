@@ -91,14 +91,75 @@ const aligned=ctx.renderChipPositionChart({
     {period:'2026-09-30',price_date:'2026-09-29',holders:120000,price:12},
   ],
 });
-assert.ok(aligned.includes('区间股价变化'));
+assert.ok(aligned.includes('上涨伴随明显增户，筹码分散风险上升'));
+assert.ok(aligned.includes('区间股价'));
 assert.ok(aligned.includes('+20.00%'));
-assert.ok(aligned.includes('区间股东户数变化'));
+assert.ok(aligned.includes('股东户数'));
 assert.ok(aligned.includes('2026-09-29'));
 assert.ok(aligned.includes('股东户数与同期股价走势'));
 assert.ok(aligned.includes('实际收盘价'));
 assert.ok(aligned.includes('<table>'));
 assert.ok(!aligned.includes('52周低位'));  // genuine history replaces gauge
+
+// The user's real report: price down 25.09%, holder accounts up 81.37%.
+// This is a dispersion warning, NOT a sign of healthier shareholder structure.
+const reported=ctx.renderChipPositionChart({
+  price_holder_series:[
+    {period:'2024-09-30',holders:100000,price:100},
+    {period:'2025-03-31',holders:145000,price:82},
+    {period:'2025-06-30',holders:200000,price:70},
+    {period:'2026-06-30',holders:181370,price:74.91},
+  ],
+});
+assert.ok(reported.includes('-25.09%'));
+assert.ok(reported.includes('+81.37%'));
+assert.ok(reported.includes('股价下跌、股东户数大增，筹码趋于分散'));
+assert.ok(reported.includes('这不能解释为筹码改善'));
+assert.ok(reported.includes('最明显的一段是'));
+assert.ok(reported.includes('2024-09-30 至 2025-03-31'));
+assert.ok(!reported.includes('区间股价变化'));
+assert.ok(!reported.includes('chip-history-summary'));
+
+// Price DOWN while holders DOWN is possible concentration, not proof of absorption.
+const downAndFewer=ctx.explainHolderPriceMovement([
+  {period:'2025-12-31',price:100,holders:10000},
+  {period:'2026-06-30',price:70,holders:7000},
+]);
+assert.equal(downAndFewer.status,'improve');
+assert.ok(downAndFewer.headline.includes('筹码集中迹象'));
+assert.ok(downAndFewer.explanation.includes('不能证明抛压已经结束'));
+
+// Rally with growing holder count is a dispersion warning.
+const upAndMore=ctx.explainHolderPriceMovement([
+  {period:'2025-12-31',price:100,holders:10000},
+  {period:'2026-06-30',price:145,holders:14800},
+]);
+assert.equal(upAndMore.status,'risk');
+assert.ok(upAndMore.headline.includes('上涨伴随明显增户'));
+
+// Rally with fewer holders suggests concentration, but no inferred institution.
+const upAndFewer=ctx.explainHolderPriceMovement([
+  {period:'2025-12-31',price:100,holders:10000},
+  {period:'2026-06-30',price:125,holders:8100},
+]);
+assert.equal(upAndFewer.status,'improve');
+assert.ok(upAndFewer.explanation.includes('不能据此断定是机构持续吸筹'));
+
+// A price move without a meaningful holder-count change is neutral.
+const flatCounts=ctx.explainHolderPriceMovement([
+  {period:'2025-12-31',price:100,holders:10000},
+  {period:'2026-06-30',price:90,holders:10200},
+]);
+assert.equal(flatCounts.status,'neutral');
+assert.ok(flatCounts.headline.includes('暂未出现明显筹码信号'));
+
+// A drawdown with increasing accounts cannot be mislabeled as "improving".
+const downAndMore=ctx.explainHolderPriceMovement([
+  {period:'2025-12-31',price:100,holders:10000},
+  {period:'2026-06-30',price:80,holders:14000},
+]);
+assert.equal(downAndMore.status,'risk');
+
 const insufficientHistory=ctx.renderChipPositionChart({
   status:'insufficient_data',price_holder_series:[],
 });
