@@ -111,6 +111,79 @@ def _select_sources(excerpts: Iterable, cutoff: date, limit: int = 10) -> list:
     return selected
 
 
+# Regime is an observation, not a forecast.  Do not attach explanations
+# of technology leadership to an observed dividend-up/technology-down window.
+# The filter is intentionally narrow: do not reject normal discussion of
+# *previous* tech strength as a setup for its subsequent correction.
+def _observed_rotation(context: Mapping | None) -> str:
+    ctx = context or {}
+    if not isinstance(ctx, Mapping):
+        return "unknown"
+    nested = ctx.get("a_share_style") or ctx.get("style_context") or {}
+    style = nested if isinstance(nested, Mapping) and nested else ctx
+    try:
+        red = float(style["dividend_index_return_pct"])
+        growth = float(style["growth_index_mean_return_pct"])
+    except (KeyError, TypeError, ValueError):
+        return "unknown"
+    from math import isfinite
+    if not (isfinite(red) and isfinite(growth)):
+        return "unknown"
+    if red > 0 and growth < -2 and red - growth > 2:
+        return "dividend_up_growth_down"
+    if growth > 0 and red < -2 and growth - red > 2:
+        return "growth_up_dividend_down"
+    if red > growth + 2 and growth < -2:
+        return "growth_selloff_dividend_relative"
+    if growth > red + 2 and red < -2:
+        return "dividend_selloff_growth_relative"
+    return "other"
+
+
+# Hard exclusions only for explicit, *present tense* opposing narratives.
+# Historical/conditional statements require separate time logic, rather than
+# treating a past crowded trade as evidence of today's fund flows.
+_CONTRADICTS_DIVIDEND_LEAD = re.compile(
+    r"红利(?:股|板块|资产|类产品|类资金|相对)?[^，。；]{0,14}"
+    r"(?:承压|走弱|领跌|相对下跌|被边缘化|遭抛售|弱于科技|跌得更厉害)|"
+    r"(?:资金|机构|投资者|公募|市场)[^，。；]{0,20}"
+    r"(?:更愿意?追(?:逐)?科技|更愿追科技|更偏科技|转向科技|流向科技|涌入科技|追捧科技)|"
+    r"科技(?:股|成长|板块|主题|类指数基金)?[^，。；]{0,19}"
+    r"(?:持续领涨|正在领涨|相对走强|跑赢红利|买盘持续增强|受到被动买盘推动上涨)"
+)
+_CONTRADICTS_GROWTH_LEAD = re.compile(
+    r"科技(?:股|成长|板块|主题)?[^，。；]{0,16}"
+    r"(?:承压|大幅回撤|持续下跌|遭抛售|跑输红利)|"
+    r"(?:资金|机构|投资者|公募)[^，。；]{0,20}"
+    r"(?:更偏红利|转向红利|流向红利|追捧红利)|"
+    r"红利(?:股|板块|资产)?[^，。；]{0,14}(?:持续领涨|跑赢科技|相对走强)"
+)
+
+
+def _conflicts_with_observed_style(insight: str, rotation: str) -> bool:
+    """Reject statements that cannot explain this *observed* relative return."""
+    # Old leadership explicitly identified as old is not an account of today's
+    # price movements. Let such background through only if the current reversal
+    # is also clearly described in the same explanation.
+    recent_past = bool(re.search(r"此前|之前|前期|过去|先前|一度", insight))
+    reversal = bool(re.search(r"如今|随后|转而|反转|获利回吐|回撤|高低切", insight))
+    if recent_past and reversal:
+        return False
+    if rotation == "dividend_up_growth_down":
+        return bool(_CONTRADICTS_DIVIDEND_LEAD.search(insight))
+    if rotation == "growth_up_dividend_down":
+        return bool(_CONTRADICTS_GROWTH_LEAD.search(insight))
+    return False
+
+
+def _compatible_reasons(items: list[dict], rotation: str) -> list[dict]:
+    return [
+        item for item in items
+        if isinstance(item, dict)
+        and not _conflicts_with_observed_style(str(item.get("insight") or ""), rotation)
+    ]
+
+
 def _safe_fallback(selected: list) -> list[dict]:
     # Fallbacks may only express hypotheses related to actual selected text.
     text = "\n".join(str(getattr(e, "distilled", "") or "") for e in selected)
@@ -136,14 +209,29 @@ async def build_market_style_reasons(
         "transcript" in str(getattr(x, "source", "") or "").lower()
         for x in selected
     )
-    baseline = _safe_fallback(selected)
+    rotation = _observed_rotation(market_context)
+    baseline = _compatible_reasons(_safe_fallback(selected), rotation)
     # Preserves individual causal chains from the author's distilled source.
     # Only vetted, rewritten abstractions enter style_context and the UI.
     snippets = [
         _deidentify_seed(str(getattr(e, "distilled", "") or "")[:950], selected)
         for e in selected[:8]
     ]
+    style = market_context or {}
+    observation = (
+        "本轮同口径指数观察：" +
+        "上证红利=" + str(style.get("dividend_index_return_pct", "未知")) + "%，" +
+        "科技成长=" + str(style.get("growth_index_mean_return_pct", "未知")) + "%，" +
+        "统计截止=" + str(style.get("style_observed_as_of") or as_of) + "，" +
+        "窗口=" + str(style.get("style_window") or "未知") +
+        "，观测形态=" + rotation + "。"
+    ) if isinstance(style, Mapping) else "当前行情缺失，不能证明任何资金流向。"
     prompt = (
+        observation +
+        "先回答上述真实涨跌格局。知识库材料可能来自科技领涨的旧阶段，"
+        "不能把旧阶段的主张改写成这轮科技下跌、红利上涨的原因。"
+        "尤其在红利上涨而科技下跌时，红利承压、资金仍集中追逐科技"
+        "并不是对当前现象的解释。无法从材料找到方向一致的机制就返回空数组。"
         "请从以下匿名化投资研究中，提炼2至3个能解释红利与科技成长相对表现的"
         "不同原因。请像知乎上认真回答问题的投资研究者那样写，说人话，"
         "一个原因讲清一个经济机制，不要写成审计报告或条件清单。"
@@ -173,7 +261,9 @@ async def build_market_style_reasons(
         )
     except Exception:
         pass  # A quote API failure must not silently invent a market explanation.
-    validated = validate_method_output(generated, selected)
+    validated = _compatible_reasons(
+        validate_method_output(generated, selected), rotation,
+    )
     reasons = validated[:3] if validated else baseline[:3]
     return {
         "status": ("distilled_hypotheses" if validated else
