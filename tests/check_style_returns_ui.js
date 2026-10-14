@@ -85,6 +85,32 @@ assert.ok(reasons.includes('class="style-cause-item"'));
 assert.ok(reasons.includes('并不代表已证实资金从科技板块流向红利板块'));
 assert.ok(!reasons.includes('买股票的老木匠'));
 assert.ok(!reasons.includes('xueqiu.com'));
+// Screenshot regression: the two index numbers are from one observed window,
+// and commentary claiming technology buyers / dividend pressure cannot explain it.
+const reversed=[
+  '政策资金更偏科技，科技类指数基金批量发行带来被动买盘，红利类产品供给偏少；科技估值被推高，传统红利相对承压。',
+  '游资和量化让红利股短期波动被放大；基本面没变，资金更愿追科技主题。',
+];
+const screenshotStyle={
+  ...base,style_observed_as_of:'2026-10-13',
+  dividend_index_return_pct:2.30,growth_index_mean_return_pct:-12.31,
+  dividend_minus_growth_ytd_pp:14.61,
+  causal_knowledge_status:'distilled_hypotheses',
+  causal_drivers:reversed.map(mechanism=>({mechanism,
+    evidence_status:'private_research_hypothesis'})),
+};
+const guarded=ctx.renderInvestmentStyleStrip({style_context:screenshotStyle});
+assert.ok(guarded.includes('>+2.30%</strong>'));
+assert.ok(guarded.includes('>-12.31%</strong>'));
+assert.ok(guarded.includes('红利上涨，科技成长回撤'));
+assert.ok(!guarded.includes('红利相对承压'));
+assert.ok(!guarded.includes('资金更愿追科技'));
+assert.ok(guarded.includes('历史观点解释的是另一个市场阶段'));
+assert.equal((guarded.match(/class="style-return-row"/g)||[]).length,2);
+assert.ok(ctx.styleCauseDirectionConflict(reversed[0], screenshotStyle));
+assert.ok(!ctx.styleCauseDirectionConflict(
+  '成长板块高估值回撤，红利股相对抗跌。',screenshotStyle));
+
 const noKnowledge=ctx.renderInvestmentStyleStrip({style_context:{
   ...base,causal_knowledge_status:'no_matching_distilled_knowledge',
   causal_drivers:[],
