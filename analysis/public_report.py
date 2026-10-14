@@ -56,6 +56,45 @@ _SOURCE_ATRIBUTION = re.compile(
 _POST_ID = re.compile(r"(?<![0-9A-Za-z_])(?:用户|账号|作者|ID|id)[：:=\s]+[0-9A-Za-z_]{8,}")
 _SENTENCE_BREAK = re.compile(r"(?<=[。！？；\n])")
 
+# Internal reviewer/methodology statements are not portfolio conclusions.
+# Match only administrative phrases, rather than broad financial vocabulary:
+# investors still need to see *specific*, dated disagreements in the data.
+_INTERNAL_PROCESS_CLAUSE = re.compile(
+    r"^\\s*(?:"
+    r"跨(?:研究|分析)?维度.{0,24}(?:重复|因子|计分|加权|底层事实)|"
+    r"(?:同一组?|相同)(?:底层)?事实.{0,36}(?:只计|一次|重复(?:计|加权))|"
+    r"(?:重复因子|重复计分|重复加权|因子去重)|"
+    r"(?:不因|避免).{0,55}(?:多方向|多维度|多个维度).{0,35}(?:重复|加权)"
+    r")"
+)
+_GENERIC_REVIEW_CONFLICT = re.compile(
+    r"^\\s*(?:筹码\\s*[/／、与和]\\s*资金面|资金面\\s*[/／、与和]\\s*筹码)"
+    r"存在口径冲突[，,]?\\s*(?:不作为|不纳入)(?:当前)?方向性证据"
+)
+
+
+def strip_internal_process_commentary(value: str) -> str:
+    """Discard detachable QA/methodology clauses without rewriting investment facts.
+
+    Split on strong Chinese punctuation so an LLM's trailing, same-line audit
+    appendix is removed while its preceding numeric investment thesis survives.
+    Do not generically delete '口径冲突': concrete and dated data discrepancies
+    belong in a research report.
+    """
+    if not value:
+        return value
+    pieces = re.split(r"([。！？；;\\n])", value)
+    kept = []
+    for index in range(0, len(pieces), 2):
+        clause = pieces[index]
+        separator = pieces[index + 1] if index + 1 < len(pieces) else ""
+        if (_INTERNAL_PROCESS_CLAUSE.match(clause)
+                or _GENERIC_REVIEW_CONFLICT.match(clause)):
+            continue
+        kept.append(clause + separator)
+    return "".join(kept).strip()
+
+
 
 def _private_cues(raw: Mapping[str, Any]) -> tuple[set[str], set[str], list[str]]:
     target = re.sub(r"\D", "", str(raw.get("stock_code") or ""))[-6:]
@@ -119,7 +158,7 @@ def _safe_prose(value: str, names: set[str], cases: set[str],
         part for part in pieces
         if part and not _contaminated(part, names, cases, excerpts, target_code)
     ]
-    result = "".join(clean).strip()
+    result = strip_internal_process_commentary("".join(clean).strip())
     return result or "本项需要依据本公司数据重新分析。"
 
 
