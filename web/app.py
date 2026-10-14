@@ -1748,7 +1748,8 @@ function renderDividendChart(data) {
 
 // 股东户数(柱,蓝) + 同期股价(线,橙) 走势图。两条序列都以首期=100 指数化、
 // 共用一条 y 轴 (避免双轴混标); 悬停显示原始数值, 图下附原始数据表。
-function renderHolderChart(series) {
+function renderHolderChart(series, priceSource='daily_close') {
+  const f10Reference = priceSource === 'ths_f10';
   const n = series.length;
   const W = 720, H = 250, padL = 52, padR = 16, padT = 30, padB = 36;
   const plotW = W - padL - padR, plotH = H - padT - padB;
@@ -1805,11 +1806,12 @@ function renderHolderChart(series) {
     '<text x="' + (padL + 180) + '" y="20">股价 (首期=100)</text></g>';
 
   const table = '<div class="chip-holder-table"><table><thead><tr><th>统计截止日</th>'+
-    '<th>股东户数</th><th>收盘价（元）</th><th>价格日期</th></tr></thead><tbody>'+
+    '<th>股东户数</th><th>'+(f10Reference?'F10参考股价（元）':'收盘价（元）')+
+    '</th><th>'+(f10Reference?'数据来源':'价格日期')+'</th></tr></thead><tbody>'+
     series.map(p=>'<tr><td>'+escapeHtml(String(p.period).slice(0,10))+
       '</td><td>'+Number(p.holders).toLocaleString('zh-CN')+'</td><td>'+
       Number(p.price).toFixed(2)+'</td><td>'+
-      escapeHtml(String(p.price_date||p.period).slice(0,10))+
+      (f10Reference?'同花顺F10':escapeHtml(String(p.price_date||p.period).slice(0,10)))+
       '</td></tr>').join('')+'</tbody></table></div>';
 
   return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" style="max-width:100%;"' +
@@ -2108,27 +2110,58 @@ function renderIndustryBreadthChart(industry) {
   ]);
 }
 
-function renderChipPositionChart(context) {
-  if(!context) return '';
-  const aligned=(Array.isArray(context.price_holder_series)?context.price_holder_series:[])
-    .filter(p=>p && /^\d{4}-\d{2}-\d{2}$/.test(String(p.period||'')) &&
+function renderChipPositionChart(context, report) {
+  const rawSeries=(context && Array.isArray(context.price_holder_series))
+    ? context.price_holder_series : [];
+  let aligned=rawSeries.filter(p=>p &&
+      /^\d{4}-\d{2}-\d{2}$/.test(String(p.period||'')) &&
       numericOrNull(p.holders)>0 && numericOrNull(p.price)>0)
     .sort((a,b)=>String(a.period).localeCompare(String(b.period)));
+  let f10Reference=false;
+
+  // For older live reports, chip_price_context can be completely absent even
+  // when the already-returned THS F10 holder/price comparison has multiple dates.
+  // Never use this live-only F10 data in historical point-in-time reports.
+  if(aligned.length<2 && report && report.research_mode!=='historical'){
+    const facts=((report.fundamentals||{}).facts||{});
+    const cutoff=String(report.as_of||'').slice(0,10);
+    const f10=(Array.isArray(facts.holder_count_series)?facts.holder_count_series:[])
+      .filter(p=>p && /^\d{4}-\d{2}-\d{2}$/.test(String(p.period||'')) &&
+        (!cutoff || String(p.period)<=cutoff) &&
+        numericOrNull(p.holders)>0 && numericOrNull(p.price)>0)
+      .map(p=>({period:p.period,holders:Number(p.holders),price:Number(p.price)}))
+      .sort((a,b)=>String(a.period).localeCompare(String(b.period)));
+    if(f10.length>=2){
+      aligned=f10;
+      f10Reference=true;
+    }
+  }
+
   if(aligned.length>=2){
     const first=aligned[0],last=aligned[aligned.length-1];
     const changePct=(v1,v2)=>((Number(v2)/Number(v1)-1)*100);
     const hp=changePct(first.holders,last.holders);
     const pp=changePct(first.price,last.price);
     const signed=v=>(v>0?'+':'')+v.toFixed(2)+'%';
+    const note=f10Reference
+      ? '股东户数与股价均来自同花顺F10历史对照；F10价格是该页面参考值，未由独立日线行情接口核验日期和复权口径，不宜当作精确收盘价。'
+      : '已披露股东户数与对应统计截止日之前最近交易日的实际收盘价。';
     return '<div class="chip-history-summary">'+
       '<div><span>区间股价变化</span><strong>'+signed(pp)+'</strong></div>'+
       '<div><span>区间股东户数变化</span><strong>'+signed(hp)+'</strong></div></div>'+
-      '<p class="section-caption">已披露股东户数与对应统计截止日之前最近交易日的实际收盘价，'+
-      '区间 '+escapeHtml(first.period)+'—'+escapeHtml(last.period)+
-      '；按首期=100指数化，仅展示真实配对日期，不插值、不将股东户数当作散户精确人数。</p>'+
-      renderHolderChart(aligned)+
+      '<p class="section-caption">'+note+' 区间 '+escapeHtml(first.period)+'—'+escapeHtml(last.period)+
+      '；按首期=100指数化，仅展示真实来源所列的日期，不插值、不将股东户数当作散户精确人数。</p>'+
+      renderHolderChart(aligned,f10Reference?'ths_f10':'daily_close')+
       '<p class="section-caption">仅凭股东户数变化无法证明机构派发或吸筹。'+
-      '价格是未经复权的日收盘价，跨分红、送转、拆股需另作复权比较。</p>';
+      (f10Reference?'F10股价口径与未复权日线可能不同，跨分红、送转、拆股须另作可比调整。':
+        '价格是未经复权的日收盘价，跨分红、送转、拆股需另作复权比较。')+'</p>';
+  }
+  if(!context){
+    const facts=((report||{}).fundamentals||{}).facts||{};
+    const holderPoints=Array.isArray(facts.holder_count_series)?facts.holder_count_series.length:0;
+    return '<p class="section-caption">本次报告缺少已核验的股价与股东户数配对数据'+
+      (holderPoints?'；F10返回 '+holderPoints+' 期股东记录，但未取得至少2期有股价的可比点':'；股东户数历史记录也暂缺')+
+      '。当前不编造走势图，请检查历史行情和股东数据接口。</p>';
   }
   if(numericOrNull(context.position_52w_pct)===null)
     return '<p class="section-caption">尚未取得至少两个有披露依据的股东统计期与同期实际收盘价配对；'+
@@ -2182,8 +2215,8 @@ function renderDashboardCharts(report) {
   html+='<div class="market-structure-lines" role="group" aria-label="市场情绪与行业广度">'+
     renderSentimentMixChart(report.sentiment)+
     renderIndustryBreadthChart(report.industry_comparison)+'</div>';
-  html+=chartTile('股价位置 × 筹码分散','真实历史收盘价与已披露股东户数按截止日对齐；需区分户数变化、股价变化与机构买卖',
-    renderChipPositionChart(report.chip_price_context));
+  html+=chartTile('股价位置 × 筹码分散','优先对齐真实收盘价与已披露股东户数；旧报告可显示标明来源的F10参考序列',
+    renderChipPositionChart(report.chip_price_context, report));
   html+=chartTile('历史估值区间','PE(TTM)历史序列，失真区间将按原图分位裁剪',
     renderValuationHistoryChart((report.valuation_history || {}).history_monthly || []));
   html+='</div></section>';
