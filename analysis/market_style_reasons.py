@@ -174,7 +174,7 @@ async def build_market_style_reasons(
     except Exception:
         pass  # A quote API failure must not silently invent a market explanation.
     validated = validate_method_output(generated, selected)
-    reasons = validated[:4] if validated else baseline
+    reasons = validated[:3] if validated else baseline[:3]
     return {
         "status": ("distilled_hypotheses" if validated else
                    "keyword_grounded_fallback" if baseline else
@@ -204,7 +204,7 @@ def market_style_reasons_prompt_block(context: Mapping | None) -> str:
     ]
     drivers = context.get("drivers") or []
     if not drivers:
-    rows.append(
+        rows.append(
             "本次没有可转化为公司研究的知识库因果机制；"
             "不得假装已阅读缺失的直播/帖子，也不得把指数上涨等同于资金净流入。"
         )
