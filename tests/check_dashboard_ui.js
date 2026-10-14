@@ -53,13 +53,24 @@ const metricsHtml=ctx.renderDashboardCharts({
   valuation:{pb:3.98,roe_pct:19.6,valuation_as_of:'2026-10-09'},
   fundamentals:{facts:{cash_to_profit_ratio:1.42,finance_period:'2026-06-30'}},
 });
+// Official-filing cash coverage must retain a distinct source/date label.
+const filingMetrics=ctx.renderDashboardCharts({
+  ...report,
+  fundamentals:{facts:{
+    cash_to_profit_ratio:1.171,cash_profit_period:'2026-06-30',
+    cash_profit_source:'巨潮资讯原始定期报告',
+  }},
+});
+assert.ok(filingMetrics.includes('现金流/归母净利'));
+assert.ok(filingMetrics.includes('1.17 倍'));
+assert.ok(filingMetrics.includes('2026-06-30 · 官方财报'));
 const headlineStrip=metricsHtml.split('class="metric-strip primary-kpis"')[1]
   ?.split('<div class="chart-grid"')[0] || '';
 assert.ok(headlineStrip.includes('role="group" aria-label="股票主要财务指标"'));
 assert.equal((headlineStrip.match(/class="metric"/g)||[]).length,4);
 for(const fact of ['参考股价','30.40 元','2026-10-13','市净率 PB','3.98 倍',
                    '2026-10-09','F10 披露ROE','19.60%',
-                   '现金流/利润','1.42 倍','2026-06-30']) {
+                   '现金流/归母净利','1.42 倍','2026-06-30']) {
   assert.ok(headlineStrip.includes(fact),'Missing aligned KPI: '+fact);
 }
 assert.ok(ctx.renderChipPositionChart({
