@@ -2203,7 +2203,9 @@ function renderDashboardCharts(report) {
     metricCard('参考股价',price===null?'暂缺':price.toFixed(2)+' 元',quote.quote_time || report.as_of || '报价时点未知')+
     metricCard('市净率 PB',pb===null?'暂缺':pb.toFixed(2)+' 倍',val.valuation_as_of || 'F10时点未知')+
     metricCard('F10 披露ROE',roe===null?'暂缺':roe.toFixed(2)+'%',val.valuation_as_of || '需注意报告期间')+
-    metricCard('现金流/利润',cashRatio===null?'暂缺':cashRatio.toFixed(2)+' 倍',facts.finance_period || '报告期未知')+
+    metricCard('现金流/归母净利',cashRatio===null?'暂缺':cashRatio.toFixed(2)+' 倍',
+      (facts.cash_profit_period || facts.finance_period || '报告期未知')+
+      (facts.cash_profit_source?' · 官方财报':''))+
     '</div>';
   html+='<div class="chart-grid" style="margin-top:16px;">';
   html+=chartTile('盈利质量的变化','ROE、毛利率与净利率；季报ROE为报告期间累计数，不跨期年化',
