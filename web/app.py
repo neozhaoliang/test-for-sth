@@ -2475,6 +2475,40 @@ function renderInvestorReference(model) {
     '可能改变长期收益；不能把这些情景当作已核实的公司价值。</p></div>';
   return html;
 }
+// Give investors a readable explanation rather than the model's internal
+// four-field research checklist. Different hypotheses may describe the same
+// underlying mechanism, so keep only one example per theme in the short view.
+function readableStyleCauses(drivers) {
+  const themes=new Set(), result=[];
+  for(const item of (Array.isArray(drivers)?drivers:[])){
+    if(!item || item.evidence_status!=='private_research_hypothesis' ||
+       typeof item.mechanism!=='string') continue;
+    const explanation=item.mechanism.trim();
+    if(!explanation)continue;
+    const text=[explanation,item.conditions||''].join(' ');
+    let key='general', label='其他可能因素';
+    if(/游资|量化|高频|短线交易|换手|交易拥挤/.test(text)) {
+      key='trading'; label='短线交易';
+    } else if(/国债|债券收益率|利率变化|险资/.test(text)) {
+      key='rates'; label='利率与分红';
+    } else if(/股息|派息|分红现金流|红利.+基本面|现金回报/.test(text) &&
+              !/ETF发行|ETF供给/.test(text)){
+      key='dividend'; label='现金回报';
+    } else if(/ETF|公募|基金|调仓|存量资金|增量资金|资金迁移|资金再平衡/.test(text)){
+      key='allocation'; label='资金配置';
+    } else if(/科技|成长|估值|盈利预期/.test(text)){
+      key='valuation'; label='估值变化';
+    }
+    // Unclassified arguments remain distinct; do not discard different ideas.
+    const dedupeKey=key==='general'?'general_'+result.length:key;
+    if(themes.has(dedupeKey))continue;
+    themes.add(dedupeKey);
+    result.push({label,explanation});
+    if(result.length>=3)break;
+  }
+  return result;
+}
+
 function renderInvestmentStyleStrip(model) {
   const style=(model||{}).style_context || {};
   if(style.status!=='observed')return '';
@@ -2534,34 +2568,28 @@ function renderInvestmentStyleStrip(model) {
         '不是相同的比较口径，不能直接把这两个百分数相减得到该涨跌差。</p>';
     }
   }
-  const causes=(Array.isArray(style.causal_drivers)?style.causal_drivers:[]).filter(
-    item=>item && item.evidence_status==='private_research_hypothesis' &&
-      typeof item.mechanism==='string' && item.mechanism.trim()).slice(0,4);
-  html+='<div class="style-why"><h5>为什么出现这种风格变化？</h5>';
-  if(causes.length){
-    html+='<p class="section-caption">以下是从历史投资研究中提炼的可能驱动，仍需市场数据验证，'
-      +'并非已经查实的资金净流入或交易指令。</p>';
-    html+='<ol class="style-cause-list">'+causes.map(item=>
-      '<li><div class="style-cause-mechanism">'+escapeHtml(item.mechanism)+'</div>'+
-      '<details><summary>成立条件、反向解释与核验办法</summary>'+
-      '<p><b>成立条件：</b>'+escapeHtml(item.conditions||'尚未核实')+'</p>'+
-      '<p><b>可能的反向解释：</b>'+escapeHtml(item.alternative||'尚未核实')+'</p>'+
-      '<p><b>需要核验：</b>'+escapeHtml(item.verification||'尚无资料')+'</p>'+
-      '</details></li>'
-    ).join('')+'</ol>';
+  const causes=readableStyleCauses(style.causal_drivers);
+  html+='<section class="style-why" aria-label="市场风格的可能原因">'+
+    '<h5>为什么会这样？</h5>';
+  if(causes.length) {
+    html+='<div class="style-cause-prose">'+causes.map(item=>
+      '<p class="style-cause-item"><strong>'+escapeHtml(item.label)+'：</strong>'+
+      escapeHtml(item.explanation)+'</p>'
+    ).join('')+'</div>'+
+      '<p class="style-cause-caveat">这些是可能的解释，并不代表已证实资金从科技板块流向红利板块。'+
+      '判断是否真的调仓，还需要查看同期的基金份额和持仓变化。</p>';
   } else if(style.causal_knowledge_status==='no_matching_distilled_knowledge' ||
             style.causal_knowledge_status==='knowledge_available_unresolved'){
-    html+='<p class="section-caption">本次没有匹配且已经完成提炼的市场机制观点；'
-      +'可能是相关帖子或直播尚未入库、提炼未完成，也可能确无适用解释。'
-      +'目前只能确认相对涨跌，不能凭指数表现编造资金转向的原因。</p>';
+    html+='<p class="style-cause-caveat">指数的相对涨跌可以确认，背后的资金流向还缺少可靠证据。'+
+      '暂时不能断言资金正在从科技转向红利。</p>';
   } else if(style.causal_knowledge_status==='historical_method_not_available'){
-    html+='<p class="section-caption">历史研究模式未使用后来的知识提炼方法，'
-      +'不追溯添加当时未核验的解释。</p>';
+    html+='<p class="style-cause-caveat">当时的数据还不足以解释这轮风格变化，'+
+      '这里不使用后来获得的资料倒推原因。</p>';
   } else {
-    html+='<p class="section-caption">当前报告尚未提供经过核验边界处理的因果解释；'
-      +'请重新生成报告，或检查后台知识提炼是否成功。</p>';
+    html+='<p class="style-cause-caveat">暂时缺少足够的原因分析资料。'+
+      '可以先参考上方指数表现，不能仅凭涨跌猜测资金流向。</p>';
   }
-  html+='</div>';
+  html+='</section>';
   events.slice(0,2).forEach(e=>{
     html+='<p><b>市场事件：</b>'+escapeHtml(e.headline||'')+
       '（'+escapeHtml(e.date||'')+'）'+
