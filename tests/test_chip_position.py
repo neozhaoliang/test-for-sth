@@ -1,5 +1,6 @@
 """Price location must condition interpretation of retail-holder dispersion."""
 import pytest
+import pandas as pd
 
 from analysis.chip_position import assess_chip_price_context, render_chip_price_context
 
