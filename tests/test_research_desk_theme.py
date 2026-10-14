@@ -113,9 +113,15 @@ def test_wechat_style_reading_column_applies_to_entire_page_without_wide_breakou
     assert "width:min(calc(100% - 48px),840px)" in css
     assert "width:min(calc(100% - 36px),840px)" in css
     assert "1380px" not in css
-    # Two KPI columns and full-width charts/ROE calculator instead of squeezing
-    # unrelated dashboard panels side by side in a 840px article column.
-    assert "#result .metric-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }" in css
+    # The four headline KPIs are one horizontal strip, while other report
+    # panels keep their own layouts inside the 840px reading column.
+    assert "#result .dashboard-charts .metric-strip.primary-kpis" in css
+    assert "grid-template-columns:repeat(4,minmax(0,1fr));" in css
+    assert "gap:0;" in css
+    assert "#result .dashboard-charts .primary-kpis .metric + .metric" in css
+    assert "border-left:1px solid #e0e8f3;" in css
+    assert "grid-template-columns:repeat(4,minmax(149px,1fr));" in css
+    assert "overflow-x:auto;" in css
     assert "#result .chart-grid { grid-template-columns:minmax(0,1fr); }" in css
     assert "#result .lab-layout { grid-template-columns:minmax(0,1fr); }" in css
     assert "#result .lab-result { position:static; }" in css

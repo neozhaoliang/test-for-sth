@@ -722,3 +722,73 @@ body, input, select, textarea, button { font-family:inherit; }
   #result .chip-history-summary > div { padding:11px; }
   #result .chip-history-summary strong { font-size:17px; }
 }
+
+
+/* Stock report's four headline facts belong to ONE aligned reading strip,
+   not four large independent cards. Scoped: the investor-return metric pair
+   elsewhere continues to use its normal layout. */
+#result .dashboard-charts .metric-strip.primary-kpis {
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:0;
+  width:100%;
+  min-width:0;
+  margin:2px 0 0;
+  border:1px solid #dfe7f3;
+  border-radius:12px;
+  background:#f8fafd;
+  overflow:hidden;
+}
+#result .dashboard-charts .primary-kpis .metric {
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  min-width:0;
+  padding:14px 15px;
+  margin:0;
+  background:transparent;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+}
+#result .dashboard-charts .primary-kpis .metric + .metric {
+  border-left:1px solid #e0e8f3;
+}
+#result .dashboard-charts .primary-kpis .metric label {
+  display:block;
+  margin:0;
+  font-size:11px;
+  font-weight:650;
+  color:#72809a;
+  white-space:nowrap;
+}
+#result .dashboard-charts .primary-kpis .metric strong {
+  display:block;
+  margin:6px 0 3px;
+  font-size:clamp(19px,2.4vw,24px);
+  font-weight:800;
+  line-height:1.25;
+  letter-spacing:-.035em;
+  white-space:nowrap;
+  font-variant-numeric:tabular-nums;
+}
+#result .dashboard-charts .primary-kpis .metric small {
+  display:block;
+  margin:0;
+  font-size:10px;
+  line-height:1.55;
+  color:#7d8ba2;
+  overflow-wrap:anywhere;
+}
+/* On phones preserve the requested single row rather than stacking cards.
+   Only the KPI strip scrolls horizontally, never the whole article. */
+@media(max-width:700px) {
+  #result .dashboard-charts .metric-strip.primary-kpis {
+    grid-template-columns:repeat(4,minmax(149px,1fr));
+    overflow-x:auto;
+    overscroll-behavior-x:contain;
+    -webkit-overflow-scrolling:touch;
+  }
+  #result .dashboard-charts .primary-kpis .metric { padding:12px 13px; }
+  #result .dashboard-charts .primary-kpis .metric strong { font-size:20px; }
+}

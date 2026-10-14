@@ -624,6 +624,24 @@ _INDEX_HTML = """<!DOCTYPE html>
   .chart-tile h4 { font-size:14px; margin:0 0 5px; }
   .chart-tile .section-caption { margin-bottom:10px; }
   .chart-tile svg { display:block; max-width:100%; height:auto; }
+  /* Two compact, full-width rows instead of large market sentiment/industry tiles. */
+  .market-structure-lines { grid-column:1 / -1; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+  .market-structure-row { display:grid; grid-template-columns:160px minmax(130px,1fr) auto;
+    align-items:center; gap:14px; min-height:46px; padding:8px 2px; min-width:0; }
+  .market-structure-row + .market-structure-row { border-top:1px solid #edf1f7; }
+  .market-structure-heading { color:var(--ink); font-size:13px; font-weight:700; white-space:nowrap; cursor:help; }
+  .market-structure-track { display:flex; height:12px; width:100%; overflow:hidden; border-radius:999px; background:#ecf0f6; }
+  .market-structure-track span { display:block; height:100%; flex:none; }
+  .market-structure-values { display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center;
+    gap:5px 14px; white-space:nowrap; font-size:12px; font-variant-numeric:tabular-nums; color:#40516e; }
+  .market-structure-value { display:inline-flex; gap:6px; align-items:center; }
+  .market-structure-dot { display:inline-block; flex:none; height:8px; width:8px; border-radius:50%; }
+  .market-structure-missing { grid-column:2 / -1; color:var(--muted); font-size:12px; }
+  @media(max-width:700px) {
+    .market-structure-row { grid-template-columns:145px minmax(0,1fr); }
+    .market-structure-values { grid-column:2; justify-content:flex-start; }
+  }
+
   .chart-empty { padding:32px 10px; text-align:center; background:#f7f9ff; border:1px dashed #d6e1f1;
     border-radius:10px; font-size:12px; color:var(--muted); }
   .valuation-lab { border-color:#cbd5ff !important; }
@@ -672,6 +690,8 @@ _INDEX_HTML = """<!DOCTYPE html>
     .metric-strip,.chart-grid { grid-template-columns:1fr; }
     .research-options { align-items:stretch; }
     .metric strong { font-size:21px; }
+    .market-structure-row { grid-template-columns:1fr; gap:7px; padding:12px 0; }
+    .market-structure-values,.market-structure-missing { grid-column:1; }
   }
   @media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto !important; transition:none !important; } }
 </style>
@@ -2045,38 +2065,47 @@ function renderProfitabilityTrendChart(trend) {
   svg+='</svg>';
   return svg;
 }
-function renderSentimentMixChart(sentiment) {
-  if(!sentiment) return '';
-  const values=[
-    ['看多',numericOrNull(sentiment.bullish),'#cc5364'],
-    ['看空',numericOrNull(sentiment.bearish),'#18977b'],
-    ['中性',numericOrNull(sentiment.neutral),'#9ba8bd']
-  ];
-  if(values.some(x=>x[1]===null)||values.reduce((a,x)=>a+x[1],0)<=0) return '';
-  const total=values.reduce((a,x)=>a+x[1],0);
-  let pos=0, svg='<svg viewBox="0 0 590 108" width="100%" role="img" aria-label="雪球观点方向比例">';
-  values.forEach((item,i)=>{
-    const width=item[1]/total*550;
-    svg+='<rect x="'+(20+pos).toFixed(1)+'" y="17" width="'+width.toFixed(1)+'" height="32" fill="'+item[2]+'"><title>'+
-      escapeHtml(item[0]+': '+item[1])+'</title></rect>';
-    svg+='<circle cx="'+(25+i*184)+'" cy="79" r="5" fill="'+item[2]+'"/>';
-    svg+='<text x="'+(36+i*184)+'" y="83" font-size="12" fill="#40516e">'+item[0]+' '+(item[1]/total*100).toFixed(1)+'%</text>';
-    pos+=width;
-  });
-  return svg+'</svg>';
+// Compact, one-line market breadth indicators; no oversized chart cards.
+function renderMarketStructureRow(title, description, parts) {
+  const total=parts.reduce((acc,item)=>acc+item.value,0);
+  const valid=parts.length>0 && parts.every(item=>item.value!==null && Number.isFinite(item.value) && item.value>=0) && total>0;
+  const heading='<strong class="market-structure-heading" title="'+escapeHtml(description)+'">'+escapeHtml(title)+'</strong>';
+  if(!valid) {
+    return '<div class="market-structure-row" role="group">'+heading+
+      '<span class="market-structure-missing">当前没有足够的可比数据</span></div>';
+  }
+  const bars=parts.map(item=>
+    '<span style="width:'+(100*item.value/total).toFixed(3)+'%;background:'+item.color+'" title="'+
+    escapeHtml(item.description)+'"></span>').join('');
+  const legend=parts.map(item=>
+    '<span class="market-structure-value"><span class="market-structure-dot" style="background:'+
+    item.color+'"></span>'+escapeHtml(item.description)+'</span>').join('');
+  return '<div class="market-structure-row" role="group">'+heading+
+    '<div class="market-structure-track" role="img" aria-label="'+
+    escapeHtml(title+'：'+parts.map(item=>item.description).join('，'))+'">'+bars+'</div>'+
+    '<div class="market-structure-values">'+legend+'</div></div>';
 }
-
+function renderSentimentMixChart(sentiment) {
+  const s=sentiment || {};
+  const bullish=numericOrNull(s.bullish), bearish=numericOrNull(s.bearish), neutral=numericOrNull(s.neutral);
+  const values=[bullish,bearish,neutral];
+  const total=values.every(v=>v!==null && v>=0)?values.reduce((a,b)=>a+b,0):0;
+  const pct=v=>total>0?(100*v/total).toFixed(1)+'%':'暂缺';
+  return renderMarketStructureRow('市场讨论结构','雪球言论只能作为情绪信号，不能替代财务事实',[
+    {value:bullish,color:'#cc5364',description:'看多 '+pct(bullish)},
+    {value:bearish,color:'#18977b',description:'看空 '+pct(bearish)},
+    {value:neutral,color:'#9ba8bd',description:'中性 '+pct(neutral)}
+  ]);
+}
 function renderIndustryBreadthChart(industry) {
-  if (!industry) return '';
-  const adv=numericOrNull(industry.advancing),dec=numericOrNull(industry.declining);
-  if (adv===null || dec===null || adv<0 || dec<0 || adv+dec<=0) return '';
-  const total=adv+dec,aw=adv/total*540,dw=dec/total*540;
-  return '<svg viewBox="0 0 590 108" width="100%" role="img" aria-label="行业上涨和下跌家数">'+
-    '<rect x="20" y="14" width="'+aw.toFixed(1)+'" height="34" rx="5" fill="#ce5c68"/>'+
-    '<rect x="'+(20+aw).toFixed(1)+'" y="14" width="'+dw.toFixed(1)+'" height="34" rx="5" fill="#159a79"/>'+
-    '<text x="20" y="80" font-size="12" fill="#ad3e53">上涨 '+adv+' 家（'+(100*adv/total).toFixed(0)+'%）</text>'+
-    '<text x="290" y="80" font-size="12" fill="#197c68">下跌 '+dec+' 家（'+(100*dec/total).toFixed(0)+'%）</text>'+
-    '</svg>';
+  const data=industry || {};
+  const adv=numericOrNull(data.advancing),dec=numericOrNull(data.declining);
+  const total=adv!==null && dec!==null && adv>=0 && dec>=0?adv+dec:0;
+  const pct=v=>total>0?(100*v/total).toFixed(0)+'%':'暂缺';
+  return renderMarketStructureRow('行业上涨与下跌家数','同一交易时点的行业广度，不能独立当作投资结论',[
+    {value:adv,color:'#ce5c68',description:'上涨 '+(adv===null?'暂缺':adv)+' 家（'+pct(adv)+'）'},
+    {value:dec,color:'#159a79',description:'下跌 '+(dec===null?'暂缺':dec)+' 家（'+pct(dec)+'）'}
+  ]);
 }
 
 function renderChipPositionChart(context) {
@@ -2137,7 +2166,7 @@ function renderDashboardCharts(report) {
   let html='<section class="dashboard-charts" id="report-charts"><h3>数据概览与维度图谱</h3>'+
     '<p class="section-caption">图表仅展示当前报告真实返回的数据，不对缺失年份插值，也不自动将半年ROE年化。</p>';
   html+=renderInvestmentStyleStrip(report.valuation_model);
-  html+='<div class="metric-strip">'+
+  html+='<div class="metric-strip primary-kpis" role="group" aria-label="股票主要财务指标">'+
     metricCard('参考股价',price===null?'暂缺':price.toFixed(2)+' 元',quote.quote_time || report.as_of || '报价时点未知')+
     metricCard('市净率 PB',pb===null?'暂缺':pb.toFixed(2)+' 倍',val.valuation_as_of || 'F10时点未知')+
     metricCard('F10 披露ROE',roe===null?'暂缺':roe.toFixed(2)+'%',val.valuation_as_of || '需注意报告期间')+
@@ -2150,10 +2179,9 @@ function renderDashboardCharts(report) {
     scores.length>=6?renderDimensionBars(scores):'');
   html+=chartTile('历年分红与回购','金额和回购分开理解，原图含历史金额及备注',
     (report.dividend_chart || []).length?renderDividendChart(report.dividend_chart):'');
-  html+=chartTile('市场讨论结构','雪球言论只能作为情绪信号，不能替代财务事实',
-    renderSentimentMixChart(report.sentiment));
-  html+=chartTile('行业上涨与下跌家数','同一交易时点的行业广度，不能独立当作投资结论',
-    renderIndustryBreadthChart(report.industry_comparison));
+  html+='<div class="market-structure-lines" role="group" aria-label="市场情绪与行业广度">'+
+    renderSentimentMixChart(report.sentiment)+
+    renderIndustryBreadthChart(report.industry_comparison)+'</div>';
   html+=chartTile('股价位置 × 筹码分散','真实历史收盘价与已披露股东户数按截止日对齐；需区分户数变化、股价变化与机构买卖',
     renderChipPositionChart(report.chip_price_context));
   html+=chartTile('历史估值区间','PE(TTM)历史序列，失真区间将按原图分位裁剪',
