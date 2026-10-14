@@ -36,6 +36,7 @@ from analysis.position_risk import validated_quote_or_close
 from analysis.commodity import get_cycle_commodity_signal, get_rmb_trend_signal
 from analysis.freight import get_container_freight_signal
 from analysis.fundamentals import get_ths_fundamentals
+from analysis.live_financial_completion import complete_live_cash_profit
 from analysis.filing_calendar import get_financial_filing_calendar
 from analysis.industry import get_industry_comparison
 from analysis.margin import get_margin_signal
@@ -235,6 +236,13 @@ async def generate_report(
         )
 
     else:
+        # F10 only lists large financial-item changes: a published cash flow
+        # may be omitted even though the issuer's full report has the number.
+        # Reuse the already-loaded CNINFO filing calendar, and complete only
+        # a missing ratio from the same dated official report.
+        fundamentals = await complete_live_cash_profit(
+            fundamentals, filing_calendar,
+        )
         shareholder_trend = reconcile_live_shareholder_trend(
             shareholder_trend,
             fundamentals,
