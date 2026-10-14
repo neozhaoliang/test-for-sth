@@ -46,6 +46,22 @@ const report={
 };
 assert.ok(ctx.renderProfitabilityTrendChart(report.profitability_trend).includes('<svg'));
 assert.ok(ctx.renderDashboardCharts(report).includes('数据概览与维度图谱'));
+const metricsHtml=ctx.renderDashboardCharts({
+  ...report,
+  as_of:'2026-10-13',
+  realtime_quote:{latest_price:30.4,quote_time:'2026-10-13'},
+  valuation:{pb:3.98,roe_pct:19.6,valuation_as_of:'2026-10-09'},
+  fundamentals:{facts:{cash_to_profit_ratio:1.42,finance_period:'2026-06-30'}},
+});
+const headlineStrip=metricsHtml.split('class="metric-strip primary-kpis"')[1]
+  ?.split('<div class="chart-grid"')[0] || '';
+assert.ok(headlineStrip.includes('role="group" aria-label="股票主要财务指标"'));
+assert.equal((headlineStrip.match(/class="metric"/g)||[]).length,4);
+for(const fact of ['参考股价','30.40 元','2026-10-13','市净率 PB','3.98 倍',
+                   '2026-10-09','F10 披露ROE','19.60%',
+                   '现金流/利润','1.42 倍','2026-06-30']) {
+  assert.ok(headlineStrip.includes(fact),'Missing aligned KPI: '+fact);
+}
 assert.ok(ctx.renderChipPositionChart({
     status:'contextualized',position_52w_pct:12.5,
     holder_change_pct:20,holder_period:'2026-09-30',
