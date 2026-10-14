@@ -92,6 +92,32 @@ const insufficientHistory=ctx.renderChipPositionChart({
   status:'insufficient_data',price_holder_series:[],
 });
 assert.ok(insufficientHistory.includes('尚未取得至少两个'));
+const f10Legacy={
+  ...report,
+  stock_code:'SH601899',
+  as_of:'2026-10-14',
+  research_mode:'live',
+  fundamentals:{facts:{holder_count_series:[
+    {period:'2026-06-30',holders:1318365,price:25.14},
+    {period:'2026-03-31',holders:1252002,price:32.72},
+    {period:'2025-12-31',holders:584983,price:34.47},
+  ]}},
+};
+const legacyChipHtml=ctx.renderChipPositionChart(undefined,f10Legacy);
+assert.ok(legacyChipHtml.includes('<svg'));
+assert.ok(legacyChipHtml.includes('1,318,365'));
+assert.ok(legacyChipHtml.includes('同花顺F10'));
+assert.ok(legacyChipHtml.includes('F10参考股价'));
+assert.ok(legacyChipHtml.includes('未由独立日线行情接口核验'));
+assert.ok(!legacyChipHtml.includes('已披露股东户数与对应统计截止日之前最近交易日的实际收盘价'));
+assert.ok(ctx.renderDashboardCharts(f10Legacy).includes('1,318,365'));
+// Historical replay must never backfill as-of charts from a live F10 webpage.
+const historicalChip=ctx.renderChipPositionChart(undefined,{
+  ...f10Legacy,research_mode:'historical',
+});
+assert.ok(!historicalChip.includes('1,318,365'));
+assert.ok(historicalChip.includes('本次报告缺少已核验的股价与股东户数配对数据'));
+
 
 const dividends=ctx.renderDividendChart([{year:'2025',dividend_per_10:4,
   buyback_per_10:1,total_per_10:5,yield_pct:4}]);
