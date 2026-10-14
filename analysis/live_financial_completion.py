@@ -81,7 +81,8 @@ async def complete_live_cash_profit(
         return fundamentals
     # Units must be explicitly established by the PDF parser.  Avoid presenting
     # percentages or an OCR artifact as a billion-yuan cash flow.
-    if not str(parsed.get("monetary_unit") or "").startswith("元"):
+    unit = str(parsed.get("monetary_unit") or "")
+    if not unit.startswith("元") or "单位未明确" in unit:
         return fundamentals
 
     new_facts = dict(facts)
