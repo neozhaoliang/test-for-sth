@@ -2478,13 +2478,32 @@ function renderInvestorReference(model) {
 // Give investors a readable explanation rather than the model's internal
 // four-field research checklist. Different hypotheses may describe the same
 // underlying mechanism, so keep only one example per theme in the short view.
-function readableStyleCauses(drivers) {
+// Backwards-compatible gate for cached reports: reject commentary about
+// technology attracting money / dividends falling when the actual displayed
+// period shows dividend up and technology down (and vice versa).
+function styleCauseDirectionConflict(text, style) {
+  const raw=String(text||'');
+  const red=numericOrNull(style && style.dividend_index_return_pct);
+  const growth=numericOrNull(style && style.growth_index_mean_return_pct);
+  if(red===null || growth===null)return false;
+  if(/此前|之前|前期|过去|先前|一度/.test(raw) &&
+     /如今|随后|反转|获利回吐|回撤|高低切/.test(raw))return false;
+  if(red>0 && growth< -2 && red-growth>2) {
+    return /红利(?:股|板块|资产|类产品|类资金|相对)?[^，。；]{0,14}(?:承压|走弱|领跌|相对下跌|被边缘化|遭抛售|弱于科技|跌得更厉害)|(?:资金|机构|投资者|公募|市场)[^，。；]{0,20}(?:更愿意?追(?:逐)?科技|更愿追科技|更偏科技|转向科技|流向科技|涌入科技|追捧科技)|科技(?:股|成长|板块|主题|类指数基金)?[^，。；]{0,19}(?:持续领涨|正在领涨|相对走强|跑赢红利|买盘持续增强|受到被动买盘推动上涨)/.test(raw);
+  }
+  if(growth>0 && red< -2 && growth-red>2) {
+    return /科技(?:股|成长|板块|主题)?[^，。；]{0,16}(?:承压|大幅回撤|持续下跌|遭抛售|跑输红利)|(?:资金|机构|投资者|公募)[^，。；]{0,20}(?:更偏红利|转向红利|流向红利|追捧红利)|红利(?:股|板块|资产)?[^，。；]{0,14}(?:持续领涨|跑赢科技|相对走强)/.test(raw);
+  }
+  return false;
+}
+
+function readableStyleCauses(drivers, style) {
   const themes=new Set(), result=[];
   for(const item of (Array.isArray(drivers)?drivers:[])){
     if(!item || item.evidence_status!=='private_research_hypothesis' ||
        typeof item.mechanism!=='string') continue;
     const explanation=item.mechanism.trim();
-    if(!explanation)continue;
+    if(!explanation || styleCauseDirectionConflict(explanation,style))continue;
     const text=[explanation,item.conditions||''].join(' ');
     let key='general', label='其他可能因素';
     if(/游资|量化|高频|短线交易|换手|交易拥挤/.test(text)) {
@@ -2568,7 +2587,7 @@ function renderInvestmentStyleStrip(model) {
         '不是相同的比较口径，不能直接把这两个百分数相减得到该涨跌差。</p>';
     }
   }
-  const causes=readableStyleCauses(style.causal_drivers);
+  const causes=readableStyleCauses(style.causal_drivers,style);
   html+='<section class="style-why" aria-label="市场风格的可能原因">'+
     '<h5>为什么会这样？</h5>';
   if(causes.length) {
@@ -2578,6 +2597,11 @@ function renderInvestmentStyleStrip(model) {
     ).join('')+'</div>'+
       '<p class="style-cause-caveat">这些是可能的解释，并不代表已证实资金从科技板块流向红利板块。'+
       '判断是否真的调仓，还需要查看同期的基金份额和持仓变化。</p>';
+  } else if(Array.isArray(style.causal_drivers) && style.causal_drivers.length &&
+            style.causal_drivers.some(item=>item &&
+              styleCauseDirectionConflict(item.mechanism,style))){
+    html+='<p class="style-cause-caveat">当前指数表现已经明确，但已有的历史观点解释的是另一个市场阶段，'+
+      '无法说明本轮涨跌。这里不把相反方向的观点硬套到当前行情上。</p>';
   } else if(style.causal_knowledge_status==='no_matching_distilled_knowledge' ||
             style.causal_knowledge_status==='knowledge_available_unresolved'){
     html+='<p class="style-cause-caveat">指数的相对涨跌可以确认，背后的资金流向还缺少可靠证据。'+
