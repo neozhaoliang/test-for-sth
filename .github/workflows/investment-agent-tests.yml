@@ -26,7 +26,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install \
             pytest pytest-asyncio uv \
-            "pydantic>=2,<3" "pypdf>=5,<7" \
+            "pydantic>=2,<3" "pypdf>=5,<7" "fastapi>=0.115,<1" \
             akshare anthropic python-dotenv \
             "httpx[socks]==0.28.1" pillow playwright opencv-python tenacity requests
 
@@ -66,6 +66,7 @@ jobs:
             analysis/market_research_context.py \
             analysis/market_rotation.py \
             analysis/public_report.py \
+            analysis/json_safety.py \
             analysis/issuer_business.py \
             analysis/valuation_config.py \
             analysis/valuation_assumptions.py \
@@ -183,6 +184,7 @@ jobs:
             tests/test_stock_suggest.py \
             tests/test_company_valuation_knowledge.py \
             tests/test_public_report_privacy.py \
+            tests/test_json_response_safety.py \
             tests/test_issuer_business.py \
             tests/test_issuer_capital_alignment.py \
             tests/test_valuation_config.py \

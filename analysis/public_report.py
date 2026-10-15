@@ -10,6 +10,8 @@ from copy import deepcopy
 import re
 from typing import Any, Mapping
 
+from analysis.json_safety import finite_json_numbers
+
 # Anything newly added to the private AnalysisReport is private by default.
 _PUBLIC_FIELDS = frozenset((
     "stock_code", "stock_name", "research_mode", "as_of", "realtime_quote",
@@ -329,4 +331,7 @@ def public_stock_report(raw: Mapping[str, Any]) -> dict:
     }
     out = _sanitize_narrative(out, names, cases, excerpts, target)
     out.update(protected_identity)
-    return out
+    # Provider/NumPy NaN and +/-Inf are valid Python floats but INVALID JSON.
+    # Convert to null at the public projection boundary without mutating the
+    # private report. Missing values must never be guessed or converted to 0.
+    return finite_json_numbers(out)

@@ -46,13 +46,19 @@ from analysis.realtime_price import resolve_stock_code
 from analysis.stock_suggest import search_stocks, warm_stock_catalog
 from analysis.report import generate_report
 from analysis.public_report import public_stock_report
+from analysis.json_safety import finite_json_numbers, nonfinite_number_paths
 from analysis.research_context import (
     ResearchRequest,
     assert_request_supported,
     historical_readiness,
     SOURCE_TEMPORAL_CAPABILITIES,
 )
-from media_platform.xueqiu.help import normalize_user_id
+def normalize_user_id(raw: str) -> str:
+    # Keep optional crawler/proxy/Redis imports out of stock-analysis GETs.
+    # The crawler-specific package has import-time cache initialization.
+    from media_platform.xueqiu.help import normalize_user_id as normalize
+    return normalize(raw)
+
 from tools.utils import utils
 
 app = FastAPI(title="股票投资助手")
@@ -93,8 +99,20 @@ async def _run_analysis(
     _tasks[task_id]["status"] = "running"
     try:
         report = await generate_report(stock_code, request=research_request)
+        raw_report = report.model_dump()
+        bad_paths = nonfinite_number_paths(raw_report)
+        if bad_paths:
+            # Log only field paths; no confidential input data or numbers.
+            utils.logger.warning(
+                "[web.app] analysis %s non-finite numeric observations: %s",
+                task_id, bad_paths,
+            )
+        result = public_stock_report(raw_report)
+        # Validate BEFORE marking done, so a future unsupported payload type
+        # becomes an ordinary failed task instead of repeated GET 500s.
+        json.dumps(result, ensure_ascii=False, allow_nan=False)
+        _tasks[task_id]["result"] = result
         _tasks[task_id]["status"] = "done"
-        _tasks[task_id]["result"] = public_stock_report(report.model_dump())
     except Exception as e:
         utils.logger.error(f"[web.app] 分析任务 {task_id} ({stock_code}) 失败: {e}")
         _tasks[task_id]["status"] = "failed"
@@ -190,7 +208,11 @@ async def get_task(task_id: str) -> Dict:
             public_error = "本次模型分析未能完成，请重试或更换模型服务。"
         else:
             public_error = "本次股票分析未能完成，请稍后重试。"
-    return {"status": task["status"], "result": result, "error": public_error}
+    # Also protect already-stored task payloads created by older versions.
+    # Never mutate _tasks while serving concurrent polls.
+    return finite_json_numbers(
+        {"status": task["status"], "result": result, "error": public_error}
+    )
 
 
 class CrawlXueqiuRequest(BaseModel):
