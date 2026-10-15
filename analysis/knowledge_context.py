@@ -17,6 +17,19 @@ from model.m_analysis import KnowledgeExcerpt
 
 
 _ISSUE_RULES: Dict[str, Dict[str, object]] = {
+    "resource_money_cycle": {
+        "label": "有色与贵金属的货币定价及融资周期",
+        "patterns": (
+            r"(?:大宗商品|有色|金属|黄金|金价|铜价|矿业|矿山|锂价).{0,80}(?:货币|流动性|加息|降息|利率|美元|缩表)|"
+            r"(?:货币|流动性|加息|降息|利率|美元|缩表).{0,80}(?:大宗商品|有色|金属|黄金|金价|铜价|矿业|矿山|锂价)",
+        ),
+        "questions": (
+            "本公司的黄金、铜、锂利润弹性来自产量和成本，还是商品价格与金融条件？",
+            "有日期且有效的美国利率与美债收益率走势如何，美元和实际利率能否解释商品价格波动？",
+            "日本和欧洲政策利率未核实时，不得笼统声称全球央行共同加息；工业金属供需是否提供反例？",
+            "矿价上行期的新建矿山、矿权并购、资本开支和项目回报是否会在下行周期拖累自由现金流？",
+        ),
+    },
     "fund_flow": {
         "label": "资金抱团/风格与边际买家",
         "patterns": (
@@ -221,6 +234,8 @@ def active_knowledge_topics(
         "insider_alignment",
         "accounting_quality",
     }
+    if archetype == "cyclical":
+        active.add("resource_money_cycle")
     if archetype == "technology":
         active.update(
             {
