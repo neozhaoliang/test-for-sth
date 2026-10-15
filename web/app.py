@@ -53,7 +53,12 @@ from analysis.research_context import (
     historical_readiness,
     SOURCE_TEMPORAL_CAPABILITIES,
 )
-from media_platform.xueqiu.help import normalize_user_id
+def normalize_user_id(raw: str) -> str:
+    # Keep optional crawler/proxy/Redis imports out of stock-analysis GETs.
+    # The crawler-specific package has import-time cache initialization.
+    from media_platform.xueqiu.help import normalize_user_id as normalize
+    return normalize(raw)
+
 from tools.utils import utils
 
 app = FastAPI(title="股票投资助手")
