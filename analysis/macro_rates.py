@@ -250,3 +250,96 @@ async def get_macro_rate_context(
         "warnings": warnings,
         "source_tier": "A" if us else "B",
     }
+
+
+# These decision-history series are supplemental industry-cycle context, not an
+# estimate of monetary liquidity and not a proxy for the company's revenue.
+# The Jin10-backed AkShare tables are NOT treated as first-party policy sources.
+_INTERNATIONAL_DECISIONS = {
+    "japan": ("macro_bank_japan_interest_rate", "日本央行"),
+    "euro": ("macro_bank_euro_interest_rate", "欧洲央行"),
+}
+_DECISION_MAX_STALENESS_DAYS = 120
+
+
+def _policy_decision_table(df, *, as_of: Optional[date], bank: str) -> Optional[Dict]:
+    """Parse dated decisions without assuming that a rate level means a hike.
+
+    Unavailable or stale observations remain explicitly marked and cannot
+    establish the latest monetary-policy direction.
+    """
+    if df is None or getattr(df, "empty", True):
+        return None
+    if not {"日期", "今值"}.issubset(df.columns):
+        return None
+    rows = []
+    for _, item in df.iterrows():
+        dt = _parse_date(item.get("日期"))
+        rate = _num(item.get("今值"))
+        if dt is None or rate is None or (as_of and dt > as_of):
+            continue
+        rows.append({"date": dt, "value": rate})
+    if not rows:
+        return None
+    rows.sort(key=lambda x: x["date"])
+    # Deduplicate reporting-date collisions; use the most recently encountered value.
+    unique = {row["date"]: row for row in rows}
+    rows = [unique[d] for d in sorted(unique)]
+    latest = rows[-1]
+    reference_date = as_of or _today()
+    fresh = _freshness(
+        latest["date"], _DECISION_MAX_STALENESS_DAYS,
+        reference_date=reference_date,
+    )
+    immediate_delta = (
+        round(latest["value"] - rows[-2]["value"], 3)
+        if len(rows) > 1 else None
+    )
+    return {
+        "bank": bank,
+        "decision_as_of": latest["date"].isoformat(),
+        "policy_rate_pct": latest["value"],
+        "last_decision_change_pp": immediate_delta,
+        "change_180d_pp": _change_from_days(rows, 180),
+        "freshness": fresh,
+        "source_name": "AkShare / Jin10 central bank decision calendar",
+        "source_url": "https://datacenter.jin10.com/reportType/dc_interest_rate_decision",
+        "source_tier": "B",
+        "rate_definition_note": "不同央行决议口径并不完全相同，不可直接比较数值或当作实际利率。",
+    }
+
+
+async def get_international_policy_rates(
+    *, as_of: Optional[date] = None,
+) -> Dict:
+    """Fetch BOJ/ECB dated decisions, relevant only when the industry needs them.
+
+    Any upstream error is a missing source, never evidence of easing/tightening.
+    A historical caller must supply as_of to exclude later decisions.
+    """
+    import akshare as ak
+
+    async def one(region: str, api_name: str, label: str):
+        api = getattr(ak, api_name, None)
+        if not callable(api):
+            return region, None
+        try:
+            df = await asyncio.wait_for(
+                asyncio.to_thread(api),
+                timeout=_LPR_TIMEOUT_S,
+            )
+            return region, _policy_decision_table(
+                df, as_of=as_of, bank=label,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[macro_rates] %s policy series unavailable: %s",
+                label, type(exc).__name__,
+            )
+            return region, None
+
+    found = await asyncio.gather(*(
+        one(region, api_name, label)
+        for region, (api_name, label) in _INTERNATIONAL_DECISIONS.items()
+    ))
+    return dict(found)

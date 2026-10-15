@@ -72,6 +72,8 @@ jobs:
             analysis/chip_position.py \
             analysis/position_risk.py \
             analysis/investment_method_distiller.py \
+            analysis/resource_mining_thesis.py \
+            analysis/macro_rates.py \
             analysis/rd_team.py \
             analysis/primary_sources.py \
             analysis/policy_context.py \
@@ -187,6 +189,7 @@ jobs:
             tests/test_chip_position.py \
             tests/test_position_risk.py \
             tests/test_investment_method_distiller.py \
+            tests/test_resource_mining_thesis.py \
             tests/test_market_context_asof.py \
             tests/test_realtime_price_asof.py \
             tests/test_margin_asof.py \

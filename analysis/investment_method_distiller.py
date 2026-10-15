@@ -117,6 +117,13 @@ async def compile_investment_methods(
         priority.extend(select_evergreen_tech_finance_excerpts(
             available, as_of=as_of, limit=5,
         ))
+    if archetype == "cyclical":
+        # Older monetary-cycle arguments should not be displaced by recent
+        # short-term market commentary or by the 14-excerpt context cap.
+        from analysis.resource_mining_thesis import select_resource_monetary_excerpts
+        priority.extend(select_resource_monetary_excerpts(
+            available, as_of=as_of, limit=6,
+        ))
     if stock_name:
         priority.extend(
             e for e in available

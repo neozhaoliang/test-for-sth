@@ -23,6 +23,7 @@ from analysis.knowledge_base import (
     load_cached_entries,
 )
 from analysis.knowledge_context import prefilter_knowledge_by_context
+from analysis.resource_mining_thesis import is_resource_miner, select_resource_monetary_excerpts
 from analysis.market_research_context import (
     select_recent_style_excerpts, select_evergreen_tech_finance_excerpts,
 )
@@ -218,6 +219,24 @@ _RELEVANCE_FILTER_PROMPT = """以下是知识库中若干条投资观点摘要�
 只输出应保留条目编号的 JSON 数组，例如: [0, 2, 5]"""
 
 
+def _retain_resource_monetary_sources(selected, available, *, archetype, industry_name, stock_name):
+    """Preserve dated money-cycle investment hypotheses for mining companies.
+
+    A relevance model can discard an older but economically important view;
+    this safeguard restores the original PRIVATE entries, not their quotations.
+    """
+    if not is_resource_miner(archetype=archetype, industry=industry_name or "", stock_name=stock_name):
+        return selected
+    result = list(selected)
+    known = {(e.source, e.title, e.published_at) for e in result}
+    for entry in select_resource_monetary_excerpts(available, limit=8):
+        key = (entry.source, entry.title, entry.published_at)
+        if key not in known:
+            result.append(entry)
+            known.add(key)
+    return result
+
+
 async def filter_relevant_knowledge(
     knowledge_excerpts: List[KnowledgeExcerpt],
     stock_code: str,
@@ -282,6 +301,14 @@ async def filter_relevant_knowledge(
                 prefetched.append(entry)
                 known.add(key)
 
+    if is_resource_miner(archetype=archetype, industry=industry_name or "", stock_name=stock_name):
+        known = {(e.source, e.title, e.published_at) for e in prefetched}
+        for entry in select_resource_monetary_excerpts(knowledge_excerpts, limit=8):
+            key = (entry.source, entry.title, entry.published_at)
+            if key not in known:
+                prefetched.append(entry)
+                known.add(key)
+
     items_block = "\n".join(
         f"[{i}] {e.title}: {e.distilled}"
         for i, e in enumerate(prefetched)
@@ -319,7 +346,10 @@ async def filter_relevant_knowledge(
                 if key not in existing:
                     selected.append(entry)
                     existing.add(key)
-        return _retain_market_causal_sources(selected, knowledge_excerpts)
+        return _retain_resource_monetary_sources(
+            _retain_market_causal_sources(selected, knowledge_excerpts), knowledge_excerpts,
+            archetype=archetype, industry_name=industry_name, stock_name=stock_name,
+        )
 
     kept = {
         i for i in parsed
@@ -349,7 +379,10 @@ async def filter_relevant_knowledge(
             if key not in seen:
                 selected.append(entry)
                 seen.add(key)
-    return _retain_market_causal_sources(selected, knowledge_excerpts)
+    return _retain_resource_monetary_sources(
+            _retain_market_causal_sources(selected, knowledge_excerpts), knowledge_excerpts,
+            archetype=archetype, industry_name=industry_name, stock_name=stock_name,
+        )
 
 
 async def collect_live_social_context(

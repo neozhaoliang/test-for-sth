@@ -50,6 +50,10 @@ from analysis.investment_method_distiller import (
 from analysis.market_style_reasons import (
     build_market_style_reasons, market_style_reasons_prompt_block,
 )
+from analysis.resource_mining_thesis import (
+    is_resource_miner, resource_miner_prompt_block, repair_resource_summary,
+)
+from analysis.macro_rates import get_international_policy_rates
 
 
 _PROCESS_TERM_RE = re.compile(r"六查|第[一二三四五六七八九十\d]+步|检查项\d*")
@@ -175,6 +179,19 @@ async def _generate_summary(
     candidates: List[CandidateOpinion],
     evidence: List[EvidenceItem],
 ) -> tuple[StructuredSummary, ResearchReview]:
+    profile = getattr(inputs, "research_profile", None)
+    if (getattr(inputs, "research_mode", "") != "historical"
+            and is_resource_miner(
+                archetype=getattr(profile, "archetype", ""),
+                industry=getattr(profile, "industry", ""),
+                stock_name=getattr(inputs, "stock_name", ""),
+            )):
+        # FRED US + China LPR are already collected before synthesis. Mining
+        # additionally needs dated BOJ/ECB decisions to test liquidity claims.
+        international = await get_international_policy_rates()
+        rates = getattr(inputs, "macro_rates", None) or {}
+        if isinstance(rates, dict):
+            inputs.macro_rates = {**rates, **international}
     prompt = _build_prompt(inputs, candidates)
     from analysis.issuer_business import issuer_business_prompt_block
     prompt += "\n\n" + issuer_business_prompt_block(
@@ -308,6 +325,12 @@ async def _generate_summary(
     prompt += "\n\n" + investment_manager_prompt(
         methods, archetype=getattr(profile, "archetype", "general"),
     )
+    # Preserve mining/monetary-cycle and price-history risks in synthesis.
+    # Historical replay must not borrow a later-introduced research method.
+    if getattr(inputs, "research_mode", "") != "historical":
+        resource_block = resource_miner_prompt_block(inputs)
+        if resource_block:
+            prompt += "\n\n" + resource_block
 
     # Private issuer-specific historical theses must not disappear in a generic
     # "extract timeless principles" step. They carry testable assumptions such
@@ -401,6 +424,10 @@ async def _generate_summary(
         )
     review = review_dimension_analyses(analyses, evidence)
     parsed = await _apply_review_to_draft(parsed, review, inputs.stock_code)
+    # Do not rewrite investment stance or post-fix a summary using invented facts.
+    # If four material mining risks were lost in the short thesis, revise prose once.
+    if getattr(inputs, "research_mode", "") != "historical":
+        parsed = await repair_resource_summary(parsed, inputs)
 
     lynch_category = parsed.get("lynch_category", "")
     if lynch_category not in _VALID_LYNCH_CATEGORIES:

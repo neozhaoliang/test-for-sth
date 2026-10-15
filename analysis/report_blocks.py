@@ -707,6 +707,31 @@ def _build_macro_rates_block(data: Optional[Dict]) -> str:
     else:
         lines.append("中国LPR: 暂缺")
 
+    for region, label in (("japan", "日本央行"), ("euro", "欧洲央行")):
+        item = data.get(region)
+        if not isinstance(item, dict):
+            # Missing is not evidence of policy easing or hiking.
+            if region in data:
+                lines.append(f"{label}决议: 暂缺或接口失败，不能判断加息/降息方向")
+            continue
+        fresh = bool((item.get("freshness") or {}).get("fresh"))
+        if not fresh or item.get("policy_rate_pct") is None:
+            lines.append(f"{label}决议: 数据缺失或过期，禁止作为当前利率引用")
+            continue
+        change = item.get("change_180d_pp")
+        delta_text = (
+            f"；180日变化 {change:+} 个百分点"
+            if isinstance(change, (float, int)) else
+            "；180日变化暂缺"
+        )
+        previous_change = item.get("last_decision_change_pp")
+        if isinstance(previous_change, (int, float)):
+            delta_text += f"；最近一次会议较前次 {previous_change:+} 个百分点"
+        lines.append(
+            f"{label}决议利率 {item.get('policy_rate_pct')}%"
+            f"（{item.get('decision_as_of')}{delta_text}，"
+            "AkShare/Jin10二级时间序列；需对照官方公告）"
+        )
     for warning in data.get("warnings") or []:
         lines.append(f"警告: {warning}")
     return "\n".join(lines)
