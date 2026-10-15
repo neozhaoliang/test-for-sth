@@ -50,7 +50,10 @@ from analysis.investment_method_distiller import (
 from analysis.market_style_reasons import (
     build_market_style_reasons, market_style_reasons_prompt_block,
 )
-from analysis.resource_mining_thesis import resource_miner_prompt_block, repair_resource_summary
+from analysis.resource_mining_thesis import (
+    is_resource_miner, resource_miner_prompt_block, repair_resource_summary,
+)
+from analysis.macro_rates import get_international_policy_rates
 
 
 _PROCESS_TERM_RE = re.compile(r"六查|第[一二三四五六七八九十\d]+步|检查项\d*")
@@ -176,6 +179,19 @@ async def _generate_summary(
     candidates: List[CandidateOpinion],
     evidence: List[EvidenceItem],
 ) -> tuple[StructuredSummary, ResearchReview]:
+    profile = getattr(inputs, "research_profile", None)
+    if (getattr(inputs, "research_mode", "") != "historical"
+            and is_resource_miner(
+                archetype=getattr(profile, "archetype", ""),
+                industry=getattr(profile, "industry", ""),
+                stock_name=getattr(inputs, "stock_name", ""),
+            )):
+        # FRED US + China LPR are already collected before synthesis. Mining
+        # additionally needs dated BOJ/ECB decisions to test liquidity claims.
+        international = await get_international_policy_rates()
+        rates = getattr(inputs, "macro_rates", None) or {}
+        if isinstance(rates, dict):
+            inputs.macro_rates = {**rates, **international}
     prompt = _build_prompt(inputs, candidates)
     from analysis.issuer_business import issuer_business_prompt_block
     prompt += "\n\n" + issuer_business_prompt_block(
