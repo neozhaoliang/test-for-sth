@@ -66,6 +66,7 @@ jobs:
             analysis/market_research_context.py \
             analysis/market_rotation.py \
             analysis/public_report.py \
+            analysis/json_safety.py \
             analysis/issuer_business.py \
             analysis/valuation_config.py \
             analysis/valuation_assumptions.py \
@@ -183,6 +184,7 @@ jobs:
             tests/test_stock_suggest.py \
             tests/test_company_valuation_knowledge.py \
             tests/test_public_report_privacy.py \
+            tests/test_json_response_safety.py \
             tests/test_issuer_business.py \
             tests/test_issuer_capital_alignment.py \
             tests/test_valuation_config.py \
