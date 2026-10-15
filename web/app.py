@@ -2663,6 +2663,11 @@ function renderInvestmentStyleStrip(model) {
   if((style.sector_rotation||{}).status==='observed') {
     return renderSectorRotationStyleStrip(style);
   }
+  if(style.sector_rotation && style.sector_rotation.status==='insufficient_data') {
+    return '<div class="style-insight"><h4>当前市场在交易什么？</h4>'+
+      '<p class="section-caption">多行业同期行情覆盖不足，本次不能可靠判断市场的主导风格。'+
+      '不以固定的红利与科技指数替代全市场行业比较。</p></div>';
+  }
   if(style.status!=='observed')return '';
   const events=style.dated_market_events || [];
   const redObserved=(style.dividend_index_return_pct===null ||
@@ -2865,7 +2870,16 @@ function renderIndustryValuationLab(report) {
       '；海外营收占比：'+escapeHtml(macro.overseas_revenue_pct===null||macro.overseas_revenue_pct===undefined?
         '资料不足':String(macro.overseas_revenue_pct)+'%')+
       '<p>未审计套保/美元债及汇率敏感度前，禁止给出固定估值调整。</p></div>')+'</div>';
+  const broad=(model.style_context||{}).sector_rotation||{};
   const style=macro.a_share_style || {};
+  if(broad.status==='observed') {
+    const ordered=(broad.sectors||[]);
+    if(ordered.length)html+='<p class="section-caption" style="margin-top:12px;">'+
+      'A股行业观察：近20个交易日，'+escapeHtml(ordered[0].name)+
+      '相对靠前，'+escapeHtml(ordered[ordered.length-1].name)+
+      '相对靠后（'+escapeHtml(broad.as_of||'未知日期')+
+      '）。这是行业样本相对表现，不直接改变内在价值。</p>';
+  } else if(!model.style_context || !model.style_context.sector_rotation) {
   if(style.status==='observed') {
     const styleLabel={
       dividend_leading:'红利风格相对领先',
@@ -2877,6 +2891,7 @@ function renderIndustryValuationLab(report) {
       (style.style_window==='20 trading days'?'近20个交易日；':'年内；')+
       escapeHtml(style.as_of || '未知日期')+
       '）。这是风格相对收益，不直接改变内在价值。</p>';
+  }
   }
   // Generic macro transmission templates remain in the backend but are not
   // repeatedly presented as a dense six-item list to end users.
