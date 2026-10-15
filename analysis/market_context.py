@@ -246,4 +246,22 @@ async def get_market_context(
         return None
 
     indices = [_summary(s) | {"name": name} for name, s in index_series.items()]
+    # Style benchmarks can compete for attention with metals, healthcare, and
+    # other industries; none is mandatory. Same 20-trading-day close basis.
+    benchmarks = []
+    if rotation["status"] == "observed":
+        anchor = date.fromisoformat(rotation["as_of"])
+        for row in indices:
+            when = row.get("latest_date")
+            delta = row.get("d20_pct")
+            try:
+                diff = abs((anchor - date.fromisoformat(str(when))).days)
+            except ValueError:
+                continue
+            if delta is not None and diff <= 3:
+                benchmarks.append({
+                    "name": row["name"], "d20_pct": delta,
+                    "latest_date": when, "category": "style_index",
+                })
+    rotation["benchmarks"] = benchmarks
     return {"indices": indices, "stock": stock, "sector_rotation": rotation}
