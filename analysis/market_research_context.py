@@ -286,7 +286,7 @@ def style_investment_prompt_block(ctx: Optional[Mapping]) -> str:
         "行业风格：优先使用多个行业同口径的20个交易日数据动态研判，"
         "禁止无条件把红利与科技作为市场主角。",
         f"截至 {ctx.get('as_of')}，传统红利/成长指数辅助对照={ctx.get('style_regime')}。",
-        f"公司是否与红利风格相关={ctx.get('dividend_exposure_relevant')}。",
+        f"本公司是否有高股息特征={ctx.get('dividend_exposure_relevant')}；高股息只是可选因素，不是默认市场主线。",
         "近期已经公开的市场事件："
     ]
     if not events:
