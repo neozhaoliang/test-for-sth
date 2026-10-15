@@ -73,6 +73,7 @@ jobs:
             analysis/position_risk.py \
             analysis/investment_method_distiller.py \
             analysis/resource_mining_thesis.py \
+            analysis/macro_rates.py \
             analysis/rd_team.py \
             analysis/primary_sources.py \
             analysis/policy_context.py \
