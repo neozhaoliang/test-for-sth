@@ -49,7 +49,7 @@ logger = logging.getLogger("MediaCrawler")
 
 _TTL_SECONDS = 6 * 3600
 _index_cache: Optional[Tuple[float, Dict[str, pd.Series]]] = None
-_sector_cache: Optional[Tuple[float, Dict[str, pd.Series]]] = None
+_sector_cache: Dict[int, Tuple[float, Dict[str, pd.Series]]] = {}
 
 # 个股历史区间起点: 覆盖 2021 年集运景气高点这类上一轮周期的参照系。
 _STOCK_HISTORY_START = date(2018, 1, 1)
@@ -81,18 +81,22 @@ async def _get_index_series() -> Dict[str, pd.Series]:
     return result
 
 
-async def _get_sector_series() -> Dict[str, pd.Series]:
+async def _get_sector_series(*, as_of: Optional[date] = None) -> Dict[str, pd.Series]:
     """Cache a balanced, disclosed sample of EM industry boards across stocks.
 
     Each board uses the same historical close/20-trading-day-return definition.
     Data unavailable from the provider remains missing; no synthesized index.
     """
     global _sector_cache
-    if _sector_cache and (time.time() - _sector_cache[0]) < _TTL_SECONDS:
-        return _sector_cache[1]
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    end = as_of or datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    cache_key = end.year if as_of is not None else 0
+    entry = _sector_cache.get(cache_key)
+    if entry and (time.time() - entry[0]) < _TTL_SECONDS:
+        return entry[1]
 
     limit = asyncio.Semaphore(10)
-    end = date.today()
     start = date(end.year - 2, 1, 1)
 
     async def collect(name):
@@ -127,7 +131,7 @@ async def _get_sector_series() -> Dict[str, pd.Series]:
     results = await asyncio.gather(*(collect(n) for n in SECTOR_SAMPLE))
     found = dict(row for row in results if row)
     # Avoid repeated network spikes when all backends fail; stay fail-closed.
-    _sector_cache = (time.time(), found)
+    _sector_cache[cache_key] = (time.time(), found)
     return found
 
 
@@ -174,7 +178,7 @@ async def get_market_context(
     指数与个股都取不到时返回 None。
     """
     index_series, sector_series = await asyncio.gather(
-        _get_index_series(), _get_sector_series()
+        _get_index_series(), _get_sector_series(as_of=as_of)
     )
     cutoff = pd.Timestamp(as_of) if as_of is not None else None
     if cutoff is not None:
