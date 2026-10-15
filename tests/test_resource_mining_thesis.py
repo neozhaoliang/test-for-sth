@@ -97,7 +97,7 @@ def test_no_data_no_fake_holders_or_private_KOL_attribution():
     assert "未保留可用" in block
     assert "可比历史序列不足" in block
     assert "1,318,365" not in block
-    assert "日本、欧洲同时加息" in block
+    assert "全球已进入统一紧缩周期" in block
     assert resource_summary_omissions("无足够数据判断。", ctx) == ["capex", "succession"]
 
 
