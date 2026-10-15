@@ -2614,7 +2614,9 @@ function renderSectorRotationStyleStrip(style) {
     x && typeof x.name==='string' && Number.isFinite(Number(x.d20_pct)) &&
     /^\d{4}-\d{2}-\d{2}$/.test(String(x.latest_date||'')));
   if(universe.length<3)return '';
-  const byName=new Map(universe.map(x=>[x.name,x]));
+  const benchmarks=(Array.isArray(rotation.benchmarks)?rotation.benchmarks:[]).filter(x=>
+    x && typeof x.name==='string' && Number.isFinite(Number(x.d20_pct)));
+  const byName=new Map([...universe,...benchmarks].map(x=>[x.name,x]));
   const reading=style.rotation_reading||{};
   const preferred=(Array.isArray(reading.featured_sectors)?reading.featured_sectors:[])
     .filter(name=>typeof name==='string'&&byName.has(name));
@@ -2631,9 +2633,16 @@ function renderSectorRotationStyleStrip(style) {
     escapeHtml(rotation.as_of||'')+'</span></p>';
   html+='<div class="style-return-list" role="group" aria-label="动态行业涨跌幅">'+
     selected.map(x=>'<div class="style-return-row">'+
-      '<span class="style-return-name">'+escapeHtml(x.name)+'</span>'+
+      '<span class="style-return-name">'+escapeHtml(x.name)+
+      (x.category==='style_index'?' <small>（风格指数）</small>':'')+'</span>'+
       '<strong class="style-return-value '+tone(Number(x.d20_pct))+'">'+
       fmt(Number(x.d20_pct))+'</strong></div>').join('')+'</div>';
+  if(rotation.rotation_detectable && Array.isArray(rotation.new_leaders) &&
+     rotation.new_leaders.length) {
+    html+='<p class="section-caption"><b>主线变化：</b>较此前20个交易日，'+
+      escapeHtml(rotation.new_leaders.join('、'))+
+      '进入当前行业样本涨幅前列。排名变化并不保证后续持续领涨。</p>';
+  }
   if(typeof reading.summary==='string' && reading.summary.trim()) {
     html+='<p class="style-performance-reading"><b>市场解读：</b>'+
       escapeHtml(reading.summary)+'</p>';
