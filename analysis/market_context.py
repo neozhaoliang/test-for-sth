@@ -49,7 +49,7 @@ logger = logging.getLogger("MediaCrawler")
 
 _TTL_SECONDS = 6 * 3600
 _index_cache: Optional[Tuple[float, Dict[str, pd.Series]]] = None
-_sector_cache: Dict[int, Tuple[float, Dict[str, pd.Series]]] = {}
+_sector_cache: Dict[str, Tuple[float, Dict[str, pd.Series]]] = {}
 
 # 个股历史区间起点: 覆盖 2021 年集运景气高点这类上一轮周期的参照系。
 _STOCK_HISTORY_START = date(2018, 1, 1)
@@ -91,7 +91,7 @@ async def _get_sector_series(*, as_of: Optional[date] = None) -> Dict[str, pd.Se
     from datetime import datetime
     from zoneinfo import ZoneInfo
     end = as_of or datetime.now(ZoneInfo("Asia/Shanghai")).date()
-    cache_key = end.year if as_of is not None else 0
+    cache_key = end.isoformat() if as_of is not None else 'live'
     entry = _sector_cache.get(cache_key)
     if entry and (time.time() - entry[0]) < _TTL_SECONDS:
         return entry[1]
