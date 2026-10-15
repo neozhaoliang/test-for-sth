@@ -229,6 +229,8 @@ def build_style_investment_context(
     principles = _synthesized_principles(
         knowledge_excerpts or [], cutoff, archetype=archetype, industry=industry
     )
+    sector_rotation = (market_context or {}).get("sector_rotation") or {}
+    rotation_observed = sector_rotation.get("status") == "observed"
     stock = (market_context or {}).get("stock") or {}
     stock_date = _day(stock.get("latest_date"))
     stock_20d = stock.get("d20_pct") if stock_date and (
@@ -249,7 +251,8 @@ def build_style_investment_context(
         "来源于历史讨论的投资原则只是分析问题，必须用当前个股数据交叉检查。",
     ]
     return {
-        "status": "observed" if regime != "unknown" or evidence or principles else "insufficient_data",
+        "status": "observed" if rotation_observed or regime != "unknown" or evidence or principles else "insufficient_data",
+        "sector_rotation": sector_rotation,
         "as_of": cutoff.isoformat(),
         "dividend_exposure_relevant": belongs,
         "style_regime": regime,
@@ -280,10 +283,9 @@ def style_investment_prompt_block(ctx: Optional[Mapping]) -> str:
     principles = ctx.get("investment_principles") or []
     rows = [
         "当前市场风格与投资者研究框架（这是投资判断的必要输入，不可略写为宏观资料缺失）：",
-        f"截至 {ctx.get('as_of')}，风格={ctx.get('style_regime')}，"
-        f"红利相对成长在{ctx.get('style_window')}内的涨跌差="
-        f"{ctx.get('dividend_minus_growth_ytd_pp')}个百分点；"
-        f"指标日期={ctx.get('style_observed_as_of')}。",
+        "行业风格：优先使用多个行业同口径的20个交易日数据动态研判，"
+        "禁止无条件把红利与科技作为市场主角。",
+        f"截至 {ctx.get('as_of')}，传统红利/成长指数辅助对照={ctx.get('style_regime')}。",
         f"公司是否与红利风格相关={ctx.get('dividend_exposure_relevant')}。",
         "近期已经公开的市场事件："
     ]
@@ -294,6 +296,21 @@ def style_investment_prompt_block(ctx: Optional[Mapping]) -> str:
             f"  {e['date']}：{e['headline']}；统计={e['facts']}；"
             f"来源={e['source_url']}；解读={e['interpretation']}"
         )
+    rotation = ctx.get("sector_rotation") or {}
+    if rotation.get("status") == "observed":
+        rows.append(
+            f"行业板块观察：截至{rotation.get('as_of')}、20个交易日、"
+            f"覆盖{rotation.get('coverage')}/{rotation.get('universe_size')}类、"
+            f"上涨{rotation.get('up_count')}类，下跌{rotation.get('down_count')}类。"
+            "注意这是样本，不代表全A股行业；涨跌不能证明资金净流。"
+        )
+        for row in (rotation.get("sectors") or []):
+            rows.append(
+                f"  {row.get('name')}:20日{row.get('d20_pct')}%，"
+                f"60日{row.get('d60_pct')}%，日期{row.get('latest_date')}"
+            )
+    else:
+        rows.append("多行业20日行情缺失；禁止仅凭红利与科技两个样本推断整个市场风格。")
     rows.append("从已整理的投资经验中提炼出的分析原则（不含作者、原文或跨公司案例）：")
     if not principles:
         rows.append("  没有适用于本次公司与时间范围的额外原则；只依据当前资料分析。")
@@ -314,8 +331,9 @@ def style_investment_prompt_block(ctx: Optional[Mapping]) -> str:
     )
     rows.extend([
         "必须在'市场情绪'、'A股资金结构'和'股价位置'三方面说明："
-        "当期究竟是盈利改善、股息可持续性，还是资金高低切/估值扩张驱动？"
+        "当期哪些行业真正领涨/领跌？有色、医药、消费、金融、科技等应按实际涨跌取舍，"
+        "再讨论盈利改善、股息可持续性与可能的风险偏好变化；"
         "哪些已经有数据支持，哪些只是知识库作者提出的机制？",
-        "禁止因为红利限购直接喊见顶；也禁止完全不讨论已核验的近期限购和风格切换。"
+        "禁止因为红利限购直接喊见顶；也禁止遗漏有可靠日期、与本行业相关的重大风格变化。"
     ])
     return "\n".join(rows)
