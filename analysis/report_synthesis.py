@@ -55,6 +55,7 @@ from analysis.resource_mining_thesis import (
     is_resource_miner, resource_miner_prompt_block, repair_resource_summary,
 )
 from analysis.macro_rates import get_international_policy_rates
+from analysis.resource_macro_transmission import build_resource_macro_transmission, resource_macro_prompt_block
 
 
 _PROCESS_TERM_RE = re.compile(r"六查|第[一二三四五六七八九十\d]+步|检查项\d*")
@@ -252,6 +253,24 @@ async def _generate_summary(
                    "不输出自动目标价。")
     else:
         inputs.valuation_model_result = build_industry_valuation_report(inputs)
+        macro_model = inputs.valuation_model_result.get("macro_context") or {}
+        if is_resource_miner(
+            archetype=getattr(profile, "archetype", ""),
+            industry=getattr(profile, "industry", ""),
+            stock_name=getattr(inputs, "stock_name", ""),
+        ):
+            resource_reading = build_resource_macro_transmission(
+                stock_name=getattr(inputs, "stock_name", ""),
+                archetype=getattr(profile, "archetype", ""),
+                industry=getattr(profile, "industry", ""),
+                macro_context=macro_model,
+                macro_rates=getattr(inputs, "macro_rates", None),
+                rmb_signal=getattr(inputs, "rmb_signal", None),
+                commodity_signal=getattr(inputs, "commodity_signal", None),
+            )
+            if resource_reading:
+                macro_model["miner_transmission"] = resource_reading
+                prompt += "\n\n" + resource_macro_prompt_block(resource_reading)
         prompt += ("\\n\\n## 行业专用估值与A股宏观传导（不可虚构价值）\\n"
                    + industry_model_prompt_block(inputs.valuation_model_result))
 

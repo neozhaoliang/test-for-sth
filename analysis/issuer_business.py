@@ -155,6 +155,20 @@ def normalize_operating_filings(records: List[Mapping], code6: str, *,
 def _topic_snippets(pages: List[str], *, max_count: int = 10) -> List[Dict]:
     """Short verbatim company-PDF context, with page and NO numeric extraction."""
     result = []
+    # Reserve a couple of slots for dated FX/borrowing disclosures, instead of
+    # discarding them after filling the capex and orders excerpt budget.
+    monetary_patterns = [
+        ("foreign_exchange_risk", re.compile(r"汇率风险|外币借款|汇率敏感性分析")),
+        ("interest_rate_exposure", re.compile(r"固定利率|浮动利率|利率风险|有息借款")),
+    ]
+    for topic, pattern in monetary_patterns:
+        for n, page in enumerate(pages or [], start=1):
+            compact = re.sub(r"\s+", " ", page)
+            m = pattern.search(compact)
+            if m:
+                excerpt = compact[max(0, m.start()-105):m.end()+285]
+                result.append({"topic":topic,"page":n,"excerpt":excerpt[:430]})
+                break
     patterns = [
         ("capex", re.compile(r"资本性支出|资本开支|购建固定资产|重大在建工程|项目总投资|投资预算")),
         ("orders", re.compile(r"订单|在手合同|合同负债|中标|重大销售合同|订单交付")),

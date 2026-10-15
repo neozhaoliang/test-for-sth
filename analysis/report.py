@@ -524,7 +524,7 @@ async def generate_report(
         profitability_trend=profitability_trend,
         commodity_signal=commodity_signal,
         rmb_signal=rmb_signal,
-        macro_rates=macro_rates,
+        macro_rates=inputs.macro_rates,
         policy_events=policy_events,
         fundamentals=inputs.fundamentals,
         valuation=inputs.valuation,

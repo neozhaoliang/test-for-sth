@@ -61,6 +61,40 @@ assert.ok(html.includes('股权自由现金流 FCFE'));
 assert.ok(html.includes('美国10年国债收益率'));
 assert.ok(html.includes('2026-10-08'));
 assert.ok(html.includes('人民币汇率趋势'));
+assert.ok(html.includes('class="macro-inline"'));
+assert.ok(!html.includes('近期利率与汇率数据</h4>'));
+assert.ok(!html.includes('国际市场与中国利率</h4>'));
+const dated=(metric,value,as_of)=>({metric,value,as_of,usable:true});
+const minerModel={...model,macro_context:{
+  ...model.macro_context,rmb_direction:'appreciating',rmb_is_dated:true,
+  observations:[
+    dated('fed_target_lower_pct',3.75,'2026-10-15'),
+    dated('fed_target_upper_pct',4,'2026-10-15'),
+    dated('fed_target_change_180d_pp',.25,'2026-10-15'),
+    dated('us_10y_yield_pct',4.6,'2026-10-15'),
+    dated('china_lpr_1y_pct',3,'2026-09-20'),
+    dated('china_lpr_5y_pct',3.5,'2026-09-20'),
+    dated('usdcny_midpoint_cny_per_usd',6.7253,'2026-10-15'),
+    dated('usdcny_change_30obs_pct',-.865,'2026-10-15'),
+  ],
+  miner_transmission:{
+    status:'evidence_bounded',
+    currency_reading:'人民币升值会压低美元定价的金铜人民币折算价格，但不代表净利润必然下降。',
+    rate_reading:'美国实际利率上行可能压制黄金，但金铜还受工业供需影响。',
+    financing_reading:'美元债务可能受到有利折算，浮动利率成本需核实。',
+    evidence_limit:'公司净汇兑敞口尚需原始披露。',
+  },
+}};
+const compact=ctx.renderIndustryValuationLab({valuation_model:minerModel});
+assert.ok(compact.includes('利率汇率一行摘要'));
+assert.ok(compact.includes('3.75–4.00%'));
+assert.ok(compact.includes('6.7253元'));
+assert.ok(compact.includes('-0.86%') || compact.includes('-0.87%'));
+assert.ok(compact.includes('中国LPR'));
+assert.ok(compact.includes('金铜与汇率'));
+assert.ok(compact.includes('美元利率与资源周期'));
+assert.ok(compact.includes('公司净汇兑敞口尚需原始披露'));
+assert.equal((compact.match(/class="macro-inline"/g)||[]).length,1);
 const defaults={
   discount:10,growth:2,stress:0,premium:0,safety:20,
 };

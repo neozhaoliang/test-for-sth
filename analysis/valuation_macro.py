@@ -114,6 +114,25 @@ def build_macro_valuation_context(
                 }
 
     observations = [
+        observation("fed_target_lower_pct", _valid(us.get("fed_target_lower_pct")),
+                    us.get("fed_target_lower_as_of"),
+                    (us.get("source_urls") or {}).get("target_lower"),
+                    (us.get("fed_target_freshness") or {}).get("fresh", False)),
+        observation("fed_target_upper_pct", _valid(us.get("fed_target_upper_pct")),
+                    us.get("fed_target_upper_as_of"),
+                    (us.get("source_urls") or {}).get("target_upper"),
+                    (us.get("fed_target_freshness") or {}).get("fresh", False)),
+        observation("fed_target_change_180d_pp",
+                    _valid(us.get("fed_target_upper_change_180d_pp")),
+                    us.get("fed_target_upper_as_of"),
+                    (us.get("source_urls") or {}).get("target_upper"),
+                    (us.get("fed_target_freshness") or {}).get("fresh", False)),
+        observation("us10y_change_30d_pp", _valid(us.get("us10y_change_30d_pp")),
+                    us.get("us10y_as_of"), (us.get("source_urls") or {}).get("us10y"),
+                    (us.get("us10y_freshness") or {}).get("fresh", False)),
+        observation("china_lpr_1y_pct", _valid(cn.get("lpr_1y_pct")),
+                    cn.get("as_of"), cn.get("source_url"),
+                    (cn.get("freshness") or {}).get("fresh", False)),
         observation("usdcny_midpoint_cny_per_usd",
                     _valid((rmb_signal or {}).get("usdcny_midpoint_cny_per_usd")),
                     (rmb_signal or {}).get("as_of"),
@@ -137,8 +156,8 @@ def build_macro_valuation_context(
                     stock.get("latest_date"), "A-share stock price data"),
     ]
     rmb = rmb_signal or {}
-    # RMB collector only returns direction, no dated USD/CNY level. As-of
-    # live collector with no observation timestamp is NOT point-in-time auditable.
+    # Direction is derived from dated USD/CNY fixing observations.
+    # A lower CNY-per-USD fixing means RMB appreciation, not USD appreciation.
     fx_direction = rmb.get("rmb_trend") if rmb.get("rmb_trend") in (
         "appreciating", "depreciating", "stable") else None
     if rmb.get("as_of") is None or (

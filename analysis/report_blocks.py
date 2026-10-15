@@ -739,10 +739,11 @@ def _build_macro_rates_block(data: Optional[Dict]) -> str:
 
 def _build_fx_block(rmb_signal: Optional[Dict], facts: Optional[Dict]) -> str:
     """
-    汇率敞口 = 汇率方向 × 海外收入占比。两者缺一都无法判断顺风逆风：
-    只知道人民币升值但不知道有没有海外收入，或只知道海外收入高但不知道汇率方向，
-    都不足以给出方向性结论——所以缺任一项时必须写明"暂缺"，不要让模型自己补。
+    USD commodity quotations, foreign-revenue allocation and net FX exposure
+    are distinct. For gold/copper miners, RMB appreciation has a conditional
+    translation effect even when a generic overseas-revenue ratio is missing.
     """
+
     lines = []
     trend_note = (rmb_signal or {}).get("rmb_trend_note")
     lines.append(
@@ -754,13 +755,14 @@ def _build_fx_block(rmb_signal: Optional[Dict], facts: Optional[Dict]) -> str:
         lines.append(f"海外收入占比: {_MISSING_TAIL}")
     else:
         lines.append(
-            f"海外收入占比: {overseas_pct}% (汇率敞口的主要来源；占比越高，"
-            f"汇率变动对收入/毛利的杠杆越大)"
+            f"海外收入占比: {overseas_pct}% (地域分布信息，不等于外币净头寸；"
+            f"不能直接乘汇率变化推算利润)"
         )
-    if trend_note and overseas_pct is not None:
+    if trend_note:
         lines.append(
-            "注: 上述两项均已给出，必须据此给出汇率对该公司收入的影响方向 (顺风/逆风)，"
-            "并说明大致传导路径 (折算收入 / 报价竞争力 / 汇兑损益)。"
+            "注: 结合币种、产品定价、进口成本、外币债务与套保，"
+            "说明直接折算效应及可能相反的自然对冲。"
+            "严禁用海外收入占比乘汇率变化推净利润。"
         )
     return "\n".join(lines)
 
