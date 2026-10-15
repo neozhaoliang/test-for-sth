@@ -2898,7 +2898,7 @@ function renderIndustryValuationLab(report) {
     fedLower.value+'–'+fedUpper.value+'%',fedUpper.date));
   if(fedChange)ratePieces.push(macroPart('近180日政策利率变化',
     (Number(fedChange.value)>0?'+':'')+fedChange.value+'百分点',fedChange.date));
-  if(usTen)ratePieces.push(macroPart('美债10年期',usTen.value+'%',usTen.date));
+  if(usTen)ratePieces.push(macroPart('美国10年国债收益率',usTen.value+'%',usTen.date));
   if(lprOne||lprFive)ratePieces.push(macroPart('中国LPR',
     (lprOne?'1年'+lprOne.value+'%':'')+
     (lprOne&&lprFive?' / ':'')+
@@ -2907,7 +2907,7 @@ function renderIndustryValuationLab(report) {
   if(quote)fxPieces.push(macroPart('美元兑人民币',quote.value+'元',quote.date));
   if(fxChange)fxPieces.push(macroPart('近30个报价日',
     (Number(fxChange.value)>0?'+':'')+fxChange.value+'%',fxChange.date));
-  if(macro.rmb_is_dated)fxPieces.push(macroPart('人民币汇率趋势',trend,''));
+  fxPieces.push(macroPart('人民币汇率趋势',macro.rmb_is_dated?trend:'尚未核实最新方向',''));
   html+='<div class="macro-inline" role="group" aria-label="利率汇率一行摘要">'+
     '<div class="macro-inline-group"><b>利率</b>'+
       (ratePieces.join('')||'<small>本次暂无可核验的最新政策和国债利率观测</small>')+
