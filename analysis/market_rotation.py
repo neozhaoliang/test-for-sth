@@ -66,6 +66,7 @@ def build_sector_rotation(series: Mapping[str, Any], *, as_of: date) -> dict:
             continue
         valid.append({
             "name": name, "d20_pct": round(value, 2),
+            "previous_d20_pct": _num(data.get("previous_d20_pct")),
             "d60_pct": _num(data.get("d60_pct")),
             "ytd_pct": _num(data.get("ytd_pct")),
             "latest_date": when.isoformat(),
@@ -86,6 +87,13 @@ def build_sector_rotation(series: Mapping[str, Any], *, as_of: date) -> dict:
             "note": "行业样本或同期收盘数据不足，不得据此宣称市场风格迁移。",
         }
     count = len(valid)
+    previous = sorted(
+        [r for r in valid if r["previous_d20_pct"] is not None],
+        key=lambda r: (-r["previous_d20_pct"], r["name"]),
+    )
+    past_leaders = [r["name"] for r in previous[:4]] if len(previous) >= 6 else []
+    current_leaders = [r["name"] for r in valid[:4]]
+    new_leaders = [name for name in current_leaders if name not in past_leaders] if past_leaders else []
     return {
         "status": "observed",
         "as_of": max(row["latest_date"] for row in valid),
@@ -94,8 +102,11 @@ def build_sector_rotation(series: Mapping[str, Any], *, as_of: date) -> dict:
         "coverage": count,
         "universe_size": len(SECTOR_SAMPLE),
         "sectors": valid,
-        "leaders": [r["name"] for r in valid[:4]],
+        "leaders": current_leaders,
         "laggards": [r["name"] for r in valid[-4:]],
+        "previous_leaders": past_leaders,
+        "new_leaders": new_leaders,
+        "rotation_detectable": bool(past_leaders),
         "up_count": sum(r["d20_pct"] > 0 for r in valid),
         "down_count": sum(r["d20_pct"] < 0 for r in valid),
         "median_return_pct": round((valid[(count-1)//2]["d20_pct"] +
@@ -190,6 +201,10 @@ async def interpret_sector_rotation(rotation: Mapping, *,
             "可兼顾有色、医药、能源、金融、消费、科技、制造等，只以数据实际覆盖者为准。"
             "研究基准日：" + str(as_of) + "；公司行业：" + str(stock_industry) + "。"
             "板块数据口径=东方财富行业板块样本，20个交易日收盘变化；"
+            "部分行业还提供之前20个交易日的独立涨幅，可据此识别领涨变化而非只看静态排名；"
+            "上一窗口领涨名单=" + json.dumps(rotation.get("previous_leaders") or [],ensure_ascii=False) +
+            "；新进本窗口前列的行业=" + json.dumps(rotation.get("new_leaders") or [],ensure_ascii=False) + "。"
+
             "无法凭上涨和下跌确认某些资金从A板块卖出再买入B。"
             "不得编造利率决议、基金申购赎回、监管政策、行业业绩、估值变动、"
             "资金净流或实时报价。原因只能写成有条件的解释，不要当作已经证实的事实。"
