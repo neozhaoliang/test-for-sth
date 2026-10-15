@@ -37,14 +37,16 @@ def finite_json_numbers(value: Any) -> Any:
     # NumPy scalar values, including float32/int64, need conversion to Python.
     # Avoid making numpy a hard requirement of this response-serialization layer.
     if type(value).__module__.startswith("numpy"):
-        scalar = getattr(value, "item", None)
-        if callable(scalar):
-            converted = scalar()
-            if converted is not value:
-                return finite_json_numbers(converted)
+        # ndarray.item() raises for multi-element arrays; tolist() also
+        # normalizes vector/matrix elements recursively.
         as_list = getattr(value, "tolist", None)
         if callable(as_list):
             converted = as_list()
+            if converted is not value:
+                return finite_json_numbers(converted)
+        scalar = getattr(value, "item", None)
+        if callable(scalar):
+            converted = scalar()
             if converted is not value:
                 return finite_json_numbers(converted)
     # Don't stringify unsupported objects; that would conceal bad API data.
