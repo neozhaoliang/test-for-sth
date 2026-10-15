@@ -117,3 +117,33 @@ async def test_llm_failure_preserves_numeric_sector_reading(monkeypatch):
     )
     assert out["status"]=="numeric_fallback"
     assert len(out["featured_sectors"])==6
+
+
+def test_rotation_checks_new_leaders_against_distinct_previous_window():
+    rows=observations()
+    older={"半导体":15.0,"软件开发":12.0,"通信设备":9.0,
+           "电力行业":7.0,"银行":6.0,"有色金属":-2.0,
+           "化学制药":-1.0,"医疗器械":-1.0,"小金属":-3.0}
+    for name,record in rows.items():
+        record["previous_d20_pct"]=older[name]
+    rotation=build_sector_rotation(rows,as_of=date(2026,10,15))
+    assert rotation["rotation_detectable"] is True
+    assert "半导体" in rotation["previous_leaders"]
+    assert "有色金属" in rotation["new_leaders"]
+    assert "化学制药" in rotation["new_leaders"]
+
+
+def test_llm_may_select_dividend_index_when_relevant_but_not_forced():
+    rotation=build_sector_rotation(observations(),as_of=date(2026,10,15))
+    rotation["benchmarks"]=[{"name":"上证红利","d20_pct":3.0,
+                            "latest_date":"2026-10-14","category":"style_index"}]
+    candidate={
+        "featured_sectors":["有色金属","化学制药","上证红利","半导体","软件开发"],
+        "summary":"近期资源和医疗相关行业相对领先，成长板块回撤较大，红利指数表现介于强弱行业之间。",
+        "hypotheses":[],
+    }
+    result=validate_rotation_reading(candidate,rotation)
+    assert result["status"]=="llm_selected"
+    assert "上证红利" in result["featured_sectors"]
+    candidate["featured_sectors"]=[x for x in candidate["featured_sectors"] if x!="上证红利"]
+    assert validate_rotation_reading(candidate,rotation)["status"]=="llm_selected"
