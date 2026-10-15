@@ -27,11 +27,9 @@ async def test_market_context_drops_future_stock_and_index_rows(monkeypatch):
 
     async def fake_sectors(*, as_of=None):
         assert as_of == date(2024, 6, 30)
-        sector_dates = pd.to_datetime([
-            "2024-04-01", "2024-06-28", "2024-07-02"
-        ])
+        sector_dates = pd.bdate_range("2024-05-13", periods=43)
         return {
-            name: pd.Series([100.0, 125.0, 300.0], index=sector_dates)
+            name: pd.Series([100.0 + i for i in range(43)], index=sector_dates)
             for name in ("有色金属", "化学制药", "医疗器械",
                          "半导体", "软件开发", "银行", "电力行业")
         }
