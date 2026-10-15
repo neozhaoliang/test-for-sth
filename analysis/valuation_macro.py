@@ -165,7 +165,7 @@ def build_macro_valuation_context(
          "evidence": "LPR观察值，非中国无风险收益率或央行政策利率",
          "quantifiable": False},
         {"factor": "A_share_style",
-         "route": "红利/科技风格迁移、ETF及公募持仓拥挤 → 估值折价/风险溢价情景",
+         "route": "有色、医药、科技、金融等实际行业与红利等风格指数强弱变化、ETF/公募持仓拥挤 → 风险溢价情景",
          "evidence": "必须先校验风格指数与估值分位，不允许凭叙事加减目标价",
          "quantifiable": False},
         {"factor": "China_policy_governance",
