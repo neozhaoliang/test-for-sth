@@ -69,3 +69,48 @@ async def test_macro_context_forwards_as_of_to_both_sources(monkeypatch):
         ("us", date(2024, 6, 30)),
         ("china", date(2024, 6, 30)),
     ]
+
+
+def test_policy_decisions_handle_asof_direction_and_staleness_without_inventing_moves():
+    import pandas as pd
+
+    values = pd.DataFrame({
+        "日期": ["2026-02-02", "2026-09-15", "2026-10-01", "2026-12-18"],
+        "今值": [1.0, 1.0, 1.25, 3.0],
+    })
+    result = macro_rates._policy_decision_table(
+        values, as_of=date(2026, 10, 15), bank="日本央行",
+    )
+    assert result["policy_rate_pct"] == 1.25
+    assert result["decision_as_of"] == "2026-10-01"
+    assert result["last_decision_change_pp"] == 0.25
+    assert result["change_180d_pp"] == 0.25
+    assert result["freshness"]["fresh"] is True
+
+    stale = macro_rates._policy_decision_table(
+        values, as_of=date(2026, 8, 1), bank="日本央行",
+    )
+    assert stale["policy_rate_pct"] == 1.0
+    assert stale["freshness"]["fresh"] is False
+    assert stale["last_decision_change_pp"] is None
+
+
+@pytest.mark.asyncio
+async def test_international_decision_fetch_partial_failure_is_not_false_tightening(monkeypatch):
+    import pandas as pd
+    import akshare
+
+    def japan():
+        return pd.DataFrame({"日期": ["2026-09-01"], "今值": [1.25]})
+
+    def ecb():
+        raise TimeoutError("network unreachable")
+
+    monkeypatch.setattr(akshare, "macro_bank_japan_interest_rate", japan, raising=False)
+    monkeypatch.setattr(akshare, "macro_bank_euro_interest_rate", ecb, raising=False)
+    observed = await macro_rates.get_international_policy_rates(
+        as_of=date(2026, 10, 15),
+    )
+    assert observed["japan"]["policy_rate_pct"] == 1.25
+    assert observed["euro"] is None
+    assert observed["japan"]["last_decision_change_pp"] is None
