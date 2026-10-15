@@ -26,7 +26,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install \
             pytest pytest-asyncio uv \
-            "pydantic>=2,<3" "pypdf>=5,<7" \
+            "pydantic>=2,<3" "pypdf>=5,<7" "fastapi>=0.115,<1" \
             akshare anthropic python-dotenv \
             "httpx[socks]==0.28.1" pillow playwright opencv-python tenacity requests
 
