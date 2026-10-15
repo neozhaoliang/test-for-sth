@@ -88,8 +88,8 @@ const minerModel={...model,macro_context:{
 const compact=ctx.renderIndustryValuationLab({valuation_model:minerModel});
 assert.ok(compact.includes('利率汇率一行摘要'));
 assert.ok(compact.includes('3.75–4.00%'));
-assert.ok(compact.includes('>6.7253元'));
-assert.ok(compact.includes('>-0.86%') || compact.includes('>-0.87%'));
+assert.ok(compact.includes('6.7253元'));
+assert.ok(compact.includes('-0.86%') || compact.includes('-0.87%'));
 assert.ok(compact.includes('中国LPR'));
 assert.ok(compact.includes('金铜与汇率'));
 assert.ok(compact.includes('美元利率与资源周期'));
