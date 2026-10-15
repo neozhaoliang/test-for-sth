@@ -127,4 +127,50 @@ const injected=ctx.renderInvestmentStyleStrip({style_context:{
 }});
 assert.ok(!injected.includes('<script>bad()'));
 
+// Dynamic cross-industry style: the LLM may feature pharma/metals instead of
+// a fixed dividend-vs-tech pair, but numeric values come only from board data.
+const sectorRows=[
+  ['有色金属',12.3],['化学制药',8.9],['医疗器械',5.2],
+  ['电力行业',1.2],['银行',.4],['软件开发',-7.4],['半导体',-9.5],
+].map(([name,d20_pct])=>({name,d20_pct,latest_date:'2026-10-14'}));
+const broadStyle={
+  ...base,
+  sector_rotation:{
+    status:'observed', as_of:'2026-10-14', coverage:7,universe_size:37,
+    sectors:sectorRows, leaders:['有色金属','化学制药'],
+    laggards:['半导体','软件开发'],up_count:5,down_count:2,
+  },
+  rotation_reading:{
+    status:'llm_selected', featured_sectors:['化学制药','医疗器械','有色金属','半导体'],
+    summary:'医药板块相对更强，有色和半导体明显分化，本轮不能只讨论红利与科技。',
+    hypotheses:['相关行业盈利预期可能正在改变，仍需核实上市公司业绩变化。'],
+  },
+};
+const broadMarkup=ctx.renderInvestmentStyleStrip({style_context:broadStyle});
+assert.ok(broadMarkup.includes('化学制药') && broadMarkup.includes('医疗器械'));
+assert.ok(broadMarkup.includes('>+8.90%</strong>'));
+assert.ok(broadMarkup.includes('>+12.30%</strong>'));
+assert.ok(broadMarkup.includes('>-9.50%</strong>'));
+assert.ok(broadMarkup.includes('医药板块相对更强'));
+assert.ok(broadMarkup.includes('7个行业中'));
+assert.ok(!broadMarkup.includes('科创50／创业板平均'));
+assert.ok(!broadMarkup.includes('红利相对成长'));
+assert.equal((broadMarkup.match(/class="style-return-row"/g)||[]).length,4);
+const rotated={...broadStyle,rotation_reading:{
+  ...broadStyle.rotation_reading, featured_sectors:['银行','电力行业','软件开发','半导体'],
+}};
+const rotatedMarkup=ctx.renderInvestmentStyleStrip({style_context:rotated});
+assert.ok(rotatedMarkup.includes('>+0.40%</strong>'));
+assert.ok(!rotatedMarkup.includes('>+8.90%</strong>'));
+const unavailable=ctx.renderInvestmentStyleStrip({style_context:{
+  ...base, sector_rotation:{status:'insufficient_data',coverage:2},
+}});
+assert.ok(unavailable.includes('多行业同期行情覆盖不足'));
+assert.ok(!unavailable.includes('上证红利+'));
+const injectedSector=ctx.renderInvestmentStyleStrip({style_context:{
+  ...broadStyle, rotation_reading:{...broadStyle.rotation_reading,
+    summary:'<img src=x onerror=alert(1)>'},
+}});
+assert.ok(!injectedSector.includes('<img src=x onerror=alert(1)>'));
+
 console.log('Market returns UI checks passed: plain percentages, alignment classes, sign colors, source disagreement guard, no SVG.');
