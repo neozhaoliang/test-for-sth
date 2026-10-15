@@ -281,7 +281,7 @@ async def _generate_summary(
         if (rotation.get("status") == "observed"
                 and getattr(inputs, "research_mode", "") != "historical"):
             style["rotation_reading"] = await interpret_sector_rotation(
-                rotation, stock_industry=str(getattr(profile, "industry", "")),
+                rotation, stock_industry=str(getattr(getattr(inputs, "research_profile", None), "industry", "")),
                 as_of=as_of,
             )
             style["causal_knowledge_status"] = "sector_rotation_observed"
