@@ -64,6 +64,7 @@ jobs:
             analysis/valuation_orchestrator.py \
             analysis/investor_valuation.py \
             analysis/market_research_context.py \
+            analysis/market_rotation.py \
             analysis/public_report.py \
             analysis/issuer_business.py \
             analysis/valuation_config.py \
@@ -144,7 +145,8 @@ jobs:
         run: node tests/check_dashboard_ui.js /tmp/investment-webui.js
 
       - name: Verify industry-specific valuation UI and no-target-price safeguards
-        run: node tests/check_industry_valuation_ui.js /tmp/investment-webui.js
+        run: |
+          node tests/check_industry_valuation_ui.js /tmp/investment-webui.js
           node tests/check_report_toc_ui.js /tmp/investment-webui.js
           node tests/check_style_returns_ui.js /tmp/investment-webui.js
           node --check web/stock_autocomplete.js
@@ -173,6 +175,7 @@ jobs:
             tests/test_valuation_industry_models.py \
             tests/test_investor_reference_style.py \
             tests/test_market_style_reasons.py \
+            tests/test_market_rotation.py \
             tests/test_investor_return_decomposition.py \
             tests/test_roe_discount_valuation.py \
             tests/test_research_desk_theme.py \

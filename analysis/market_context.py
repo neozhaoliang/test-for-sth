@@ -34,8 +34,9 @@ import akshare as ak
 import pandas as pd
 
 from backtest.price_source import get_price_history
+from analysis.market_rotation import SECTOR_SAMPLE, build_sector_rotation
 
-# 风格覆盖: 大盘 (上证/沪深300)、科技成长 (科创50/创业板指)、红利 (上证红利)。
+# 宽基指数提供参照；行业强弱由独立的多行业20日序列决定，不再将红利/科技设为唯一比较。
 _INDEX_UNIVERSE: List[Tuple[str, str]] = [
     ("sh000001", "上证指数"),
     ("sh000300", "沪深300"),
@@ -48,6 +49,7 @@ logger = logging.getLogger("MediaCrawler")
 
 _TTL_SECONDS = 6 * 3600
 _index_cache: Optional[Tuple[float, Dict[str, pd.Series]]] = None
+_sector_cache: Dict[str, Tuple[float, Dict[str, pd.Series]]] = {}
 
 # 个股历史区间起点: 覆盖 2021 年集运景气高点这类上一轮周期的参照系。
 _STOCK_HISTORY_START = date(2018, 1, 1)
@@ -79,6 +81,60 @@ async def _get_index_series() -> Dict[str, pd.Series]:
     return result
 
 
+async def _get_sector_series(*, as_of: Optional[date] = None) -> Dict[str, pd.Series]:
+    """Cache a balanced, disclosed sample of EM industry boards across stocks.
+
+    Each board uses the same historical close/20-trading-day-return definition.
+    Data unavailable from the provider remains missing; no synthesized index.
+    """
+    global _sector_cache
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    end = as_of or datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    cache_key = end.isoformat() if as_of is not None else 'live'
+    entry = _sector_cache.get(cache_key)
+    if entry and (time.time() - entry[0]) < _TTL_SECONDS:
+        return entry[1]
+
+    limit = asyncio.Semaphore(10)
+    start = date(end.year - 2, 1, 1)
+
+    async def collect(name):
+        async with limit:
+            try:
+                frame = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        ak.stock_board_industry_hist_em,
+                        symbol=name,
+                        start_date=start.strftime("%Y%m%d"),
+                        end_date=end.strftime("%Y%m%d"),
+                        adjust="",
+                    ),
+                    timeout=18,
+                )
+                if (frame is None or frame.empty
+                        or not {"日期", "收盘"}.issubset(frame.columns)):
+                    return None
+                df = frame[["日期", "收盘"]].copy()
+                df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+                df["收盘"] = pd.to_numeric(df["收盘"], errors="coerce")
+                df = df.dropna().drop_duplicates("日期", keep="last")
+                df = df[df["收盘"] > 0].sort_values("日期")
+                if df.empty:
+                    return None
+                return name, df.set_index("日期")["收盘"]
+            except Exception as e:
+                logger.info("[market_context] industry board %s unavailable: %s",
+                            name, type(e).__name__)
+                return None
+
+    results = await asyncio.gather(*(collect(n) for n in SECTOR_SAMPLE))
+    found = dict(row for row in results if row)
+    # Avoid repeated network spikes when all backends fail; stay fail-closed.
+    _sector_cache[cache_key] = (time.time(), found)
+    return found
+
+
 def _period_ret(series: pd.Series, start_inclusive: str, end_inclusive: str) -> Optional[float]:
     """区间 [start_inclusive, end_inclusive] 的涨跌幅 (%)。起点当日无数据时向前取最近收盘。"""
     base = series[series.index <= start_inclusive]
@@ -100,6 +156,11 @@ def _summary(series: pd.Series) -> Dict:
            if len(series) >= 21 and float(series.iloc[-21]) > 0 else None)
     d60 = ((last / float(series.iloc[-61]) - 1) * 100
            if len(series) >= 61 and float(series.iloc[-61]) > 0 else None)
+    # Independent preceding 20 trading days, not the same last-20 window.
+    previous_d20 = (
+        (float(series.iloc[-21]) / float(series.iloc[-41]) - 1) * 100
+        if len(series) >= 41 and float(series.iloc[-41]) > 0 else None
+    )
     return {
         "latest": round(last, 2),
         "latest_date": str(series.index[-1].date()),
@@ -107,6 +168,7 @@ def _summary(series: pd.Series) -> Dict:
         "h1_pct": round(h1, 1) if h1 is not None else None,
         "h2_pct": round(h2, 1) if h2 is not None else None,
         "d20_pct": round(d20, 2) if d20 is not None else None,
+        "previous_d20_pct": round(previous_d20, 2) if previous_d20 is not None else None,
         "d60_pct": round(d60, 2) if d60 is not None else None,
     }
 
@@ -121,7 +183,9 @@ async def get_market_context(
     stock 额外带 52 周高低点与 2018 年以来高低点 (用于判断"相对历史区间的位置")。
     指数与个股都取不到时返回 None。
     """
-    index_series = await _get_index_series()
+    index_series, sector_series = await asyncio.gather(
+        _get_index_series(), _get_sector_series(as_of=as_of)
+    )
     cutoff = pd.Timestamp(as_of) if as_of is not None else None
     if cutoff is not None:
         index_series = {
@@ -129,6 +193,17 @@ async def get_market_context(
             for name, s in index_series.items()
             if not s[s.index <= cutoff].empty
         }
+
+    if cutoff is not None:
+        sector_series = {
+            name: s[s.index <= cutoff]
+            for name, s in sector_series.items()
+            if not s[s.index <= cutoff].empty
+        }
+    sector_summaries = {name: _summary(s) for name, s in sector_series.items()}
+    rotation = build_sector_rotation(
+        sector_summaries, as_of=as_of or date.today()
+    )
 
     start = _STOCK_HISTORY_START
     if as_of is not None and as_of < _STOCK_HISTORY_START:
@@ -167,8 +242,26 @@ async def get_market_context(
             stock["hist_low_date"] = str(s.idxmin().date())
             stock["hist_start"] = str(s.index[0].date())
 
-    if not index_series and stock is None:
+    if not index_series and stock is None and rotation["status"] != "observed":
         return None
 
     indices = [_summary(s) | {"name": name} for name, s in index_series.items()]
-    return {"indices": indices, "stock": stock}
+    # Style benchmarks can compete for attention with metals, healthcare, and
+    # other industries; none is mandatory. Same 20-trading-day close basis.
+    benchmarks = []
+    if rotation["status"] == "observed":
+        anchor = date.fromisoformat(rotation["as_of"])
+        for row in indices:
+            when = row.get("latest_date")
+            delta = row.get("d20_pct")
+            try:
+                diff = abs((anchor - date.fromisoformat(str(when))).days)
+            except ValueError:
+                continue
+            if delta is not None and diff <= 3:
+                benchmarks.append({
+                    "name": row["name"], "d20_pct": delta,
+                    "latest_date": when, "category": "style_index",
+                })
+    rotation["benchmarks"] = benchmarks
+    return {"indices": indices, "stock": stock, "sector_rotation": rotation}

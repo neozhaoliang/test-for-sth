@@ -2604,8 +2604,79 @@ function readableStyleCauses(drivers, style) {
   return result;
 }
 
+// Live cross-industry market style: use a same-window sector sample instead of
+// always comparing dividend and technology indices. The LLM can select which
+// sectors deserve attention, but never supplies displayed return percentages.
+function renderSectorRotationStyleStrip(style) {
+  const rotation=style.sector_rotation||{};
+  if(rotation.status!=='observed')return '';
+  const universe=(Array.isArray(rotation.sectors)?rotation.sectors:[]).filter(x=>
+    x && typeof x.name==='string' && Number.isFinite(Number(x.d20_pct)) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(String(x.latest_date||'')));
+  if(universe.length<3)return '';
+  const benchmarks=(Array.isArray(rotation.benchmarks)?rotation.benchmarks:[]).filter(x=>
+    x && typeof x.name==='string' && Number.isFinite(Number(x.d20_pct)));
+  const byName=new Map([...universe,...benchmarks].map(x=>[x.name,x]));
+  const reading=style.rotation_reading||{};
+  const preferred=(Array.isArray(reading.featured_sectors)?reading.featured_sectors:[])
+    .filter(name=>typeof name==='string'&&byName.has(name));
+  const selectedNames=[...new Set(preferred.length>=3?preferred:[
+    ...universe.slice(0,3).map(x=>x.name),...universe.slice(-3).map(x=>x.name)
+  ])].slice(0,9);
+  const selected=selectedNames.map(name=>byName.get(name));
+  const leader=universe[0], laggard=universe[universe.length-1];
+  const fmt=v=>(v>0?'+':'')+v.toFixed(2)+'%';
+  const tone=v=>v>0?'style-return-up':v<0?'style-return-down':'style-return-flat';
+  let html='<div class="style-insight"><h4>当前市场在交易什么？</h4>'+
+    '<p><b>近20日行业分化：'+escapeHtml(leader.name)+'相对靠前，'+
+    escapeHtml(laggard.name)+'相对靠后</b> · <span class="section-caption">'+
+    escapeHtml(rotation.as_of||'')+'</span></p>';
+  html+='<div class="style-return-list" role="group" aria-label="动态行业涨跌幅">'+
+    selected.map(x=>'<div class="style-return-row">'+
+      '<span class="style-return-name">'+escapeHtml(x.name)+
+      (x.category==='style_index'?' <small>（风格指数）</small>':'')+'</span>'+
+      '<strong class="style-return-value '+tone(Number(x.d20_pct))+'">'+
+      fmt(Number(x.d20_pct))+'</strong></div>').join('')+'</div>';
+  if(rotation.rotation_detectable && Array.isArray(rotation.new_leaders) &&
+     rotation.new_leaders.length) {
+    html+='<p class="section-caption"><b>主线变化：</b>较此前20个交易日，'+
+      escapeHtml(rotation.new_leaders.join('、'))+
+      '进入当前行业样本涨幅前列。排名变化并不保证后续持续领涨。</p>';
+  }
+  if(typeof reading.summary==='string' && reading.summary.trim()) {
+    html+='<p class="style-performance-reading"><b>市场解读：</b>'+
+      escapeHtml(reading.summary)+'</p>';
+  }
+  const explanations=Array.isArray(reading.hypotheses)?reading.hypotheses:[];
+  if(explanations.length) {
+    html+='<section class="style-why"><h5>可能的驱动因素</h5>'+
+      explanations.slice(0,2).map(x=>'<p class="style-cause-item">'+
+        escapeHtml(x)+'</p>').join('')+'</section>';
+  }
+  html+='<p class="style-cause-caveat">已统计的'+
+    escapeHtml(String(rotation.coverage||universe.length))+
+    '个行业中，近20个交易日上涨'+escapeHtml(String(rotation.up_count??'—'))+
+    '个、下跌'+escapeHtml(String(rotation.down_count??'—'))+
+    '个。以上为行业样本价格表现，不代表覆盖全市场或证实板块之间发生资金迁移。'+
+    '判断原因仍需结合ETF份额、基金持仓、行业盈利与估值变化。</p>';
+  const stk=numericOrNull(style.stock_20d_pct);
+  if(stk!==null)html+='<p><b>本股近20个交易日：</b>'+fmt(stk)+
+    '（'+escapeHtml(style.stock_20d_as_of||'日期不明')+'）</p>';
+  html+='<p class="section-caption">板块强弱不直接等于公司盈利质量或股票内在价值。'+
+    '行业涨跌采用东方财富行业板块历史收盘数据，不同板块缺失时不填充。</p></div>';
+  return html;
+}
+
 function renderInvestmentStyleStrip(model) {
   const style=(model||{}).style_context || {};
+  if((style.sector_rotation||{}).status==='observed') {
+    return renderSectorRotationStyleStrip(style);
+  }
+  if(style.sector_rotation && style.sector_rotation.status==='insufficient_data') {
+    return '<div class="style-insight"><h4>当前市场在交易什么？</h4>'+
+      '<p class="section-caption">多行业同期行情覆盖不足，本次不能可靠判断市场的主导风格。'+
+      '不以固定的红利与科技指数替代全市场行业比较。</p></div>';
+  }
   if(style.status!=='observed')return '';
   const events=style.dated_market_events || [];
   const redObserved=(style.dividend_index_return_pct===null ||
@@ -2808,7 +2879,16 @@ function renderIndustryValuationLab(report) {
       '；海外营收占比：'+escapeHtml(macro.overseas_revenue_pct===null||macro.overseas_revenue_pct===undefined?
         '资料不足':String(macro.overseas_revenue_pct)+'%')+
       '<p>未审计套保/美元债及汇率敏感度前，禁止给出固定估值调整。</p></div>')+'</div>';
+  const broad=(model.style_context||{}).sector_rotation||{};
   const style=macro.a_share_style || {};
+  if(broad.status==='observed') {
+    const ordered=(broad.sectors||[]);
+    if(ordered.length)html+='<p class="section-caption" style="margin-top:12px;">'+
+      'A股行业观察：近20个交易日，'+escapeHtml(ordered[0].name)+
+      '相对靠前，'+escapeHtml(ordered[ordered.length-1].name)+
+      '相对靠后（'+escapeHtml(broad.as_of||'未知日期')+
+      '）。这是行业样本相对表现，不直接改变内在价值。</p>';
+  } else if(!model.style_context || !model.style_context.sector_rotation) {
   if(style.status==='observed') {
     const styleLabel={
       dividend_leading:'红利风格相对领先',
@@ -2820,6 +2900,7 @@ function renderIndustryValuationLab(report) {
       (style.style_window==='20 trading days'?'近20个交易日；':'年内；')+
       escapeHtml(style.as_of || '未知日期')+
       '）。这是风格相对收益，不直接改变内在价值。</p>';
+  }
   }
   // Generic macro transmission templates remain in the backend but are not
   // repeatedly presented as a dense six-item list to end users.

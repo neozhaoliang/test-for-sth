@@ -50,6 +50,7 @@ from analysis.investment_method_distiller import (
 from analysis.market_style_reasons import (
     build_market_style_reasons, market_style_reasons_prompt_block,
 )
+from analysis.market_rotation import interpret_sector_rotation
 from analysis.resource_mining_thesis import (
     is_resource_miner, resource_miner_prompt_block, repair_resource_summary,
 )
@@ -276,31 +277,48 @@ async def _generate_summary(
     # Integrate the private corpus as a causal hypothesis, not mere index stats.
     style = (getattr(inputs, 'valuation_model_result', None) or {}).get('style_context')
     if isinstance(style, dict):
-        historical = getattr(inputs, 'research_mode', '') == 'historical'
-        if historical and as_of and as_of < '2026-10-13':
-            style['causal_knowledge_status'] = 'historical_method_not_available'
-            style['causal_drivers'] = []
+        rotation = style.get("sector_rotation") or {}
+        if (rotation.get("status") == "observed"
+                and getattr(inputs, "research_mode", "") != "historical"):
+            style["rotation_reading"] = await interpret_sector_rotation(
+                rotation, stock_industry=str(getattr(getattr(inputs, "research_profile", None), "industry", "")),
+                as_of=as_of,
+            )
+            style["causal_knowledge_status"] = "sector_rotation_observed"
+            style["causal_drivers"] = []
+            prompt += (
+                "\n\n## 多行业风格研判（非固定红利/科技比较）\n"
+                + str(style["rotation_reading"].get("summary") or "") + "\n"
+                + "；".join(style["rotation_reading"].get("hypotheses") or [])
+                + "\n结合公司行业和实际价格解释投资赔率，禁止把涨跌认定为已证实的资金流向。"
+            )
         else:
-            reasons = await build_market_style_reasons(
-                getattr(inputs, 'knowledge_excerpts', None) or [],
-                # Exact style returns describe the outcome the hypothesis must explain.
-                # General market_context is a stock/index summary and does not contain
-                # the red-versus-growth pair; passing it left the model direction-blind.
-                as_of=as_of, market_context=style,
-                industry=str(getattr(getattr(inputs, 'research_profile', None),
-                                     'industry', '') or ''),
-            )
-            style['causal_knowledge_status'] = reasons['status']
-            style['causal_drivers'] = reasons['drivers']
-            # Counts are internal diagnostics; never expose sources to the UI.
-            style['private_excerpt_count'] = reasons['private_excerpt_count']
-            style['private_transcript_count'] = reasons['private_transcript_count']
-            utils.logger.info(
-                '[analysis.report] 市场风格因果知识覆盖 usable=%d, transcript=%d, drivers=%d, status=%s',
-                reasons['private_excerpt_count'], reasons['private_transcript_count'],
-                len(reasons['drivers']), reasons['status'],
-            )
-        prompt += '\n\n' + market_style_reasons_prompt_block(style)
+            historical = getattr(inputs, 'research_mode', '') == 'historical'
+            if historical and as_of and as_of < '2026-10-13':
+                style['causal_knowledge_status'] = 'historical_method_not_available'
+                style['causal_drivers'] = []
+            else:
+                reasons = await build_market_style_reasons(
+                    getattr(inputs, 'knowledge_excerpts', None) or [],
+                    # Exact style returns describe the outcome the hypothesis must explain.
+                    # General market_context is a stock/index summary and does not contain
+                    # the red-versus-growth pair; passing it left the model direction-blind.
+                    as_of=as_of, market_context=style,
+                    industry=str(getattr(getattr(inputs, 'research_profile', None),
+                                         'industry', '') or ''),
+                )
+                style['causal_knowledge_status'] = reasons['status']
+                style['causal_drivers'] = reasons['drivers']
+                # Counts are internal diagnostics; never expose sources to the UI.
+                style['private_excerpt_count'] = reasons['private_excerpt_count']
+                style['private_transcript_count'] = reasons['private_transcript_count']
+                utils.logger.info(
+                    '[analysis.report] 市场风格因果知识覆盖 usable=%d, transcript=%d, drivers=%d, status=%s',
+                    reasons['private_excerpt_count'], reasons['private_transcript_count'],
+                    len(reasons['drivers']), reasons['status'],
+                )
+            prompt += '\n\n' + market_style_reasons_prompt_block(style)
+
 
     # Subjective investment methods are synthesized from private knowledge,
     # then anonymized and checked before entering the final report model.
