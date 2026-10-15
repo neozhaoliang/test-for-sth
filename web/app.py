@@ -620,6 +620,18 @@ _INDEX_HTML = """<!DOCTYPE html>
   .metric strong { display:block; margin-top:5px; font-size:23px; font-weight:800; letter-spacing:-.04em; font-variant-numeric:tabular-nums; }
   .metric small { font-size:11px; color:var(--muted); overflow-wrap:anywhere; }
   .chart-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+  /* A single compact macro strip, not two full-height empty chart tiles. */
+  .macro-inline {display:flex;align-items:baseline;flex-wrap:wrap;gap:5px 22px;
+    padding:12px 15px;margin:14px 0 8px;border:1px solid var(--line);
+    border-radius:10px;background:#f8faff;font-size:12px;line-height:1.8;}
+  .macro-inline-group {display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 12px;min-width:0;}
+  .macro-inline-group b {font-size:13px;color:var(--ink);}
+  .macro-inline-group small {color:var(--muted);font-size:11px;}
+  .macro-impact {padding:5px 0 1px;font-size:13px;line-height:1.85;color:#30405b;}
+  .macro-impact p {margin:4px 0;}
+  .macro-impact strong {color:var(--ink);}
+  @media(max-width:600px){ .macro-inline {gap:10px;} .macro-inline-group {width:100%;} }
+
   .chart-tile { min-width:0; padding:18px; border:1px solid var(--line); border-radius:14px; background:#fcfdff; overflow-x:auto; }
   .chart-tile h4 { font-size:14px; margin:0 0 5px; }
   .chart-tile .section-caption { margin-bottom:10px; }
@@ -2859,26 +2871,62 @@ function renderIndustryValuationLab(report) {
       )+'</li>').join('')+
       '</ul></div>';
   }
+  // One compact row for both rates and FX; all metrics are point-in-time
+  // observations, never company profit sensitivities inferred from headlines.
   const observed=(macro.observations || []).filter(x=>x.usable && x.value!==null);
-  const names={
-    usdcny_midpoint_cny_per_usd:'美元兑人民币中间价',
-    usdcny_change_30obs_pct:'近30个报价日美元兑人民币涨跌幅',
-    us_10y_yield_pct:'美国10年国债收益率',
-    us_10y_change_90d_pp:'美国10年国债90日变化（百分点）',
-    china_lpr_5y_pct:'中国5年期LPR',
-    stock_ytd_return_pct:'个股今年以来涨幅',
+  const obs=Object.fromEntries(observed.map(x=>[x.metric,x]));
+  const show=(key,digits=2)=>{
+    const item=obs[key];
+    if(!item||!Number.isFinite(Number(item.value)))return null;
+    const v=Number(item.value);
+    return {value:v.toFixed(digits),date:item.as_of||'',source:item.source||''};
   };
-  html+='<div class="chart-grid" style="margin-top:16px;">'+
-    chartTile('近期利率与汇率数据','仅显示有明确日期、未过期的指标',
-      observed.length?'<div class="evidence-block">'+observed.map(x=>
-        '<div><b>'+escapeHtml(names[x.metric]||x.metric)+':</b> '+escapeHtml(String(x.value))+
-        ' <small>('+escapeHtml(x.as_of)+')</small></div>').join('')+'</div>':'')+
-    chartTile('国际市场与中国利率','不自动根据风格叙事调整合理股价',
-      '<div class="evidence-block">'+
-      '人民币汇率趋势：'+escapeHtml({appreciating:'人民币升值',depreciating:'人民币贬值',stable:'基本稳定'}[macro.rmb_direction]||'资料不足')+
-      '；海外营收占比：'+escapeHtml(macro.overseas_revenue_pct===null||macro.overseas_revenue_pct===undefined?
-        '资料不足':String(macro.overseas_revenue_pct)+'%')+
-      '<p>未审计套保/美元债及汇率敏感度前，禁止给出固定估值调整。</p></div>')+'</div>';
+  const quote=show('usdcny_midpoint_cny_per_usd',4);
+  const fxChange=show('usdcny_change_30obs_pct',2);
+  const fedLower=show('fed_target_lower_pct',2),fedUpper=show('fed_target_upper_pct',2);
+  const fedChange=show('fed_target_change_180d_pp',2);
+  const usTen=show('us_10y_yield_pct',2);
+  const lprOne=show('china_lpr_1y_pct',2),lprFive=show('china_lpr_5y_pct',2);
+  const trend={appreciating:'人民币升值',depreciating:'人民币贬值',
+    stable:'基本稳定'}[macro.rmb_direction]||'方向未核实';
+  const macroPart=(label,value,when)=>{
+    return '<span><b>'+escapeHtml(label)+'</b> '+escapeHtml(value)+
+      (when?' <small>('+escapeHtml(when)+')</small>':'')+'</span>';
+  };
+  const ratePieces=[];
+  if(fedLower&&fedUpper)ratePieces.push(macroPart('美联储目标利率',
+    fedLower.value+'–'+fedUpper.value+'%',fedUpper.date));
+  if(fedChange)ratePieces.push(macroPart('近180日政策利率变化',
+    (Number(fedChange.value)>0?'+':'')+fedChange.value+'百分点',fedChange.date));
+  if(usTen)ratePieces.push(macroPart('美债10年期',usTen.value+'%',usTen.date));
+  if(lprOne||lprFive)ratePieces.push(macroPart('中国LPR',
+    (lprOne?'1年'+lprOne.value+'%':'')+
+    (lprOne&&lprFive?' / ':'')+
+    (lprFive?'5年'+lprFive.value+'%':''),(lprOne||lprFive).date));
+  const fxPieces=[];
+  if(quote)fxPieces.push(macroPart('美元兑人民币',quote.value+'元',quote.date));
+  if(fxChange)fxPieces.push(macroPart('近30个报价日',
+    (Number(fxChange.value)>0?'+':'')+fxChange.value+'%',fxChange.date));
+  if(macro.rmb_is_dated)fxPieces.push(macroPart('人民币汇率趋势',trend,''));
+  html+='<div class="macro-inline" role="group" aria-label="利率汇率一行摘要">'+
+    '<div class="macro-inline-group"><b>利率</b>'+
+      (ratePieces.join('')||'<small>本次暂无可核验的最新政策和国债利率观测</small>')+
+    '</div><div class="macro-inline-group"><b>汇率</b>'+
+      (fxPieces.join('')||'<small>本次暂无可核验的最新美元兑人民币报价</small>')+
+    '</div></div>';
+  const miner=macro.miner_transmission || {};
+  if(miner.status==='evidence_bounded'){
+    html+='<div class="macro-impact"><p><strong>金铜与汇率：</strong>'+
+      escapeHtml(miner.currency_reading||'')+'</p>'+
+      '<p><strong>美元利率与资源周期：</strong>'+
+      escapeHtml(miner.rate_reading||'')+'</p>'+
+      '<p><strong>矿山成本、债务与套保：</strong>'+
+      escapeHtml(miner.financing_reading||'')+'</p>'+
+      '<p class="section-caption">'+escapeHtml(miner.evidence_limit||'')+'</p></div>';
+  } else {
+    html+='<p class="section-caption">利率、汇率是宏观背景而非利润预测；'
+      +'具体净影响需按公司产品定价、结算币种、债务和套保核验。</p>';
+  }
   const broad=(model.style_context||{}).sector_rotation||{};
   const style=macro.a_share_style || {};
   if(broad.status==='observed') {
