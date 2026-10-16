@@ -10,7 +10,7 @@ function roeDiscountCompute(book, roePct, growthPct, discountPct, horizon=10) {
   let bv=b, pvResidual=0, pvDividend=0;
   for (let y=1;y<=horizon;y++) {
     const yearRoe=r+(k-r)*(y-1)/(horizon-1);
-    const earnings=bv*yearRoe, dividend=earnings*payout;
+    const earnings=bv*yearRoe, dividend=earnings-bv*g;
     pvResidual+=(earnings-k*bv)/Math.pow(1+k,y);
     pvDividend+=dividend/Math.pow(1+k,y);
     bv+=earnings-dividend;
@@ -22,6 +22,7 @@ function roeDiscountCompute(book, roePct, growthPct, discountPct, horizon=10) {
      Math.abs(finite-(pvDividend+terminal))>1e-7*Math.max(1,Math.abs(finite)))
     return null;
   return {finite,steady,payoutPct:payout*100,
+    payoutFinalPct:(1-g/k)*100,residualPv:pvResidual,
     terminalPct:finite>0?100*terminal/finite:null};
 }
 
@@ -29,11 +30,14 @@ function renderRoeDiscountLab(model) {
   const m=((model||{}).investor_reference||{}).roe_discount_lab;
   if(!m) return '';
   const book=Number(m.book_per_share);
+  const cyclical=m.industry_archetype==='cyclical';
   let html='<div class="evidence-block" id="roe-discount-lab" style="margin-top:16px;">'+
-    '<h4>ROE × 增长 × 贴现率 · 独立经营估值</h4>'+
+    '<h4>ROE × 增长 × 贴现率 · 假设对照（非目标价）</h4>'+
     '<p class="section-caption">估值不使用历史股价或PE/PB拟合。'+
-    '主模型假设超额ROE在10年内逐步回归权益资本成本，期末PB=1；'+
-    '另以无限期稳定经营作为对照。以下价格是条件情景，并非精准买点。</p>';
+    '低值是假设ROE在10年内逐渐降到要求收益率，之后不再赚超额利润；'+
+    '另一数值是假设当前ROE长期不降。两者都是条件试算，不是合理价结论。</p>'+
+    (cyclical?'<p class="roe-cycle-caveat">矿业股还需要核验储量、矿石品位、金铜价格、'+
+    '开采成本、未来资本开支和中周期现金流；仅凭账面净资产及ROE不能估出合理股价。</p>':'');
   if(m.status==='missing_book'||!Number.isFinite(book)||book<=0)
     return html+'<p>缺少可靠每股净资产，不能生成价格。请先核实财报。</p></div>';
   const d=m.defaults||{}, a=m.roe_anchor||{};
@@ -58,11 +62,13 @@ function renderRoeDiscountLab(model) {
     slide('discount','投资者要求收益率／贴现率',4,25,.25,10)+
     '<div class="lab-actions"><button type="button" id="roe-reset">恢复初始假设</button></div>'+
     '</div><div class="lab-result roe-discount-result" aria-live="polite" aria-atomic="false">'+
-    '<h4>主模型条件价格</h4>'+
-    '<div class="lab-price" id="roe-price">—</div>'+
+    '<h4>两种盈利持续性假设（不是公司合理价）</h4>'+
+    '<div class="roe-scenarios">'+
+    '<div class="roe-scenario"><span>10年后优势消退</span><strong class="lab-price" id="roe-price">—</strong></div>'+
+    '<div class="roe-scenario"><span>ROE长期维持</span><strong class="lab-price" id="roe-steady">—</strong></div></div>'+
     '<div class="lab-stat-grid">'+
-    '<div><span>经营参数压力价格区间</span><b id="roe-band">—</b></div>'+
-    '<div><span>无限期稳态对照价格</span><b id="roe-steady">—</b></div>'+
+    '<div><span>压力情景参数扰动</span><b id="roe-band">—</b></div>'+
+    '<div><span>末年隐含派息率</span><b id="roe-payout-end">—</b></div>'+
     '<div><span>隐含派息率</span><b id="roe-payout">—</b></div>'+
     '<div><span>10年末净资产终值占比</span><b id="roe-terminal">—</b></div></div>'+
     '<div class="lab-foot" id="roe-note">—</div></div></div>';
@@ -92,7 +98,7 @@ function activateRoeDiscountLab(model) {
     keys.forEach(k=>display(k+'-value',x[k].toFixed(2)+'%'));
     const main=roeDiscountCompute(m.book_per_share,x.roe,x.growth,x.discount);
     if(!main) {
-      ['price','band','steady','payout','terminal'].forEach(k=>display(k,'—'));
+      ['price','band','steady','payout','payout-end','terminal'].forEach(k=>display(k,'—'));
       display('note','参数不满足约束：增长率须≥0、低于ROE且至少比贴现率低0.5个百分点。');
       return;
     }
@@ -108,11 +114,17 @@ function activateRoeDiscountLab(model) {
     display('band',lo.toFixed(2)+'—'+hi.toFixed(2)+'元');
     display('steady',main.steady.toFixed(2)+'元/股');
     display('payout',main.payoutPct.toFixed(1)+'%');
+    display('payout-end',main.payoutFinalPct.toFixed(1)+'%');
     display('terminal',main.terminalPct==null?'—':main.terminalPct.toFixed(1)+'%');
-    const notes=['主模型假设10年后超额ROE为0、PB=1。'];
+    const notes=['10年压力情景：ROE从'+x.roe.toFixed(2)+'%逐年下降至'+
+      x.discount.toFixed(2)+'%，此后超额ROE为0（不是ROE归零）；'+
+      '账面净资产'+Number(m.book_per_share).toFixed(2)+'元，十年超额盈利现值'+
+      main.residualPv.toFixed(2)+'元。',
+      '理想化对照要求初始ROE与增长率长期不变，不是预测。'];
     if(m.defaults.roe_pct==null)notes.push('ROE初值为示例，不是实测正常化ROE。');
     if(m.defaults.growth_pct==null)notes.push('增长率初值为零增长压力情景。');
-    notes.push('贴现率为用户可修改的要求收益率，不由股价回测得到。');
+    notes.push('权益按滑块增长，隐含派息随ROE变化；贴现率由用户设定，不是公司已核实资本成本。');
+    if(m.industry_archetype==='cyclical')notes.push('这不是矿山资源NAV或中周期自由现金流估值。');
     if(estimates.length<27)notes.push('部分极端组合违反增长约束而被排除。');
     if(main.terminalPct>70)notes.push('期末净资产占比较高，结果对终值敏感。');
     display('note',notes.join(' '));

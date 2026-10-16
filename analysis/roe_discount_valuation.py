@@ -46,8 +46,12 @@ def calculate_roe_prices(*, book_per_share: float, roe_pct: float,
 
     First-year EPS=B0*ROE; target growth in *book value* arises from
     retention b=g/ROE (100% retained-earnings conversion assumption).
-    With constant payout, modeled ROE fades linearly to required return
-    at horizon; the clean-surplus identity B(t)=B(t-1)+EPS-D holds.
+    To honor the growth_pct slider, B(t) grows by exactly g each year;
+    payout_t=(ROE_t-g)/ROE_t therefore changes as ROE fades. Modeling
+    a fixed payout instead would falsely imply that the requested growth
+    rate falls over the horizon while still labelling it "long-term".
+    Modeled ROE fades linearly to required return at horizon; the
+    clean-surplus identity B(t)=B(t-1)+EPS-D holds.
     Beyond horizon ROE = discount rate: future residual income = 0.
     """
     b = number(book_per_share)
@@ -70,7 +74,9 @@ def calculate_roe_prices(*, book_per_share: float, roe_pct: float,
         # Linear fade: starting ROE in year 1, required return by year N.
         year_roe = roe+(k-roe)*(year-1)/(horizon-1)
         earnings = book*year_roe
-        dividend = earnings*payout
+        # Sustain the explicit equity-growth assumption at every forecast
+        # year. Dividends are residual; this is NOT a distribution forecast.
+        dividend = earnings - book*g
         residual_pv += (earnings-k*book)/(1+k)**year
         dividend_pv += dividend/(1+k)**year
         book += earnings-dividend
@@ -88,6 +94,9 @@ def calculate_roe_prices(*, book_per_share: float, roe_pct: float,
         "finite_fade_price": round(finite, 4),
         "steady_growth_price": round(steady, 4),
         "implied_payout_pct": round(payout*100, 3),
+        "implied_payout_final_year_pct": round((1-g/k)*100, 3),
+        "assumed_book_growth_pct": growth_pct,
+        "pv_residual_income_yuan": round(residual_pv, 4),
         "first_year_eps_yuan": round(b*roe, 4),
         "first_year_dividend_yuan": round(b*(roe-g), 4),
         "end_book_per_share": round(book, 4),
@@ -96,7 +105,7 @@ def calculate_roe_prices(*, book_per_share: float, roe_pct: float,
         "notes": [
             "主模型：有限期剩余收益折现，ROE在%d年内线性回归权益资本成本，期末PB=1（不由股价拟合）" % horizon,
             "对照模型：恒定ROE和增长率的永续股利模型，只是强持续性假设",
-            "增长率=ROE×留存率（假设留存收益100%转化为权益增长），模型将反推出隐含分红率；需核对真实现金流",
+            "增长率=g是预测期每年的账面权益增长目标；随ROE下行，模型会逐年调节隐含派息率（首年与末年不同）。派息率是数学反推，非真实现金分红预测",
         ],
     }
 
@@ -118,6 +127,7 @@ def build_roe_discount_lab(*, valuation=None, profitability_trend=None,
         "status": "missing_book" if not book or book <= 0 else "interactive_assumptions",
         "method": "clean_surplus_roe_fade_10y_plus_gordon_v1",
         "book_per_share": round(book, 4) if book and book>0 else None,
+        "industry_archetype": archetype,
         "book_basis": "财务数据中的每股净资产；如股本、少数股东权益或资产减值发生重大变化须重新核验",
         "roe_observations": [], "roe_anchor": None,
         "eps_growth_evidence": None, "payout_evidence": None,
@@ -131,6 +141,7 @@ def build_roe_discount_lab(*, valuation=None, profitability_trend=None,
             "历史ROE包含一次性损益、资产减值或杠杆放大时，应手动修正正常化ROE",
             "权益资本成本是投资者要求回报率，不是历史股价拟合出的无噪声常数",
             "模型没有审计FCFE、维持性资本开支、发债、增发稀释和非经常性利润；输出仅为条件估值",
+            "十年ROE回归资本成本是压力情景，不是已核实的未来盈利预测；权益增长率和隐含派息不代表矿山真实现金流",
         ],
     }
     if result["status"] == "missing_book":
