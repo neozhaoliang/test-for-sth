@@ -161,7 +161,7 @@ async def test_resource_repair_accepts_long_explanatory_prose_above_old_500_char
         "创始人的接班与团队独立经营能力尚待正式资料验证，这是需要持续跟踪的风险假设。"
         "如果新增项目的现金流兑现改善，并且估值留出更大的安全边际，我会重新评价。",
     ]
-    long_form = "\\n\\n".join(paragraphs) + "\\n\\n" + "\\n\\n".join(paragraphs)
+    long_form = "\n\n".join(paragraphs) + "\n\n" + "\n\n".join(paragraphs)
     assert len(long_form) > 500
 
     async def fake_llm(prompt, **kwargs):
