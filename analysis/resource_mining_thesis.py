@@ -207,10 +207,13 @@ async def repair_resource_summary(parsed: dict, inputs: Any) -> dict:
     try:
         from backtest.llm_client import call_json_ex
         prompt = (
-            "请仅重写投资结论的一段文字，不更改原有的综合倾向、公司质量、"
+            "请仅重写投资结论的自然语言解释，不更改原有的综合倾向、公司质量、"
             "赔率观点、任何价格或数字。以下有数据依据的矿业行业研究问题在原结论中缺失："
             + ", ".join(missing) + "。"
-            "最终是自然流畅、明确有主见的中文投资评论（约220-330字）；"
+            "请用通常4—6个自然段、约450—900字把投资判断讲清楚，必要时可以更长。"
+            "首段明确给出公司质量、现价赔率与立场，其后用公司实际数据解释为什么；"
+            "避免数字、缩写、多个风险名词挤成一段，不能只把风险清单串成一句话。"
+            "重点是回答和解释的语气，而不是追求最短摘要；"
             "覆盖货币和商品价格的条件关系、股东户数历史路径、"
             "高位扩张资本成本、接班能力延续风险四方面。"
             "若具体事实缺失，明确标为风险假设或资料缺口，不可编造央行政策、矿山项目、人物或公告；"
@@ -220,11 +223,11 @@ async def repair_resource_summary(parsed: dict, inputs: Any) -> dict:
             "\n\n只返回JSON对象：{\"thesis_summary\":\"新结论\"}。"
         )
         result, _ = await call_json_ex(
-            prompt, max_tokens=1350,
+            prompt, max_tokens=3000,
             repair_requirements="必须只返回包含thesis_summary字符串的JSON对象，不得修改立场或引用私有账号。",
         )
         revised = result.get("thesis_summary") if isinstance(result, dict) else None
-        if not isinstance(revised, str) or not 70 <= len(revised) <= 500:
+        if not isinstance(revised, str) or not 100 <= len(revised) <= 3000:
             return parsed
         if _REDACT.search(revised):
             return parsed

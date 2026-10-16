@@ -70,6 +70,13 @@ assert.equal(hrefs.length,3);
 // Deep-link into all twelve investment dimensions, and conditionally displayed modules.
 const large=JSON.parse(JSON.stringify(base));
 large.summary.dimension_analyses=Object.fromEntries(fields.map(k=>[k,'该维度详细分析']));
+// A long multi-paragraph judgment must not disappear when all 12 dimensions
+// are present; 400 characters was an accidental front-end hiding threshold.
+const longThesis = '公司的盈利能力在高景气周期中表现优秀，但经营成绩不等于现价必然有安全边际。'.repeat(18)
+  + '\n\n' + '需要进一步解释金铜美元定价、人民币折算、资本开支、股东人数变化与估值情景的关系。'
+  + '\n\n' + '因此我目前对买入赔率保持谨慎，这与认可公司的长期竞争力并不矛盾。';
+assert.ok(longThesis.length>400);
+large.summary.thesis_summary=longThesis;
 large.shareholder_capital_summary={
   corporate_buybacks:[{status:'implemented',shares:123,disclosed_at:'2026-10-01'}]
 };
@@ -81,6 +88,9 @@ ctx.activateRoeDiscountLab=()=>{};
 ctx.renderResult(large);
 html=nodes.result.innerHTML;
 hrefs=verify(html);
+assert.ok(html.includes(longThesis), 'full long-form investment thesis must be visible');
+assert.ok(html.includes('\\n\\n')===false, 'paragraph breaks should not be rendered as literal slash-n');
+assert.ok(html.includes('\n\n'), 'plain-text paragraph breaks are preserved');
 for(const id of ['report-capital','report-dimensions','report-investor-reference','roe-discount-lab'])
   assert.ok(hrefs.includes(id),'missing main section '+id);
 for(const key of fields)

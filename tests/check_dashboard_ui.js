@@ -273,7 +273,7 @@ assert.ok(!html.includes('稳态模型隐含合理价格'));
 // do not repeat them when detailed analyses are present.
 report.summary.thesis_summary='LEGACY_ESSAY_TOKEN ' + '长篇概述。'.repeat(130);
 ctx.renderResult(report);
-assert.ok(!nodes.result.innerHTML.includes('LEGACY_ESSAY_TOKEN'));
+assert.equal(nodes.result.innerHTML.split('LEGACY_ESSAY_TOKEN').length-1,1);
 keys.forEach(k=>assert.equal(
   nodes.result.innerHTML.split('UNIQUE_DETAIL_'+k.toUpperCase()+'_END').length-1,1));
 // No per-dimension content in old cached report? Do not mirror thesis in a

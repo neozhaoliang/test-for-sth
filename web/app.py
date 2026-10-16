@@ -3136,12 +3136,12 @@ function renderResult(report) {
   html += '</div>';
   // The investment thesis is authored by the model. Screening indicators
   // remain available to the research logic, not as a programmatic verdict.
-  const conciseThesis=String(summary.thesis_summary || '').trim();
-  const hasDetailedAnalysis=Object.keys(summary.dimension_analyses || {}).length >= 6;
-  // Historical cached reports sometimes put the entire 12-dimension essay in
-  // thesis_summary. Do not repeat it before the actual 12 perspectives.
-  if (conciseThesis && (!hasDetailedAnalysis || conciseThesis.length <= 400)) {
-    html += '<p class="verdict-summary">' + escapeHtml(conciseThesis) + '</p>';
+  // The thesis is a reader-facing, potentially multi-paragraph explanation.
+  // Never silently hide a long verdict merely because detailed analyses exist.
+  // Old reports and new reports are both displayed in full.
+  const thesis=String(summary.thesis_summary || '').trim();
+  if (thesis) {
+    html += '<p class="verdict-summary">' + escapeHtml(thesis) + '</p>';
   }
   html += '</section>';
 
