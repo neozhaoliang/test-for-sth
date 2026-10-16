@@ -54,6 +54,8 @@ jobs:
             analysis/reviewer.py \
             analysis/research_profile.py \
             analysis/management_capital.py \
+            analysis/succession_risk.py \
+            analysis/verified_governance_events.py \
             analysis/macro_rates.py \
             analysis/macro_verified_fallback.py \
             analysis/commodity.py \
