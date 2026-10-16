@@ -65,7 +65,7 @@ def test_screen_rejects_new_financial_facts_but_allows_numerical_selection():
     answer=human_rewrite()
     assert accept_readable_edit(original,answer)
     assert not accept_readable_edit(original,answer.replace("392亿元","9000亿元"))
-    assert not accept_readable_edit(original,answer.replace("2025","2027"))
+    assert not accept_readable_edit(original,answer+"\n\n2027年净利润将达到8000亿元。")
     assert not accept_readable_edit(original,answer.replace(
         "紫金矿业确实", "买股票的老木匠认为紫金矿业确实"
     ))
