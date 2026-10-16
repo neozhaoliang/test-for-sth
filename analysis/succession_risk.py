@@ -108,6 +108,39 @@ def succession_prompt_block(data: Optional[Mapping[str, Any]]) -> str:
     """Mandatory but bounded evidence digest for the management dimension."""
     if not data:
         return "创始人依赖与管理层传承：本次未取得可核验的接班证据，暂不能判断。"
+    transition = data.get("verified_transition") or {}
+    if transition.get("status") == "completed":
+        rows = [
+            "创始人依赖与管理层传承：正式换届已完成，不属于资料缺口。",
+            f"{transition.get('effective_at')}：创始人{transition.get('founder')}卸任董事长、执行董事；"
+            f"{transition.get('chairman_appointed')}当选董事长，{transition.get('president_appointed')}获聘总裁。",
+            "卸任创始人继续担任终身荣誉董事长、高级顾问，保留一定战略指导作用，"
+            "但不再担任公司法定董事长。",
+            f"原始公告日期={transition.get('published_at')}；官方文件={transition.get('source_url')}",
+            "换届事实已经证实。新团队能否独立延续完整金铜周期的资本配置、矿山建设、"
+            "矿权获取能力，仍需未来经营记录检验，不能预设成功或失败。",
+        ]
+        if transition.get("corroborating_source_url"):
+            rows.append(
+                f"复核公告={transition.get('corroborating_source_url')} "
+                f"（发布{transition.get('corroborating_published_at')}）"
+            )
+        if data.get("chairman_source_conflict"):
+            rows.append(
+                f"旧F10董事长画像为{data.get('f10_chairman_name')}，"
+                f"与换届时官方选举结果不一致；不得沿用过期画像。"
+            )
+        rows.append(
+            "论述时必须区分已确认的人事交接和未来独立经营能力的不确定性，"
+            "禁止写接班安排或继任者身份资料暂缺。"
+        )
+        return "\n".join(rows)
+    if transition.get("status") == "proposed":
+        return (
+            "创始人依赖与管理层传承：截至该研究日仅有换届提议，不能当作已经生效。\n"
+            f"{transition.get('description')}\n"
+            f"官方文件={transition.get('source_url')}。不得预知后来的人事结果。"
+        )
     rows = [
         "创始人依赖与管理层传承（管理层评价必须讨论，不可因没有公告而宣称无风险）：",
         f"分析基准日：{data.get('as_of') or '未注明'}；"
