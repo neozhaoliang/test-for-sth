@@ -10,7 +10,7 @@ function roeDiscountCompute(book, roePct, growthPct, discountPct, horizon=10) {
   let bv=b, pvResidual=0, pvDividend=0;
   for (let y=1;y<=horizon;y++) {
     const yearRoe=r+(k-r)*(y-1)/(horizon-1);
-    const earnings=bv*yearRoe, dividend=earnings*payout;
+    const earnings=bv*yearRoe, dividend=earnings-bv*g;
     pvResidual+=(earnings-k*bv)/Math.pow(1+k,y);
     pvDividend+=dividend/Math.pow(1+k,y);
     bv+=earnings-dividend;
