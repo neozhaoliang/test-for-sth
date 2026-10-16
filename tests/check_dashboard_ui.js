@@ -96,9 +96,20 @@ assert.ok(aligned.includes('区间股价'));
 assert.ok(aligned.includes('+20.00%'));
 assert.ok(aligned.includes('股东户数'));
 assert.ok(aligned.includes('2026-09-29'));
-assert.ok(aligned.includes('股东户数与同期股价走势'));
+assert.ok(aligned.includes('股东人数（万户，左轴）'));
+assert.ok(aligned.includes('股价（元，右轴）'));
+assert.ok(aligned.includes('股东人数（万户）'));
+assert.ok(aligned.includes('股价（元）'));
+assert.ok(aligned.includes('10.00'));
+assert.ok(aligned.includes('12.00'));
 assert.ok(aligned.includes('实际收盘价'));
-assert.ok(aligned.includes('<table>'));
+assert.ok(!aligned.includes('<table'));
+assert.ok(!aligned.includes('chip-holder-table'));
+assert.ok(!aligned.includes('统计截止日'));
+assert.ok(!aligned.includes('首期=100'));
+assert.ok(aligned.includes('10.00 万户'));
+// Values stay as real absolute measurements; no 100-index transformation.
+assert.ok(aligned.includes('左轴显示股东人数（万户），右轴显示股价（元）'));
 assert.ok(!aligned.includes('52周低位'));  // genuine history replaces gauge
 
 // The user's real report: price down 25.09%, holder accounts up 81.37%.
@@ -177,17 +188,21 @@ const f10Legacy={
 };
 const legacyChipHtml=ctx.renderChipPositionChart(undefined,f10Legacy);
 assert.ok(legacyChipHtml.includes('<svg'));
-assert.ok(legacyChipHtml.includes('1,318,365'));
+assert.ok(legacyChipHtml.includes('131.84'));
+assert.ok(legacyChipHtml.includes('125.20'));
+assert.ok(legacyChipHtml.includes('58.50'));
+assert.ok(!legacyChipHtml.includes('<table'));
+assert.ok(!legacyChipHtml.includes('统计截止日'));
 assert.ok(legacyChipHtml.includes('同花顺F10'));
 assert.ok(legacyChipHtml.includes('F10参考股价'));
 assert.ok(legacyChipHtml.includes('不是独立行情接口核验的收盘价'));
 assert.ok(!legacyChipHtml.includes('已披露股东户数与对应统计截止日之前最近交易日的实际收盘价'));
-assert.ok(ctx.renderDashboardCharts(f10Legacy).includes('1,318,365'));
+assert.ok(ctx.renderDashboardCharts(f10Legacy).includes('131.84'));
 // Historical replay must never backfill as-of charts from a live F10 webpage.
 const historicalChip=ctx.renderChipPositionChart(undefined,{
   ...f10Legacy,research_mode:'historical',
 });
-assert.ok(!historicalChip.includes('1,318,365'));
+assert.ok(!historicalChip.includes('131.84'));
 assert.ok(historicalChip.includes('本次报告缺少已核验的股价与股东户数配对数据'));
 
 
@@ -366,3 +381,27 @@ assert.ok(!nodes.result.innerHTML.includes('最新价 0'));
 assert.ok(nodes.result.innerHTML.includes('有效股价暂缺'));
 
 console.log('Dashboard UI checks passed: 4 public sections, 12 unique dimensions, hidden internal reviews and industry no-price gate.');
+
+
+// Regression for the eight-report illustration: actual values in 10k accounts
+// and real yuan axes, directly above bars. The old detail table is gone.
+const fullHolderSample=[
+  ['2025-02-28',452287,15.35],['2025-03-31',369956,18.12],
+  ['2025-06-30',335659,19.50],['2025-09-30',529769,29.44],
+  ['2025-12-31',584983,34.47],['2026-02-28',1108965,39.55],
+  ['2026-03-31',1252002,32.72],['2026-06-30',1318365,25.14],
+].map(([period,holders,price])=>({period,holders,price}));
+const fullHolderSvg=ctx.renderHolderChart(fullHolderSample,'ths_f10');
+assert.ok(fullHolderSvg.startsWith('<svg'));
+for(const count of ['45.23','37.00','33.57','52.98','58.50','110.90','125.20','131.84'])
+  assert.ok(fullHolderSvg.includes(count),'missing marked raw count '+count);
+assert.ok(fullHolderSvg.includes('F10参考股价 39.55 元'));
+assert.ok(fullHolderSvg.includes('F10参考股价 25.14 元'));
+assert.ok(fullHolderSvg.includes('2026-02-28'));
+assert.ok(fullHolderSvg.includes('2026-06-30'));
+assert.ok(fullHolderSvg.includes('股东人数（万户）'));
+assert.ok(fullHolderSvg.includes('股价（元）'));
+assert.ok(!fullHolderSvg.includes('首期=100'));
+assert.ok(!fullHolderSvg.includes('<table'));
+assert.ok(!fullHolderSvg.includes('统计截止日'));
+assert.ok(!fullHolderSvg.includes('data-tip="undefined'));
