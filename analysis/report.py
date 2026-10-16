@@ -339,6 +339,7 @@ async def generate_report(
         governance_alerts = fundamentals.pop("governance_alerts", None) or []
 
     management_capital = build_management_capital_record(
+        stock_code=stock_code,
         dividend_history=dividend_history,
         buyback_history=buyback_history,
         refinancing_history=refinancing_history,
