@@ -99,3 +99,71 @@ def test_llm_management_tool_and_main_prompt_enforce_succession_without_rigid_pe
     prompt = report_contract._PROMPT_TEMPLATE
     assert "接班传承是管理层必查事项" in prompt
     assert "不能将“大概率平庸”当作无证据的统计事实" in prompt
+
+
+
+def test_zijin_actual_2025_transfer_is_confirmed_even_without_cninfo_headlines():
+    rec = build_succession_evidence(
+        stock_code="SH601899",
+        primary_evidence=[],
+        executive_profile={"chairman": "陈景河"},
+        as_of=date(2026, 10, 16),
+    )
+    assert rec["status"] == "confirmed_transition"
+    assert rec["founder_identity_verified"] is True
+    assert rec["successor_competence_verified"] is False
+    assert rec["current_chairman_name"] == "邹来昌"
+    assert rec["f10_chairman_name"] == "陈景河"
+    assert rec["chairman_source_conflict"] is True
+    transition = rec["verified_transition"]
+    assert transition["founder"] == "陈景河"
+    assert transition["effective_at"] == "2025-12-31"
+    assert transition["chairman_appointed"] == "邹来昌"
+    assert transition["president_appointed"] == "林泓富"
+    assert "执行董事" in transition["founder_departed_roles"]
+    assert "高级顾问" in transition["founder_new_roles"]
+    assert transition["source_url"].startswith("https://www1.hkexnews.hk/")
+    assert "static.cninfo.com.cn" in transition["corroborating_source_url"]
+    rendered = succession_prompt_block(rec)
+    assert "正式换届已完成" in rendered
+    for name in ("陈景河", "邹来昌", "林泓富"):
+        assert name in rendered
+    assert "接班安排暂缺" not in rendered
+    assert "旧F10董事长画像" in rendered
+
+
+def test_zijin_transition_point_in_time_disclosure_and_replacement():
+    from analysis.verified_governance_events import verified_transition
+    assert verified_transition("SH601899", as_of=date(2025, 11, 27)) is None
+    proposal = verified_transition("SH601899", as_of=date(2025, 11, 28))
+    assert proposal["status"] == "proposed"
+    assert "chairman_appointed" not in proposal
+    pending = build_succession_evidence(
+        stock_code="SH601899", as_of=date(2025, 12, 30),
+    )
+    assert pending["status"] == "proposed_transition"
+    text = succession_prompt_block(pending)
+    assert "尚未完成" in text
+    assert "邹来昌" not in text
+    first = verified_transition("SH601899", as_of=date(2025, 12, 31))
+    assert first["status"] == "completed"
+    assert "corroborating_source_url" not in first
+    second = verified_transition("SH601899", as_of=date(2026, 1, 1))
+    assert second["status"] == "completed"
+    assert "corroborating_source_url" in second
+    assert verified_transition("SH600000", as_of=date(2026, 10, 16)) is None
+    assert verified_transition("HK02899", as_of=date(2026, 10, 16)) is None
+
+
+def test_management_capital_pipeline_receives_verified_named_transition():
+    obj = build_management_capital_record(
+        stock_code="SH601899", as_of=date(2026, 10, 16),
+        executive_profile={"chairman": "陈景河"},
+        primary_evidence=[],
+    )
+    rendered = _build_management_capital_block(obj)
+    assert obj["succession"]["status"] == "confirmed_transition"
+    assert "2025-12-31" in rendered
+    assert "邹来昌" in rendered
+    assert "林泓富" in rendered
+    assert "法定董事长" in rendered
