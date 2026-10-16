@@ -263,6 +263,50 @@ body, input, select, textarea, button { font-family:inherit; }
 #result :is(.analysis-prose,.verdict-summary) { overflow-wrap:anywhere; }
 .analysis-entry { padding:19px 0; }
 .analysis-entry h4 { line-height:1.6; }
+
+/* Supporting charts and original issuer announcements belong immediately
+   below the narrative paragraph they support, not in a later chapter. */
+#result .analysis-inline-evidence {
+  min-width:0;
+  margin:14px 0 0;
+  padding:14px 15px;
+  border:1px solid #e2eaf5;
+  border-radius:11px;
+  background:#f9fbfe;
+}
+#result .analysis-inline-evidence h5 {
+  margin:0 0 9px;
+  font-size:14px;
+  line-height:1.55;
+  color:#263f62;
+}
+#result .analysis-evidence {
+  min-width:0;
+  margin:12px 0 0;
+  padding:12px;
+  background:#fff;
+  border:1px solid #e3ebf5;
+  border-radius:9px;
+  overflow-x:auto;
+}
+#result .shareholder-return-evidence .analysis-evidence:first-child { margin-top:0; }
+#result .analysis-inline-evidence svg {
+  display:block;
+  max-width:100%;
+  height:auto;
+}
+#result .analysis-inline-evidence .investor-band-table {
+  min-width:540px;
+}
+#result .analysis-inline-evidence .investor-band-table :is(th,td) {
+  padding:7px 9px;
+  font-size:12px;
+}
+@media(max-width:530px) {
+  #result .analysis-inline-evidence { padding:10px; }
+  #result .analysis-evidence { padding:9px; }
+}
+
 .analysis-index { flex-shrink:0; }
 .investor-reference,.style-insight {
   padding:19px 20px;
