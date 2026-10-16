@@ -30,7 +30,11 @@ async def test_macro_context_warns_when_upstream_marks_series_stale(monkeypatch)
     monkeypatch.setattr(macro_rates, "_fetch_us_rates", fake_us)
     monkeypatch.setattr(macro_rates, "_fetch_china_lpr", fake_china)
 
-    result = await macro_rates.get_macro_rate_context()
+    # Historical research never borrows the independently verified
+    # 2026-10-16 live fallback observations.
+    result = await macro_rates.get_macro_rate_context(
+        as_of=date(2024, 6, 30),
+    )
 
     assert result is not None
     assert len(result["warnings"]) == 2
