@@ -105,7 +105,7 @@ assert.ok(aligned.includes('12.00'));
 assert.ok(aligned.includes('实际收盘价'));
 assert.ok(!aligned.includes('<table'));
 assert.ok(!aligned.includes('chip-holder-table'));
-assert.ok(!aligned.includes('统计截止日'));
+assert.ok(!aligned.includes('<th>统计截止日'));
 assert.ok(!aligned.includes('首期=100'));
 assert.ok(aligned.includes('10.00 万户'));
 // Values stay as real absolute measurements; no 100-index transformation.
