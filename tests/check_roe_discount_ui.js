@@ -27,7 +27,15 @@ const model={investor_reference:{roe_discount_lab:{
 const html=ctx.renderRoeDiscountLab(model);
 for(const id of ['roe-roe','roe-growth','roe-discount','roe-price','roe-band','roe-reset'])
   assert.ok(html.includes(id),'missing control '+id);
-assert.ok(html.includes('10%只是演示输入'));
+assert.ok(html.includes('class="lab-layout roe-discount-layout"'));
+assert.ok(html.includes('class="roe-discount-controls"'));
+assert.ok(html.includes('class="lab-result roe-discount-result"'));
+assert.ok(html.includes('aria-live="polite"'));
+assert.ok(html.indexOf('roe-discount-controls')<html.indexOf('roe-discount-result'));
+for (const removed of ['ROE依据：','增长依据：','贴现率依据：',
+                      '10%只是演示输入','增长和分红受约束：',
+                      'g=ROE×留存率','隐含派息率=1−g/ROE'])
+  assert.ok(!html.includes(removed),'obsolete explanatory paragraph: '+removed);
 assert.ok(!html.includes('双木林叔'));
 assert.ok(!html.includes('陈chensir'));
 
@@ -45,9 +53,15 @@ ctx.activateRoeDiscountLab(model);
 assert.ok(nodes['roe-price'].textContent.endsWith('元/股'));
 assert.ok(nodes['roe-band'].textContent.includes('—'));
 const before=nodes['roe-price'].textContent;
+const oldSteady=nodes['roe-steady'].textContent;
+const oldBand=nodes['roe-band'].textContent;
 nodes['roe-discount'].value='15';
 nodes['roe-discount'].listeners.input();
 assert.notEqual(nodes['roe-price'].textContent,before);
+assert.notEqual(nodes['roe-steady'].textContent,oldSteady);
+assert.notEqual(nodes['roe-band'].textContent,oldBand);
+assert.ok(nodes['roe-payout'].textContent.endsWith('%'));
+assert.ok(nodes['roe-terminal'].textContent.endsWith('%'));
 nodes['roe-growth'].value='16';
 nodes['roe-growth'].listeners.input();
 assert.equal(nodes['roe-price'].textContent,'—');
@@ -61,4 +75,14 @@ const noBook=ctx.renderRoeDiscountLab({investor_reference:{
 }});
 assert.ok(noBook.includes('不能生成价格'));
 assert.ok(!noBook.includes('roe-growth'));
+const css=fs.readFileSync('web/research_desk.css','utf8');
+const rowRule=css.match(/#result\s+#roe-discount-lab\s+\.roe-discount-layout\s*\{([^}]+)\}/);
+assert.ok(rowRule,'must have ROE-only layout rule overriding global single-column layout');
+assert.ok(/display\s*:\s*grid/.test(rowRule[1]));
+assert.ok(/grid-template-columns\s*:\s*minmax\(0,\s*\.95fr\)\s+minmax\(0,\s*1\.05fr\)/.test(rowRule[1]));
+assert.ok(css.includes('#result #roe-discount-lab .roe-discount-controls'));
+assert.ok(css.includes('#result #roe-discount-lab .roe-discount-result'));
+assert.ok(/@media\s*\(max-width:760px\)/.test(css));
+assert.ok(/@media\s*\(max-width:420px\)/.test(css));
+
 console.log('ROE discount lab: math, 3 sliders, live update, reset, guard passed.');

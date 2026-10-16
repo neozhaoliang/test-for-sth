@@ -36,7 +36,7 @@ function renderRoeDiscountLab(model) {
     '另以无限期稳定经营作为对照。以下价格是条件情景，并非精准买点。</p>';
   if(m.status==='missing_book'||!Number.isFinite(book)||book<=0)
     return html+'<p>缺少可靠每股净资产，不能生成价格。请先核实财报。</p></div>';
-  const d=m.defaults||{}, a=m.roe_anchor||{}, params=m.parameter_basis||{};
+  const d=m.defaults||{}, a=m.roe_anchor||{};
   const initialRoe=d.roe_pct==null?10:Math.max(.5,Math.min(60,Number(d.roe_pct)));
   const initialG=d.growth_pct==null?0:Math.max(0,Math.min(15,Number(d.growth_pct)));
   const slide=(key,label,min,max,step,val)=>'<div class="slider-row">'+
@@ -51,18 +51,13 @@ function renderRoeDiscountLab(model) {
       '%；四分位'+escapeHtml(String(a.low_pct))+'%—'+
       escapeHtml(String(a.high_pct))+'%。':
       '不足三个完整年度ROE，初始10%仅为可修改的示例。')+'</p>';
-  html+='<div class="lab-layout"><div>'+
+  html+='<div class="lab-layout roe-discount-layout"><div class="roe-discount-controls">'+
     slide('roe','正常化ROE',.5,60,.25,initialRoe)+
     slide('growth','长期权益增长率',0,15,.25,initialG)+
     slide('discount','投资者要求收益率／贴现率',4,25,.25,10)+
     '<div class="lab-actions"><button type="button" id="roe-reset">恢复初始假设</button></div>'+
-    '<p class="section-caption"><b>ROE依据：</b>'+escapeHtml(params.roe||'用户判断')+'</p>'+
-    '<p class="section-caption"><b>增长依据：</b>'+escapeHtml(params.growth||'用户判断')+'</p>'+
-    '<p class="section-caption"><b>贴现率依据：</b>10%只是演示输入，不是根据股价测算；'+
-    '请综合人民币国债收益率、股票风险溢价、公司债务及经营风险自主调整。</p>'+
-    '<p class="section-caption">增长和分红受约束：g=ROE×留存率（假设全部留存收益转化为权益）；'+
-    '隐含派息率=1−g/ROE，须与实际现金分红、资本开支和增发核对。</p>'+
-    '</div><div class="lab-result" aria-live="polite"><h4>主模型条件价格</h4>'+
+    '</div><div class="lab-result roe-discount-result" aria-live="polite" aria-atomic="false">'+
+    '<h4>主模型条件价格</h4>'+
     '<div class="lab-price" id="roe-price">—</div>'+
     '<div class="lab-stat-grid">'+
     '<div><span>经营参数压力价格区间</span><b id="roe-band">—</b></div>'+
