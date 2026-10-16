@@ -291,6 +291,17 @@ async def repair_resource_summary(parsed: dict, inputs: Any) -> dict:
         # Refuse a rewrite that drops instead of covers the salient missing risks.
         if any(not _SUMMARY_FIELDS[k].search(revised) for k in missing):
             return parsed
+        verified = (((getattr(inputs, "management_capital", None) or {})
+                    .get("succession") or {}).get("verified_transition") or {})
+        if verified.get("status") == "completed":
+            # A rewrite that omits or contradicts the named, completed
+            # transition must not replace a more accurate draft.
+            required = (
+                str(verified.get("founder") or ""),
+                str(verified.get("chairman_appointed") or ""),
+            )
+            if not all(name and name in revised for name in required):
+                return parsed
         return {**parsed, "thesis_summary": revised}
     except Exception:
         return parsed
