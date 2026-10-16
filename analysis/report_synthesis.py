@@ -56,6 +56,7 @@ from analysis.resource_mining_thesis import (
 )
 from analysis.macro_rates import get_international_policy_rates
 from analysis.resource_macro_transmission import build_resource_macro_transmission, resource_macro_prompt_block
+from analysis.thesis_readability import polish_thesis_prose
 
 
 _PROCESS_TERM_RE = re.compile(r"六查|第[一二三四五六七八九十\d]+步|检查项\d*")
@@ -470,6 +471,10 @@ async def _generate_summary(
     # If four material mining risks were lost in the short thesis, revise prose once.
     if getattr(inputs, "research_mode", "") != "historical":
         parsed = await repair_resource_summary(parsed, inputs)
+        # A long, number-heavy verdict is an evidence dump even if every
+        # required topic is technically present. Condense only its prose after
+        # fact/stance review; detailed dimensions retain the complete audit.
+        parsed = await polish_thesis_prose(parsed, inputs)
 
     lynch_category = parsed.get("lynch_category", "")
     if lynch_category not in _VALID_LYNCH_CATEGORIES:
