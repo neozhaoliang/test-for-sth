@@ -39,11 +39,12 @@ function renderRoeDiscountLab(model) {
   const d=m.defaults||{}, a=m.roe_anchor||{};
   const initialRoe=d.roe_pct==null?10:Math.max(.5,Math.min(60,Number(d.roe_pct)));
   const initialG=d.growth_pct==null?0:Math.max(0,Math.min(15,Number(d.growth_pct)));
-  const slide=(key,label,min,max,step,val)=>'<div class="slider-row">'+
-    '<div class="slider-top"><label for="roe-'+key+'">'+escapeHtml(label)+'</label>'+
-    '<output id="roe-'+key+'-value">'+Number(val).toFixed(2)+'%</output></div>'+
+  const slide=(key,label,min,max,step,val)=>'<div class="slider-row roe-discount-slider-row">'+
+    '<label for="roe-'+key+'">'+escapeHtml(label)+'</label>'+
     '<input type="range" id="roe-'+key+'" min="'+min+'" max="'+max+
-    '" step="'+step+'" value="'+val+'"></div>';
+    '" step="'+step+'" value="'+val+'">'+
+    '<output for="roe-'+key+'" id="roe-'+key+'-value">'+
+    Number(val).toFixed(2)+'%</output></div>';
   html+='<p class="section-caption"><b>期初每股净资产</b> '+book.toFixed(2)+'元；'+
     (a.status==='historical_observed'?
       '最近完整年度ROE：'+escapeHtml((a.years||[]).join('、'))+
