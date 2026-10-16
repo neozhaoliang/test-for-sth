@@ -246,6 +246,27 @@ async def get_market_context(
             stock["w52_low"] = round(float(week52.min()), 2)
             stock["w52_low_date"] = str(week52.idxmin().date())
         if stock is not None and not s.empty:
+            # Compare *unadjusted daily closes with daily closes*. The stock
+            # backend does not provide verified intraday highs; do not call
+            # this the intraday/yearly absolute peak. Use only observations
+            # before the as-of cutoff and from the stock's latest calendar year.
+            latest_day = s.index[-1]
+            ytd = s[s.index.year == latest_day.year]
+            # A truncated feed starting well after the first trading days is
+            # not complete YTD evidence and must not show a false annual high.
+            if (not ytd.empty and ytd.index[0].month == 1
+                    and ytd.index[0].day <= 15):
+                peak = float(ytd.max())
+                latest_close = float(ytd.iloc[-1])
+                stock["ytd_close_high"] = round(peak, 2)
+                stock["ytd_close_high_date"] = str(ytd.idxmax().date())
+                stock["ytd_close_latest"] = round(latest_close, 2)
+                stock["ytd_close_as_of"] = str(latest_day.date())
+                stock["ytd_close_drawdown_pct"] = round(
+                    (latest_close / peak - 1) * 100, 2
+                ) if peak > 0 else None
+                stock["ytd_close_basis"] = "unadjusted_daily_close"
+        if stock is not None and not s.empty:
             stock["hist_high"] = round(float(s.max()), 2)
             stock["hist_high_date"] = str(s.idxmax().date())
             stock["hist_low"] = round(float(s.min()), 2)

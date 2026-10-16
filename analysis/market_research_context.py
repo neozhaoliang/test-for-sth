@@ -237,6 +237,19 @@ def build_style_investment_context(
     stock_20d = stock.get("d20_pct") if stock_date and (
         0 <= (cutoff - stock_date).days <= 7
     ) else None
+    # The retail-facing stock-position context uses YTD high-to-latest CLOSE
+    # rather than a transient 20-day return. Keep the short-term return only
+    # for research comparisons, not for the dashboard's prominent stock line.
+    ytd_day = _day(stock.get("ytd_close_as_of"))
+    ytd_usable = bool(
+        stock_date and ytd_day == stock_date
+        and 0 <= (cutoff - ytd_day).days <= 7
+        and stock.get("ytd_close_basis") == "unadjusted_daily_close"
+        and isinstance(stock.get("ytd_close_drawdown_pct"), (int, float))
+        and isinstance(stock.get("ytd_close_high"), (int, float))
+        and isinstance(stock.get("ytd_close_latest"), (int, float))
+        and 0 < stock["ytd_close_latest"] <= stock["ytd_close_high"]
+    )
     belongs = archetype == "stable_yield" or any(
         term in str(industry or "") for term in
         ("电力", "水务", "煤炭", "高速", "运营商", "公用事业")
@@ -267,6 +280,14 @@ def build_style_investment_context(
         "investment_principles": principles,
         "stock_20d_pct": stock_20d,
         "stock_20d_as_of": stock_date.isoformat() if stock_20d is not None else None,
+        "stock_ytd_close_high": stock.get("ytd_close_high") if ytd_usable else None,
+        "stock_ytd_close_high_date": stock.get("ytd_close_high_date") if ytd_usable else None,
+        "stock_ytd_latest_close": stock.get("ytd_close_latest") if ytd_usable else None,
+        "stock_ytd_close_as_of": stock.get("ytd_close_as_of") if ytd_usable else None,
+        "stock_ytd_close_drawdown_pct": (
+            stock.get("ytd_close_drawdown_pct") if ytd_usable else None
+        ),
+        "stock_ytd_close_basis": "unadjusted_daily_close" if ytd_usable else None,
         "interpretation": (
             "红利行情对本股的边际资金吸引力可能有帮助，但必须与派息能力、"
             "煤价/电价、公司相对涨幅及股价位置同时看；风格资金驱动与企业内在价值分开。"

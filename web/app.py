@@ -2700,12 +2700,35 @@ function renderSectorRotationStyleStrip(style) {
     '个、下跌'+escapeHtml(String(rotation.down_count??'—'))+
     '个。以上为行业样本价格表现，不代表覆盖全市场或证实板块之间发生资金迁移。'+
     '判断原因仍需结合ETF份额、基金持仓、行业盈利与估值变化。</p>';
-  const stk=numericOrNull(style.stock_20d_pct);
-  if(stk!==null)html+='<p><b>本股近20个交易日：</b>'+fmt(stk)+
-    '（'+escapeHtml(style.stock_20d_as_of||'日期不明')+'）</p>';
+  html+=renderStockYtdHighPosition(style);
   html+='<p class="section-caption">板块强弱不直接等于公司盈利质量或股票内在价值。'+
     '行业涨跌采用东方财富行业板块历史收盘数据，不同板块缺失时不填充。</p></div>';
   return html;
+}
+
+// Stock *position*, not stock momentum: two actual unadjusted closing
+// prices from one Jan-to-as-of series. Do not substitute F10 point samples,
+// 52-week extrema, or an intraday quote into this daily-close calculation.
+function renderStockYtdHighPosition(style) {
+  const high=numericOrNull(style.stock_ytd_close_high);
+  const latest=numericOrNull(style.stock_ytd_latest_close);
+  const decline=numericOrNull(style.stock_ytd_close_drawdown_pct);
+  const highDate=String(style.stock_ytd_close_high_date||'');
+  const asOf=String(style.stock_ytd_close_as_of||'');
+  if(style.stock_ytd_close_basis!=='unadjusted_daily_close' ||
+      high===null || latest===null || decline===null ||
+      !(high>0 && latest>0 && latest<=high) ||
+      decline>0 || decline < -100 ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(highDate) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(asOf) ||
+      highDate.slice(0,4)!==asOf.slice(0,4) ||
+      highDate>asOf) return '';
+  return '<p class="stock-ytd-position"><b>距年内最高收盘价</b> '+
+    '<strong>'+Math.abs(decline).toFixed(2)+'%</strong> 回撤'+
+    '<span class="stock-ytd-position-meta">（峰值 '+
+    high.toFixed(2)+' 元，'+escapeHtml(highDate)+'；'+
+    '最近收盘 '+latest.toFixed(2)+' 元，'+escapeHtml(asOf)+'；'+
+    '未复权收盘价口径）</span></p>';
 }
 
 // With limited coverage we still show every dated, verifiable observation.
@@ -2747,10 +2770,7 @@ function renderLimitedMarketStyleStrip(style) {
     '个行业板块和'+indexes.length+'个指数的同期行情。'+
     '仅能比较显示的样本，不能据此断言整个A股市场的行业主线已切换，'+
     '也不能把相对涨跌直接认作实际资金流向。</p>';
-  if(style.stock_20d_pct!==null && style.stock_20d_pct!==undefined &&
-     Number.isFinite(Number(style.stock_20d_pct)))
-    html+='<p><b>本股近20个交易日：</b>'+fmt(Number(style.stock_20d_pct))+
-      '（'+escapeHtml(style.stock_20d_as_of||'')+'）</p>';
+  html+=renderStockYtdHighPosition(style);
   return html+'</div>';
 }
 
@@ -2858,13 +2878,7 @@ function renderInvestmentStyleStrip(model) {
       (e.source_url?' <span>'+safeExternalLink(e.source_url,'报道来源')+'</span>':'')+
       '。限购可能意味着关注度升温，但不能直接据此判断顶部。</p>';
   });
-  if(style.stock_20d_pct!==null && style.stock_20d_pct!==undefined &&
-     Number.isFinite(Number(style.stock_20d_pct))) {
-    const pct=Number(style.stock_20d_pct);
-    html+='<p><b>本股近20个交易日：</b>'+
-      (pct>0?'+':'')+pct.toFixed(2)+'%（'+
-      escapeHtml(style.stock_20d_as_of||'日期不明')+'），可与上述市场风格和指数数据比较。</p>';
-  }
+  html+=renderStockYtdHighPosition(style);
   html+='<p class="section-caption">市场资金偏好与公司的长期盈利价值是两回事；'
      +'判断个股需同时看价格位置、实际派息、经营利润和指数相对走势。</p></div>';
   return html;

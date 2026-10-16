@@ -229,4 +229,51 @@ const zero=ctx.renderInvestmentStyleStrip({style_context:{
 }});
 assert.ok(zero.includes('行业和指数数据源本次均未返回'));
 
+
+// The stock line should explain location relative to *this year's* high
+// close, while sector/index figures retain their independent 20-day windows.
+const ytdStock={
+  stock_ytd_close_high:39.55,
+  stock_ytd_close_high_date:'2026-02-27',
+  stock_ytd_latest_close:29.92,
+  stock_ytd_close_as_of:'2026-10-16',
+  stock_ytd_close_drawdown_pct:-24.35,
+  stock_ytd_close_basis:'unadjusted_daily_close',
+  stock_20d_pct:-12.55,
+  stock_20d_as_of:'2026-10-16',
+};
+const pos=ctx.renderStockYtdHighPosition(ytdStock);
+for(const text of ['距年内最高收盘价','24.35%','39.55 元',
+                   '2026-02-27','29.92 元','2026-10-16','未复权收盘价口径'])
+  assert.ok(pos.includes(text),'annual high data missing: '+text);
+assert.ok(!pos.includes('12.55%'));
+assert.equal(ctx.renderStockYtdHighPosition({...ytdStock,
+  stock_ytd_close_high_date:'2027-02-27'}),''); // after cutoff
+assert.equal(ctx.renderStockYtdHighPosition({...ytdStock,
+  stock_ytd_close_basis:'f10_quarterly'}),''); // never pass off F10 as YTD peak
+assert.equal(ctx.renderStockYtdHighPosition({...ytdStock,
+  stock_ytd_close_high:null}),'');
+const observedAnnual=ctx.renderInvestmentStyleStrip({style_context:{
+  ...broadStyle,...ytdStock,
+}});
+const partialAnnual=ctx.renderInvestmentStyleStrip({style_context:{
+  ...base,...ytdStock,
+  sector_rotation:{status:'partial',as_of:'2026-10-14',
+                   sectors:sectorRows.slice(0,2),benchmarks:[]},
+}});
+const legacyAnnual=ctx.renderInvestmentStyleStrip({style_context:{
+  ...base,...ytdStock,
+}});
+for(const section of [observedAnnual,partialAnnual,legacyAnnual]){
+  assert.ok(section.includes('距年内最高收盘价'));
+  assert.ok(section.includes('24.35%'));
+  assert.ok(!section.includes('本股近20个交易日'));
+  assert.ok(!section.includes('本股近20日'));
+}
+const missingAnnual=ctx.renderInvestmentStyleStrip({style_context:{
+  ...base,stock_20d_pct:-12.55,
+}});
+assert.ok(!missingAnnual.includes('本股近20个交易日'));
+assert.ok(!missingAnnual.includes('距年内最高收盘价'));
+
 console.log('Market returns UI checks passed: plain percentages, alignment classes, sign colors, source disagreement guard, no SVG.');
