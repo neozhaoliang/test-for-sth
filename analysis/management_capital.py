@@ -288,6 +288,7 @@ def build_management_capital_record(
     executive_profile: Optional[Dict] = None,
     profitability_trend: Optional[Dict] = None,
     as_of: Optional[date] = None,
+    stock_code: str = "",
 ) -> Dict:
     """
     Build one evidence record used by both management-quality and shareholder-return analysis.
@@ -320,6 +321,7 @@ def build_management_capital_record(
         primary_evidence=primary_evidence,
         executive_profile=executive_profile,
         as_of=as_of,
+        stock_code=stock_code,
     )
 
     alignment = {
