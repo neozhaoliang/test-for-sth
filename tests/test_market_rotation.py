@@ -52,7 +52,11 @@ def test_stale_future_or_mismatched_board_cannot_be_used():
 
 def test_sparse_or_stale_board_data_cannot_claim_sector_rotation():
     data={name: observations()[name] for name in list(observations())[:4]}
-    assert build_sector_rotation(data,as_of=date(2026,10,15))["status"]=="insufficient_data"
+    partial=build_sector_rotation(data,as_of=date(2026,10,15))
+    assert partial["status"]=="partial"
+    assert partial["coverage"]==4 and len(partial["sectors"])==4
+    assert partial["rotation_detectable"] is False
+    assert "样本覆盖不足" in partial["note"]
     assert build_sector_rotation(observations(),as_of=date(2027,1,1))["status"]=="insufficient_data"
 
 
@@ -147,3 +151,44 @@ def test_llm_may_select_dividend_index_when_relevant_but_not_forced():
     assert "上证红利" in result["featured_sectors"]
     candidate["featured_sectors"]=[x for x in candidate["featured_sectors"] if x!="上证红利"]
     assert validate_rotation_reading(candidate,rotation)["status"]=="llm_selected"
+
+
+def test_no_industries_but_valid_indices_produce_limited_fallback():
+    from analysis.market_rotation import default_rotation_reading
+    rotation=build_sector_rotation({},as_of=date(2026,10,15))
+    rotation["benchmarks"]=[
+        {"name":"上证指数","d20_pct":-1.2,"latest_date":"2026-10-14","category":"style_index"},
+        {"name":"沪深300","d20_pct":-.5,"latest_date":"2026-10-14","category":"style_index"},
+        {"name":"上证红利","d20_pct":2.3,"latest_date":"2026-10-14","category":"style_index"},
+        {"name":"科创50","d20_pct":-10.3,"latest_date":"2026-10-14","category":"style_index"},
+        {"name":"创业板指","d20_pct":-7.1,"latest_date":"2026-10-14","category":"style_index"},
+    ]
+    reading=default_rotation_reading(rotation)
+    assert reading["status"]=="limited_fallback"
+    assert "上证红利" in reading["summary"]
+    assert "科创50" in reading["summary"]
+    assert "全市场行业轮动" in reading["summary"]
+
+
+@pytest.mark.asyncio
+async def test_partial_index_only_llm_can_select_indices_without_fabricating(monkeypatch):
+    import backtest.llm_client
+    seen=[]
+    async def model(prompt,**kwargs):
+        seen.append(prompt)
+        return {
+            "featured_sectors":["上证红利","沪深300","科创50"],
+            "summary":"红利指数相对更强，科创相关指数明显回撤，当前只能确认已核验指数之间的强弱对照。",
+            "hypotheses":[]
+        },"end_turn"
+    monkeypatch.setattr(backtest.llm_client,"call_json_ex",model)
+    rotation=build_sector_rotation({},as_of=date(2026,10,15))
+    rotation["benchmarks"]=[
+        {"name":"上证红利","d20_pct":2.3,"latest_date":"2026-10-14"},
+        {"name":"沪深300","d20_pct":-.5,"latest_date":"2026-10-14"},
+        {"name":"科创50","d20_pct":-10.3,"latest_date":"2026-10-14"},
+    ]
+    result=await interpret_sector_rotation(rotation,as_of="2026-10-15")
+    assert result["status"]=="llm_selected"
+    assert result["featured_sectors"]==["上证红利","沪深300","科创50"]
+    assert "insufficient_data" in seen[0]

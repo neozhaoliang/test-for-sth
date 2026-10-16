@@ -230,7 +230,8 @@ def build_style_investment_context(
         knowledge_excerpts or [], cutoff, archetype=archetype, industry=industry
     )
     sector_rotation = (market_context or {}).get("sector_rotation") or {}
-    rotation_observed = sector_rotation.get("status") == "observed"
+    rotation_observed = (sector_rotation.get("status") in ("observed", "partial")
+                         or bool(sector_rotation.get("benchmarks")))
     stock = (market_context or {}).get("stock") or {}
     stock_date = _day(stock.get("latest_date"))
     stock_20d = stock.get("d20_pct") if stock_date and (
@@ -297,20 +298,25 @@ def style_investment_prompt_block(ctx: Optional[Mapping]) -> str:
             f"来源={e['source_url']}；解读={e['interpretation']}"
         )
     rotation = ctx.get("sector_rotation") or {}
-    if rotation.get("status") == "observed":
+    if rotation.get("status") in ("observed", "partial") or rotation.get("benchmarks"):
+        coverage = rotation.get("coverage", 0)
         rows.append(
-            f"行业板块观察：截至{rotation.get('as_of')}、20个交易日、"
-            f"覆盖{rotation.get('coverage')}/{rotation.get('universe_size')}类、"
-            f"上涨{rotation.get('up_count')}类，下跌{rotation.get('down_count')}类。"
-            "注意这是样本，不代表全A股行业；涨跌不能证明资金净流。"
+            f"市场已获得同期行情：行业板块{coverage}/{rotation.get('universe_size')}类、"
+            f"风格/宽基指数{len(rotation.get('benchmarks') or [])}个。"
+            "这是实际观察范围而不是全市场覆盖。行业不足6个时不准据此概括A股主导行业；"
+            "仅可描述已经显示的指数及行业强弱，不得编造未覆盖行业的涨跌。"
         )
-        for row in (rotation.get("sectors") or []):
+        for item in (rotation.get("sectors") or []) + (rotation.get("benchmarks") or []):
             rows.append(
-                f"  {row.get('name')}:20日{row.get('d20_pct')}%，"
-                f"60日{row.get('d60_pct')}%，日期{row.get('latest_date')}"
+                f"  {item.get('name')}:近20日{item.get('d20_pct')}%，"
+                f"此前20日{item.get('previous_d20_pct')}%，"
+                f"截至{item.get('latest_date')}。"
             )
     else:
-        rows.append("多行业20日行情缺失；禁止仅凭红利与科技两个样本推断整个市场风格。")
+        rows.append(
+            "没有得到可核验的同期行业或宽基指数；如有独立的红利/成长指数观测，"
+            "仅把它作为局部比较，不因行业供应商暂时失败就完全回避已证实的涨跌。"
+        )
     rows.append("从已整理的投资经验中提炼出的分析原则（不含作者、原文或跨公司案例）：")
     if not principles:
         rows.append("  没有适用于本次公司与时间范围的额外原则；只依据当前资料分析。")

@@ -78,15 +78,16 @@ def build_sector_rotation(series: Mapping[str, Any], *, as_of: date) -> dict:
             newest - _day(row["latest_date"])
         ).days <= 3]
     valid.sort(key=lambda r: (-r["d20_pct"], r["name"]))
-    if len(valid) < _MIN_COVERAGE:
+    if not valid:
         return {
             "status": "insufficient_data", "as_of": None,
             "window": "20 trading days", "source": "东方财富行业板块历史行情",
-            "coverage": len(valid), "universe_size": len(SECTOR_SAMPLE),
+            "coverage": 0, "universe_size": len(SECTOR_SAMPLE),
             "sectors": [], "leaders": [], "laggards": [],
-            "note": "行业样本或同期收盘数据不足，不得据此宣称市场风格迁移。",
+            "note": "行业板块行情暂不可用；继续参考其他有日期的指数，禁止推断全市场行业强弱。",
         }
     count = len(valid)
+    partial = count < _MIN_COVERAGE
     previous = sorted(
         [r for r in valid if r["previous_d20_pct"] is not None],
         key=lambda r: (-r["previous_d20_pct"], r["name"]),
@@ -95,7 +96,7 @@ def build_sector_rotation(series: Mapping[str, Any], *, as_of: date) -> dict:
     current_leaders = [r["name"] for r in valid[:4]]
     new_leaders = [name for name in current_leaders if name not in past_leaders] if past_leaders else []
     return {
-        "status": "observed",
+        "status": "partial" if partial else "observed",
         "as_of": max(row["latest_date"] for row in valid),
         "window": "20 trading days",
         "source": "东方财富行业板块历史行情（AkShare）",
@@ -111,17 +112,35 @@ def build_sector_rotation(series: Mapping[str, Any], *, as_of: date) -> dict:
         "down_count": sum(r["d20_pct"] < 0 for r in valid),
         "median_return_pct": round((valid[(count-1)//2]["d20_pct"] +
                                    valid[count//2]["d20_pct"])/2, 2),
-        "note": "固定行业观察样本内的排名，不代表全A股所有行业；"
-                "20日涨跌不直接证明资金净流向，也不代表中长期趋势。",
+        "note": ("本次行业样本覆盖不足，以下仅为已取得行情的板块，"
+                 "不得宣称全市场行业领先或风格迁移。" if partial else
+                 "固定行业观察样本内的排名，不代表全A股所有行业；"
+                 "20日涨跌不直接证明资金净流向，也不代表中长期趋势。"),
     }
 
 
 def default_rotation_reading(rotation: Mapping) -> dict:
     """Truthful, stock-independent fallback when LLM fails."""
     rows = rotation.get("sectors") or []
-    if not rows:
+    benchmarks = sorted(rotation.get("benchmarks") or [],
+                        key=lambda r: (-r["d20_pct"], r["name"]))
+    if not rows and not benchmarks:
         return {"status": "unavailable", "featured_sectors": [],
                 "summary": "", "hypotheses": []}
+    if rotation.get("status") != "observed":
+        available = rows + benchmarks
+        if len(available) == 1:
+            summary = f"本次只取得{available[0]['name']}近20个交易日行情，不能据此推断整个市场的风格。"
+        else:
+            ranked = sorted(available, key=lambda r: (-r["d20_pct"], r["name"]))
+            summary = (f"已取得行情中，{ranked[0]['name']}相对靠前，"
+                       f"{ranked[-1]['name']}相对靠后。"
+                       "样本不完整，不足以证明全市场行业轮动或实际资金调仓。")
+        return {
+            "status": "limited_fallback",
+            "featured_sectors": [r["name"] for r in available[:7]],
+            "summary": summary, "hypotheses": [],
+        }
     leaders = [r["name"] for r in rows[:3]]
     laggards = [r["name"] for r in rows[-3:]]
     return {
@@ -197,7 +216,9 @@ async def interpret_sector_rotation(rotation: Mapping, *,
     hypotheses, never as measured fund flows.
     """
     fallback = default_rotation_reading(rotation)
-    if rotation.get("status") != "observed":
+    if rotation.get("status") not in ("observed", "partial", "insufficient_data"):
+        return fallback
+    if len(rotation.get("sectors") or []) + len(rotation.get("benchmarks") or []) < 3:
         return fallback
     try:
         from backtest.llm_client import call_json_ex
@@ -205,11 +226,14 @@ async def interpret_sector_rotation(rotation: Mapping, *,
         benchmarks = rotation.get("benchmarks") or []
         prompt = (
             "你是一名研究A股市场风格迁移的投资经理。不要固定比较红利和科技；"
-            "从以下真实、同口径的行业板块20日涨跌中，识别最重要的2-3组强弱分化、"
+            "从以下有日期的行业和指数20日涨跌中，识别有数据支持的强弱分化、"
             "异常的行业或逆市上涨，并考虑当前股票行业是否明显不同步。"
-            "不要机械挑头尾两个数字，优先选择具有解释力的4-8个行业，"
+            "如果仅有少量行业数据，可结合宽基/风格指数识别有限范围的走势，"
+            "不要夸大样本代表性；优先选择具有解释力的3-8个品种，"
             "可兼顾有色、医药、能源、金融、消费、科技、制造等，只以数据实际覆盖者为准。"
             "研究基准日：" + str(as_of) + "；公司行业：" + str(stock_industry) + "。"
+            "行业覆盖状态：" + str(rotation.get("status")) + "，已观测板块数：" +
+            str(rotation.get("coverage", 0)) + "，严禁用已观测的少数板块代表全市场。"
             "板块数据口径=东方财富行业板块样本，20个交易日收盘变化；"
             "部分行业还提供之前20个交易日的独立涨幅，可据此识别领涨变化而非只看静态排名；"
             "上一窗口领涨名单=" + json.dumps(rotation.get("previous_leaders") or [],ensure_ascii=False) +
@@ -223,7 +247,7 @@ async def interpret_sector_rotation(rotation: Mapping, *,
             "hypotheses写0-2条有解释力的条件假设，没有证据可以留空。"
             "另附上证红利、科创50、创业板等同期风格指数作为可选参照；"
             "若其变化重要可选入输出，否则无需出现。"
-            "featured_sectors填行业或风格指数名称数组，必须来自输入，选4-8个，"
+            "featured_sectors填行业或风格指数名称数组，必须来自输入，选3-8个，"
             "不要求每种板块都出现，也不允许预设某两个板块一定重要。"
             "输出JSON对象：{\"featured_sectors\":[\"行业名\"],\"summary\":\"...\","
             "\"hypotheses\":[\"...\"]}。"

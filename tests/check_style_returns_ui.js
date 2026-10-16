@@ -162,15 +162,71 @@ const rotated={...broadStyle,rotation_reading:{
 const rotatedMarkup=ctx.renderInvestmentStyleStrip({style_context:rotated});
 assert.ok(rotatedMarkup.includes('>+0.40%</strong>'));
 assert.ok(!rotatedMarkup.includes('>+8.90%</strong>'));
+// A failed sector provider cannot erase previously verified index returns.
 const unavailable=ctx.renderInvestmentStyleStrip({style_context:{
-  ...base, sector_rotation:{status:'insufficient_data',coverage:2},
+  ...base, sector_rotation:{status:'insufficient_data',coverage:0,sectors:[],benchmarks:[]},
 }});
-assert.ok(unavailable.includes('多行业同期行情覆盖不足'));
-assert.ok(!unavailable.includes('上证红利+'));
+assert.ok(unavailable.includes('上证红利'));
+assert.ok(unavailable.includes('科创50／创业板平均'));
+assert.ok(unavailable.includes('已核验的红利与成长指数对照') ||
+          unavailable.includes('当前市场在交易什么？'));
 const injectedSector=ctx.renderInvestmentStyleStrip({style_context:{
   ...broadStyle, rotation_reading:{...broadStyle.rotation_reading,
     summary:'<img src=x onerror=alert(1)>'},
 }});
 assert.ok(!injectedSector.includes('<img src=x onerror=alert(1)>'));
+
+
+
+// Index-only case: never confuse missing sector data with missing all market
+// data, and do not force the fixed red/growth pairing when 5 indices survive.
+const indexOnly=ctx.renderInvestmentStyleStrip({style_context:{
+  status:'observed',style_regime:'unknown',
+  sector_rotation:{
+    status:'insufficient_data', coverage:0, sectors:[], benchmarks:[
+      {name:'上证指数',d20_pct:-2.15,latest_date:'2026-10-14'},
+      {name:'沪深300',d20_pct:-1.72,latest_date:'2026-10-14'},
+      {name:'上证红利',d20_pct:1.33,latest_date:'2026-10-14'},
+      {name:'科创50',d20_pct:-14.05,latest_date:'2026-10-14'},
+      {name:'创业板指',d20_pct:-13.87,latest_date:'2026-10-14'},
+    ],
+  },
+}});
+for(const field of ['上证红利','沪深300','上证指数','科创50','创业板指'])
+  assert.ok(indexOnly.includes(field),'missing available index '+field);
+assert.ok(indexOnly.includes('>+1.33%</strong>'));
+assert.ok(indexOnly.includes('>-14.05%</strong>'));
+assert.ok(indexOnly.includes('0个行业板块和5个指数'));
+assert.ok(!indexOnly.includes('多行业同期行情覆盖不足'));
+assert.ok(!indexOnly.includes('不能可靠判断市场的主导风格'));
+assert.ok(!indexOnly.includes('已经发生全市场风格迁移'));
+
+// Partial sector case: all observed industries remain visible; 6 is the
+// bar for an industry-market claim, not a hard threshold for reporting facts.
+const partial=ctx.renderInvestmentStyleStrip({style_context:{
+  status:'observed',sector_rotation:{
+    status:'partial',coverage:2,as_of:'2026-10-14',
+    sectors:[
+      {name:'有色金属',d20_pct:11.0,latest_date:'2026-10-14'},
+      {name:'化学制药',d20_pct:-2.4,latest_date:'2026-10-14'},
+    ],
+    benchmarks:[
+      {name:'沪深300',d20_pct:-1.7,latest_date:'2026-10-14'},
+      {name:'科创50',d20_pct:-10.5,latest_date:'2026-10-14'},
+    ],
+  },
+}});
+for(const name of ['有色金属','化学制药','沪深300','科创50'])
+  assert.ok(partial.includes(name));
+assert.ok(partial.includes('>+11.00%</strong>'));
+assert.ok(partial.includes('>-2.40%</strong>'));
+assert.ok(partial.includes('2个行业板块和2个指数'));
+assert.ok(partial.includes('不能据此断言整个A股市场的行业主线已切换'));
+
+// If every source is missing, report that *actual* narrow failure.
+const zero=ctx.renderInvestmentStyleStrip({style_context:{
+  status:'insufficient_data',sector_rotation:{status:'insufficient_data',sectors:[],benchmarks:[]},
+}});
+assert.ok(zero.includes('行业和指数数据源本次均未返回'));
 
 console.log('Market returns UI checks passed: plain percentages, alignment classes, sign colors, source disagreement guard, no SVG.');

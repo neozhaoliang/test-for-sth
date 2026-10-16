@@ -297,13 +297,18 @@ async def _generate_summary(
     style = (getattr(inputs, 'valuation_model_result', None) or {}).get('style_context')
     if isinstance(style, dict):
         rotation = style.get("sector_rotation") or {}
-        if (rotation.get("status") == "observed"
+        observed_count = len(rotation.get("sectors") or []) + len(rotation.get("benchmarks") or [])
+        if (rotation.get("status") in ("observed", "partial", "insufficient_data")
+                and observed_count >= 3
                 and getattr(inputs, "research_mode", "") != "historical"):
             style["rotation_reading"] = await interpret_sector_rotation(
                 rotation, stock_industry=str(getattr(getattr(inputs, "research_profile", None), "industry", "")),
                 as_of=as_of,
             )
-            style["causal_knowledge_status"] = "sector_rotation_observed"
+            style["causal_knowledge_status"] = (
+                "sector_rotation_observed" if rotation.get("status") == "observed"
+                else "limited_market_indices_or_sectors"
+            )
             style["causal_drivers"] = []
             prompt += (
                 "\n\n## 多行业风格研判（非固定红利/科技比较）\n"

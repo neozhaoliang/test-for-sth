@@ -2701,17 +2701,67 @@ function renderSectorRotationStyleStrip(style) {
   return html;
 }
 
+// With limited coverage we still show every dated, verifiable observation.
+function renderLimitedMarketStyleStrip(style) {
+  const data=style.sector_rotation||{};
+  const valid=x=>x && typeof x.name==='string' && x.name &&
+    x.d20_pct!==null && x.d20_pct!==undefined &&
+    Number.isFinite(Number(x.d20_pct)) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(String(x.latest_date||''));
+  const boards=(Array.isArray(data.sectors)?data.sectors:[]).filter(valid);
+  const indexes=(Array.isArray(data.benchmarks)?data.benchmarks:[]).filter(valid);
+  const merged=new Map();
+  boards.forEach(x=>merged.set(x.name,{...x,kind:'行业'}));
+  indexes.forEach(x=>merged.set(x.name,{...x,kind:'指数'}));
+  const rows=[...merged.values()].sort((a,b)=>Number(b.d20_pct)-Number(a.d20_pct));
+  if(!rows.length)return '';
+  const featured=rows.length<=7?rows:[...rows.slice(0,3),...rows.slice(-3)];
+  const fmt=v=>(v>0?'+':'')+v.toFixed(2)+'%';
+  const klass=v=>v>0?'style-return-up':v<0?'style-return-down':'style-return-flat';
+  let title='已观测行情';
+  if(rows.length>1) {
+    title=Number(rows[0].d20_pct)<=0?
+      rows[0].name+'相对抗跌，'+rows[rows.length-1].name+'回撤更大':
+      rows[0].name+'表现相对较强，'+rows[rows.length-1].name+'相对较弱';
+  }
+  let html='<div class="style-insight"><h4>当前市场在交易什么？</h4>'+
+    '<p><b>'+escapeHtml(title)+'</b> · <span class="section-caption">'+
+    escapeHtml(data.as_of||rows[0].latest_date||'')+'</span></p>'+
+    '<div class="style-return-list" role="group" aria-label="已取得的近20日行业与指数涨跌幅">'+
+    featured.map(x=>'<div class="style-return-row"><span class="style-return-name">'+
+      escapeHtml(x.name)+' <small>（'+x.kind+'）</small></span>'+
+      '<strong class="style-return-value '+klass(Number(x.d20_pct))+'">'+
+      fmt(Number(x.d20_pct))+'</strong></div>').join('')+'</div>';
+  const reading=style.rotation_reading||{};
+  if(reading.status==='llm_selected' && typeof reading.summary==='string' && reading.summary.trim())
+    html+='<p class="style-performance-reading"><b>有限数据解读：</b>'+
+      escapeHtml(reading.summary)+'</p>';
+  html+='<p class="style-cause-caveat">本次已取得'+boards.length+
+    '个行业板块和'+indexes.length+'个指数的同期行情。'+
+    '仅能比较显示的样本，不能据此断言整个A股市场的行业主线已切换，'+
+    '也不能把相对涨跌直接认作实际资金流向。</p>';
+  if(style.stock_20d_pct!==null && style.stock_20d_pct!==undefined &&
+     Number.isFinite(Number(style.stock_20d_pct)))
+    html+='<p><b>本股近20个交易日：</b>'+fmt(Number(style.stock_20d_pct))+
+      '（'+escapeHtml(style.stock_20d_as_of||'')+'）</p>';
+  return html+'</div>';
+}
+
 function renderInvestmentStyleStrip(model) {
   const style=(model||{}).style_context || {};
   if((style.sector_rotation||{}).status==='observed') {
     return renderSectorRotationStyleStrip(style);
   }
-  if(style.sector_rotation && style.sector_rotation.status==='insufficient_data') {
-    return '<div class="style-insight"><h4>当前市场在交易什么？</h4>'+
-      '<p class="section-caption">多行业同期行情覆盖不足，本次不能可靠判断市场的主导风格。'+
-      '不以固定的红利与科技指数替代全市场行业比较。</p></div>';
+  if(style.sector_rotation && style.sector_rotation.status!=='observed') {
+    const partial=renderLimitedMarketStyleStrip(style);
+    if(partial)return partial;
   }
-  if(style.status!=='observed')return '';
+  if(style.status!=='observed') {
+    if(!style.sector_rotation)return '';
+    return '<div class="style-insight"><h4>当前市场在交易什么？</h4>'+
+      '<p class="section-caption">行业和指数数据源本次均未返回有日期的可比涨跌幅。'+
+      '无法量化这段期间的市场风格，不代表市场没有出现轮动。</p></div>';
+  }
   const events=style.dated_market_events || [];
   const redObserved=(style.dividend_index_return_pct===null ||
     style.dividend_index_return_pct===undefined)?null:Number(style.dividend_index_return_pct);
