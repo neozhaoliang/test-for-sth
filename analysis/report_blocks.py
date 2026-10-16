@@ -670,22 +670,27 @@ def _build_macro_rates_block(data: Optional[Dict]) -> str:
         lo = us.get("fed_target_lower_pct")
         hi = us.get("fed_target_upper_pct")
         if ff_fresh and lo is not None and hi is not None:
-            lines.append(
-                f"美联储联邦基金目标区间 {lo}%~{hi}% "
-                f"(截至 {us.get('fed_target_upper_as_of')}; "
-                f"上限较约180日前变化 {us.get('fed_target_upper_change_180d_pp')}pct)"
-            )
+            fed_text = (f"美联储联邦基金目标区间 {lo}%~{hi}% "
+                        f"（数据截至 {us.get('fed_target_upper_as_of')}）")
+            change = us.get("fed_target_upper_change_180d_pp")
+            last = us.get("fed_target_last_decision_change_pp")
+            if isinstance(change, (int, float)):
+                fed_text += f"；近180天上限变化 {change:+} 个百分点"
+            if isinstance(last, (int, float)):
+                fed_text += f"；最近已核验会议利率变化 {last:+} 个百分点"
+            lines.append(fed_text)
         else:
             lines.append("美联储目标利率: 数据缺失或过期，不得作为当前利率引用")
 
         u10_fresh = (us.get("us10y_freshness") or {}).get("fresh", False)
         if u10_fresh and us.get("us10y_yield_pct") is not None:
-            lines.append(
-                f"美国10年期国债收益率 {us.get('us10y_yield_pct')}% "
-                f"(截至 {us.get('us10y_as_of')}; 30日变化 "
-                f"{us.get('us10y_change_30d_pp')}pct，90日变化 "
-                f"{us.get('us10y_change_90d_pp')}pct)"
-            )
+            text = (f"美国10年期国债收益率 {us.get('us10y_yield_pct')}% "
+                    f"（数据截至 {us.get('us10y_as_of')}）")
+            for days, change in ((30, us.get("us10y_change_30d_pp")),
+                                  (90, us.get("us10y_change_90d_pp"))):
+                if isinstance(change, (int, float)):
+                    text += f"；近{days}日变化 {change:+} 个百分点"
+            lines.append(text)
         else:
             lines.append("美国10年期国债收益率: 数据缺失或过期")
     else:
@@ -696,11 +701,16 @@ def _build_macro_rates_block(data: Optional[Dict]) -> str:
         fresh = (china.get("freshness") or {}).get("fresh", False)
         if fresh:
             lines.append(
-                f"中国LPR: 1年期 {china.get('lpr_1y_pct')}%，5年期 {china.get('lpr_5y_pct')}% "
-                f"(截至 {china.get('as_of')}; 近6个观测值变化分别 "
-                f"{china.get('lpr_1y_change_6obs_pp')}pct / "
-                f"{china.get('lpr_5y_change_6obs_pp')}pct)"
+                f"中国LPR: 1年期 {china.get('lpr_1y_pct')}%，"
+                f"5年期 {china.get('lpr_5y_pct')}% "
+                f"（数据截至 {china.get('as_of')}）"
             )
+            if china.get("lpr_1y_change_6obs_pp") is not None:
+                lines.append("1年期LPR近6期变动: "
+                             f"{china['lpr_1y_change_6obs_pp']:+} 个百分点")
+            if china.get("lpr_5y_change_6obs_pp") is not None:
+                lines.append("5年期LPR近6期变动: "
+                             f"{china['lpr_5y_change_6obs_pp']:+} 个百分点")
             lines.append(f"注: {china.get('note')}")
         else:
             lines.append("中国LPR: 数据缺失或过期，不得作为当前利率引用")
@@ -732,8 +742,30 @@ def _build_macro_rates_block(data: Optional[Dict]) -> str:
             f"（{item.get('decision_as_of')}{delta_text}，"
             "AkShare/Jin10二级时间序列；需对照官方公告）"
         )
+    for region, label in (("us", "美国"), ("china", "中国")):
+        item = data.get(region) or {}
+        if item.get("source_mode") in (
+            "dated_verified_fallback", "live_and_dated_verified_fallback"
+        ):
+            lines.append(
+                f"{label}部分指标采用官方来源的有日期后备记录，不是本次实时抓取："
+                f"{item.get('fallback_note') or ''}"
+            )
+    for region, label in (("japan", "日本"), ("euro", "欧洲")):
+        item = data.get(region) or {}
+        if item.get("source_mode") == "dated_verified_fallback":
+            lines.append(
+                f"{label}央行利率来自已核验的有日期官方决议后备记录，"
+                f"并非本次实时重新抓取，出处：{item.get('source_url')}"
+            )
     for warning in data.get("warnings") or []:
-        lines.append(f"警告: {warning}")
+        lines.append(f"提示: {warning}")
+    if any(line.startswith(("美联储联邦基金", "美国10年期", "中国LPR:"))
+           for line in lines):
+        lines.append(
+            "已明确提供的利率不可再笼统称作全部资料缺失；"
+            "需直接利用带日期的数值，指出已知的政策方向及不能确定的实际利率/后续决议。"
+        )
     return "\n".join(lines)
 
 

@@ -16,6 +16,7 @@ import io
 from datetime import date, datetime
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
+from analysis.macro_verified_fallback import us_reference, china_reference, international_reference
 
 
 
@@ -224,15 +225,70 @@ async def _fetch_china_lpr(as_of: Optional[date] = None) -> Optional[Dict]:
 async def get_macro_rate_context(
     *,
     as_of: Optional[date] = None,
+    allow_verified_live_fallback: bool = False,
 ) -> Optional[Dict]:
     us, china = await asyncio.gather(
         _fetch_us_rates(as_of=as_of),
         _fetch_china_lpr(as_of=as_of),
     )
+    # An upstream FRED / AkShare failure must not erase already independently
+    # verified PUBLIC interest-rate data from the same research period. This
+    # limited bridge is intentionally live-only; archived historical research
+    # cannot use a 2026 reference as if it had been published in the past.
+    fallback_used = []
+    if as_of is None or allow_verified_live_fallback:
+        reference_us = us_reference(today=as_of or _today())
+        if reference_us:
+            current = dict(us or {})
+            urls = dict(current.get("source_urls") or {})
+            supplemented = []
+            if (not (current.get("fed_target_freshness") or {}).get("fresh")
+                    or current.get("fed_target_lower_pct") is None
+                    or current.get("fed_target_upper_pct") is None):
+                if reference_us.get("fed_target_upper_pct") is not None:
+                    for field in ("fed_target_lower_pct", "fed_target_upper_pct",
+                                  "fed_target_lower_as_of", "fed_target_upper_as_of",
+                                  "fed_target_freshness",
+                                  "fed_target_last_decision_change_pp"):
+                        current[field] = reference_us[field]
+                    for k in ("target_lower", "target_upper"):
+                        urls[k] = reference_us["source_urls"][k]
+                    # A 180-day comparison is NOT established by the last hike.
+                    current.pop("fed_target_upper_change_180d_pp", None)
+                    current.pop("fed_target_lower_change_180d_pp", None)
+                    supplemented.append("Fed")
+            if (not (current.get("us10y_freshness") or {}).get("fresh")
+                    or current.get("us10y_yield_pct") is None):
+                if reference_us.get("us10y_yield_pct") is not None:
+                    for field in ("us10y_yield_pct", "us10y_as_of",
+                                  "us10y_freshness"):
+                        current[field] = reference_us[field]
+                    for field in ("us10y_change_30d_pp", "us10y_change_90d_pp"):
+                        current.pop(field, None)
+                    urls["us10y"] = reference_us["source_urls"]["us10y"]
+                    supplemented.append("US10Y")
+            if supplemented:
+                current["source_urls"] = urls
+                current["source_mode"] = ("dated_verified_fallback" if us is None
+                    else "live_and_dated_verified_fallback")
+                current["fallback_note"] = reference_us["fallback_note"]
+                fallback_used.extend(supplemented)
+                us = current
+        if not china or not (china.get("freshness") or {}).get("fresh"):
+            reference_china = china_reference(today=as_of or _today())
+            if reference_china:
+                china = reference_china
+                fallback_used.append("China LPR")
+
     if not us and not china:
         return None
 
     warnings: List[str] = []
+    if fallback_used:
+        warnings.append(
+            "宏观接口本次缺失/过期；以下 " + "、".join(fallback_used) +
+            " 使用已核验且尚未过期的官方日期快照，并非实时重新抓取。"
+        )
     if us:
         ff = us.get("fed_target_freshness") or {}
         u10 = us.get("us10y_freshness") or {}
@@ -249,6 +305,7 @@ async def get_macro_rate_context(
         "china": china,
         "warnings": warnings,
         "source_tier": "A" if us else "B",
+        "fallback_used": fallback_used,
     }
 
 
@@ -342,4 +399,21 @@ async def get_international_policy_rates(
         one(region, api_name, label)
         for region, (api_name, label) in _INTERNATIONAL_DECISIONS.items()
     ))
-    return dict(found)
+    result = dict(found)
+    if as_of is None:
+        for region in _INTERNATIONAL_DECISIONS:
+            official = international_reference(region)
+            current = result.get(region) or {}
+            # Prefer fresh newer provider observations. Never overwrite a
+            # newer decision with an older official reference snapshot.
+            current_date = _parse_date(current.get("decision_as_of"))
+            verified_date = _parse_date(official.get("decision_as_of"))
+            if (official and (
+                not (current.get("freshness") or {}).get("fresh")
+                or current_date is None
+                or (verified_date and current_date < verified_date)
+            )):
+                result[region] = official
+                logger.info("[macro_rates] %s: official dated fallback %s",
+                            region, official["decision_as_of"])
+    return result

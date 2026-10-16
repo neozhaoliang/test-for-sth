@@ -198,7 +198,10 @@ async def generate_report(
         get_cninfo_primary_evidence(stock_code, as_of=request.as_of),
         live_a_share_structure_task,
         get_valuation_history(stock_code, as_of=request.as_of),
-        get_macro_rate_context(as_of=request.as_of),
+        get_macro_rate_context(
+            as_of=request.as_of,
+            allow_verified_live_fallback=not historical_mode,
+        ),
         get_financial_filing_calendar(stock_code, as_of=request.as_of),
         pit_financials_task,
         ownership_task,

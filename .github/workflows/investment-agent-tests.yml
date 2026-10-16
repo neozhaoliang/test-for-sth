@@ -55,6 +55,7 @@ jobs:
             analysis/research_profile.py \
             analysis/management_capital.py \
             analysis/macro_rates.py \
+            analysis/macro_verified_fallback.py \
             analysis/commodity.py \
             analysis/a_share_structure.py \
             analysis/valuation_history.py \
@@ -209,6 +210,7 @@ jobs:
             tests/test_management_capital.py \
             tests/test_succession_risk.py \
             tests/test_macro_rates.py \
+            tests/test_macro_verified_fallback.py \
             tests/test_commodity_cycle.py \
             tests/test_a_share_structure.py \
             tests/test_primary_sources.py \
