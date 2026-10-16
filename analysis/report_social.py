@@ -23,7 +23,10 @@ from analysis.knowledge_base import (
     load_cached_entries,
 )
 from analysis.knowledge_context import prefilter_knowledge_by_context
-from analysis.resource_mining_thesis import is_resource_miner, select_resource_monetary_excerpts
+from analysis.resource_mining_thesis import (
+    is_resource_miner, select_resource_monetary_excerpts,
+    select_resource_succession_excerpts,
+)
 from analysis.market_research_context import (
     select_recent_style_excerpts, select_evergreen_tech_finance_excerpts,
 )
@@ -229,7 +232,8 @@ def _retain_resource_monetary_sources(selected, available, *, archetype, industr
         return selected
     result = list(selected)
     known = {(e.source, e.title, e.published_at) for e in result}
-    for entry in select_resource_monetary_excerpts(available, limit=8):
+    for entry in (select_resource_monetary_excerpts(available, limit=8)
+                  + select_resource_succession_excerpts(available, limit=5)):
         key = (entry.source, entry.title, entry.published_at)
         if key not in known:
             result.append(entry)
@@ -303,7 +307,8 @@ async def filter_relevant_knowledge(
 
     if is_resource_miner(archetype=archetype, industry=industry_name or "", stock_name=stock_name):
         known = {(e.source, e.title, e.published_at) for e in prefetched}
-        for entry in select_resource_monetary_excerpts(knowledge_excerpts, limit=8):
+        for entry in (select_resource_monetary_excerpts(knowledge_excerpts, limit=8)
+                      + select_resource_succession_excerpts(knowledge_excerpts, limit=5)):
             key = (entry.source, entry.title, entry.published_at)
             if key not in known:
                 prefetched.append(entry)
