@@ -30,7 +30,7 @@ function renderRoeDiscountLab(model) {
   if(!m) return '';
   const book=Number(m.book_per_share);
   let html='<div class="evidence-block" id="roe-discount-lab" style="margin-top:16px;">'+
-    '<h4>ROE × 增长 × 贴现率 · 独立经营估值</h4>'+
+    '<h4>ROE × 增长 × 贴现率 · 假设对照（非目标价）</h4>'+
     '<p class="section-caption">估值不使用历史股价或PE/PB拟合。'+
     '主模型假设超额ROE在10年内逐步回归权益资本成本，期末PB=1；'+
     '另以无限期稳定经营作为对照。以下价格是条件情景，并非精准买点。</p>';
@@ -58,11 +58,11 @@ function renderRoeDiscountLab(model) {
     slide('discount','投资者要求收益率／贴现率',4,25,.25,10)+
     '<div class="lab-actions"><button type="button" id="roe-reset">恢复初始假设</button></div>'+
     '</div><div class="lab-result roe-discount-result" aria-live="polite" aria-atomic="false">'+
-    '<h4>主模型条件价格</h4>'+
+    '<h4>ROE十年衰减 · 压力情景价格</h4>'+
     '<div class="lab-price" id="roe-price">—</div>'+
     '<div class="lab-stat-grid">'+
-    '<div><span>经营参数压力价格区间</span><b id="roe-band">—</b></div>'+
-    '<div><span>无限期稳态对照价格</span><b id="roe-steady">—</b></div>'+
+    '<div><span>压力情景参数扰动</span><b id="roe-band">—</b></div>'+
+    '<div><span>ROE长期不降的理想化对照</span><b id="roe-steady">—</b></div>'+
     '<div><span>隐含派息率</span><b id="roe-payout">—</b></div>'+
     '<div><span>10年末净资产终值占比</span><b id="roe-terminal">—</b></div></div>'+
     '<div class="lab-foot" id="roe-note">—</div></div></div>';
