@@ -124,7 +124,7 @@ function activateRoeDiscountLab(model) {
     if(m.defaults.roe_pct==null)notes.push('ROE初值为示例，不是实测正常化ROE。');
     if(m.defaults.growth_pct==null)notes.push('增长率初值为零增长压力情景。');
     notes.push('权益按滑块增长，隐含派息随ROE变化；贴现率由用户设定，不是公司已核实资本成本。');
-    if(cyclical)notes.push('这不是矿山资源NAV或中周期自由现金流估值。');
+    if(m.industry_archetype==='cyclical')notes.push('这不是矿山资源NAV或中周期自由现金流估值。');
     if(estimates.length<27)notes.push('部分极端组合违反增长约束而被排除。');
     if(main.terminalPct>70)notes.push('期末净资产占比较高，结果对终值敏感。');
     display('note',notes.join(' '));
