@@ -66,6 +66,32 @@ def select_resource_monetary_excerpts(
     return [e for _, _, e in items[:max(0, limit)]]
 
 
+def select_resource_succession_excerpts(
+    excerpts: Iterable, *, as_of: str = "", limit: int = 5,
+) -> list:
+    """Recall dated private research on a named miner's founder/succession.
+
+    These are hypothesis prompts, NOT proof that a formal resignation occurred.
+    The actual officer facts always come from first-party filings.
+    """
+    cutoff = _day(as_of) or date.today()
+    relevant = []
+    for item in excerpts or []:
+        published = _day(getattr(item, "published_at", ""))
+        if published is None or published > cutoff:
+            continue
+        body = str(getattr(item, "title", "") or "") + " " + str(
+            getattr(item, "distilled", "") or ""
+        )
+        if not re.search(r"紫金矿业|陈景河|邹来昌", body):
+            continue
+        if not re.search(r"创始人|接班|继任|退休|卸任|换届|管理层|董事长|经营传承", body):
+            continue
+        relevant.append((published, item))
+    relevant.sort(key=lambda pair: pair[0], reverse=True)
+    return [item for _, item in relevant[:max(0, limit)]]
+
+
 def _holder_trajectory(inputs: Any) -> dict:
     """Pick a historical low-to-later-high in dated holder observations.
 
@@ -128,6 +154,14 @@ def resource_miner_prompt_block(inputs: Any) -> str:
         as_of=str(getattr(inputs, "as_of", "") or ""),
     )
     holder = _holder_trajectory(inputs)
+    succession_private = select_resource_succession_excerpts(
+        getattr(inputs, "knowledge_excerpts", ()) or (),
+        as_of=str(getattr(inputs, "as_of", "") or ""),
+    )
+    succession_record = (
+        (getattr(inputs, "management_capital", None) or {}).get("succession") or {}
+    )
+    confirmed = succession_record.get("verified_transition") or {}
     lines = [
         "## 矿业/有色：影响买入赔率的行业特殊矛盾（仅是研究问题，不自动看空）",
         "货币与商品：有色及黄金有金融/货币属性，不能只按产量、矿石品位和终端供需推断价格。"
@@ -156,6 +190,20 @@ def resource_miner_prompt_block(inputs: Any) -> str:
         "现任管理层任职和派息优秀不能证明交班后业绩同样优秀；缺少交接公告与继任者"
         "独立经营记录时，明确这是未解决的能力连续性风险，不可编造交接已经完成。",
     ]
+    if succession_private:
+        lines.append(
+            "本地知识库确有该矿业公司创始人/换届/接班相关历史研究；"
+            "其机制与投资提醒应参与核验，但不得替代正式公告，"
+            "不得对外引用原帖、账号和来源。"
+        )
+    if confirmed.get("status") == "completed":
+        lines.append(
+            f"已经证实的人事交接：{confirmed.get('effective_at')}，"
+            f"陈景河卸任董事长及执行董事；邹来昌当选董事长、林泓富获聘总裁；"
+            "陈景河继续任终身荣誉董事长、高级顾问。"
+            f"第一手证据：{confirmed.get('source_url')}。"
+            "交接事实不是缺口；尚待验证的是继任团队在完整金铜周期中的独立资本配置与管理能力。"
+        )
     if holder and holder["holder_rise_pct"] >= 40:
         lines.append(
             f"股东户数历史阶段：{holder['start']}的{holder['start_holders']:,}户"
@@ -196,6 +244,15 @@ def resource_summary_omissions(text: str, inputs: Any) -> list[str]:
     for key in ("capex", "succession"):
         if not _SUMMARY_FIELDS[key].search(text or ""):
             omissions.append(key)
+    confirmed = ((getattr(inputs, "management_capital", None) or {})
+                 .get("succession") or {}).get("verified_transition") or {}
+    if confirmed.get("status") == "completed":
+        stated = str(text or "")
+        names = (str(confirmed.get("founder") or ""),
+                 str(confirmed.get("chairman_appointed") or ""))
+        if not all(name and name in stated for name in names):
+            if "succession" not in omissions:
+                omissions.append("succession")
     return omissions
 
 
