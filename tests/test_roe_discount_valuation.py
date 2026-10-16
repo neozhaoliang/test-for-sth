@@ -97,3 +97,28 @@ def test_missing_book_does_not_substitute_quote():
         as_of="2026-10-13")
     assert lab["status"] == "missing_book"
     assert lab["book_per_share"] is None
+
+
+def test_miner_screenshot_fade_is_stress_not_constant_roe_value():
+    # 7.60 book, 10.5% initial ROE, 5.75% annual book growth, 7.5% hurdle.
+    d = calculate_roe_prices(
+        book_per_share=7.60, roe_pct=10.5, growth_pct=5.75,
+        discount_pct=7.50)
+    assert d["status"] == "calculated"
+    assert abs(d["finite_fade_price"] - 8.6157) < 0.002
+    assert abs(d["steady_growth_price"] - 20.6286) < 0.002
+    assert abs(d["pv_residual_income_yuan"] -
+               (d["finite_fade_price"] - 7.6)) < 0.001
+    assert abs(d["end_book_per_share"] - 7.6 * 1.0575**10) < 0.0002
+    assert abs(d["implied_payout_pct"] - 45.238) < 0.01
+    assert abs(d["implied_payout_final_year_pct"] - 23.333) < 0.01
+    assert d["terminal_book_share_pct"] > 70
+    assert d["finite_fade_price"] < d["steady_growth_price"]
+
+
+def test_mining_roe_lab_is_labeled_as_conditional_not_nav():
+    lab = build_roe_discount_lab(
+        valuation={"nav_per_share":7.6},
+        as_of="2026-10-16",archetype="cyclical")
+    assert lab["industry_archetype"] == "cyclical"
+    assert any("矿山" in w for w in lab["warnings"])
