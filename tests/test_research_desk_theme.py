@@ -143,3 +143,19 @@ def test_report_toc_chapters_and_subsections_are_single_column():
     # The existing ordered list and native anchor destinations are preserved.
     js = (ROOT / "web" / "app.py").read_text(encoding="utf-8")
     assert "'<ol class=\"toc-chapters\">'+chapters.map(entry).join('')+'</ol>'" in js
+
+
+def test_report_header_is_one_row_with_horizontal_scroll_on_narrow_screens():
+    css=(ROOT / "web" / "research_desk.css").read_text(encoding="utf-8")
+    import re
+    match=re.search(r"#result \.report-header-inline\s*\{([^}]+)\}", css)
+    assert match, "report heading row CSS missing"
+    rules=match.group(1)
+    for required in ("display:flex", "flex-direction:row", "flex-wrap:nowrap", "overflow-x:auto"):
+        assert required in rules
+    js=(ROOT / "web" / "app.py").read_text(encoding="utf-8")
+    assert 'report-header-inline' in js
+    assert 'report-mode-inline' in js
+    assert 'report-quote-inline' in js
+    assert '<h3>研究目录</h3>' in js
+    assert 'CONTENTS · 研究导览' not in js
