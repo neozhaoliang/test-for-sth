@@ -17,7 +17,7 @@ _SUMMARY_FIELDS = {
     "monetary": re.compile(r"货币|流动性|利率|美元|金融条件"),
     "holders": re.compile(r"股东户数|持股账户|股东人数|筹码|持有人分散"),
     "capex": re.compile(r"扩张|扩产|资本开支|资本配置|矿山投资|并购|项目投入"),
-    "succession": re.compile(r"接班|继任|传承|关键人|创始人|管理层"),
+    "succession": re.compile(r"接班|继任|接任|卸任|换届|传承|关键人|创始人|管理层"),
 }
 _REDACT = re.compile(r"买股票的老木匠|军师祭咖啡|陈chensir|双木林叔|https?://|\b(?:SH|SZ|BJ)\d{6}\b", re.I)
 
