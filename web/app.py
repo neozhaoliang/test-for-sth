@@ -3122,9 +3122,8 @@ function renderReportToc(reportHtml) {
   const entry=([id,label])=>
     '<li><a href="#'+id+'"><span>'+escapeHtml(label)+
     '</span><span class="toc-arrow" aria-hidden="true">↗</span></a></li>';
-  let html='<nav class="report-toc" id="report-toc" aria-label="报告目录">'+
-    '<div class="toc-heading"><div><span class="toc-eyebrow">CONTENTS · 研究导览</span>'+
-    '<h3>报告目录</h3></div><span class="toc-count">'+chapters.length+' 个章节</span></div>'+
+  let html='<nav class="report-toc" id="report-toc" aria-label="研究目录">'+
+    '<div class="toc-heading"><h3>研究目录</h3></div>'+
     '<ol class="toc-chapters">'+chapters.map(entry).join('')+'</ol>';
   if(dimensions.length){
     html+='<details class="toc-subsections"><summary>展开 '+
@@ -3137,36 +3136,44 @@ function renderReportToc(reportHtml) {
 
 function renderResult(report) {
   const el = document.getElementById('result');
-  let html = '<h2 id="report-top">' + escapeHtml(report.stock_name || report.stock_code) + ' (' + escapeHtml(report.stock_code) + ')</h2>';
   const isHistorical = report.research_mode === 'historical';
-  if (isHistorical) {
-    html += '<div class="historical-banner"><b>历史研究</b> ｜ 截止日 ' +
-      escapeHtml(report.as_of || '未知') +
-      ' ｜ 结论只允许使用该日及之前已公开的信息；当前知识不会用于补全历史缺口。</div>';
-  } else {
-    html += '<div class="live-banner"><b>Live 研究</b> ｜ 基准日 ' +
-      escapeHtml(report.as_of || '今天') + '</div>';
-  }
+  // One compact row: company identity | mode and research date | quote.
+  // Never split these into stacked heading, full-width banner and quote blocks.
+  let html = '<div class="report-header-inline" role="group" aria-label="公司与行情摘要">'+
+    '<h2 id="report-top">' + escapeHtml(report.stock_name || report.stock_code) +
+    ' (' + escapeHtml(report.stock_code) + ')</h2>';
+  html += '<span class="report-mode-inline ' +
+    (isHistorical ? 'historical-banner' : 'live-banner') + '"><b>' +
+    (isHistorical ? '历史研究' : 'Live 研究') + '</b><span class="report-meta-divider">｜</span>' +
+    (isHistorical ? '截止日 ' : '基准日 ') +
+    escapeHtml(report.as_of || (isHistorical ? '未知' : '今天'))+'</span>';
 
   if (report.realtime_quote) {
     const q = report.realtime_quote;
     const price = numericOrNull(q.latest_price);
-    if(price!==null && price>0){
+    if (price !== null && price > 0) {
       const previous = q.quote_mode === 'verified_previous_close';
-      let qtext = '<p class="quote">' +
+      let qtext = '<span class="report-quote-inline quote">' +
         (previous ? '最近可核验收盘价 ' : isHistorical ? '截止日收盘价 ' : '最新价 ') +
         escapeHtml(String(price)) + '元';
-      if(q.change_pct!==null && q.change_pct!==undefined &&
-         numericOrNull(q.change_pct)!==null)
-        qtext += ' 涨跌幅 ' + escapeHtml(String(q.change_pct)) + '%';
-      if(q.volume!==null && q.volume!==undefined &&
-         numericOrNull(q.volume)!==null)
-        qtext += ' 成交量 ' + escapeHtml(String(q.volume));
-      if(previous) qtext += '（'+escapeHtml(q.date||q.timestamp||'未知日期')+'，不是盘中实时价）';
-      html+=qtext+'</p>';
+      if (numericOrNull(q.change_pct) !== null)
+        qtext += '<span class="report-quote-item">涨跌幅 ' +
+          escapeHtml(String(q.change_pct)) + '%</span>';
+      if (numericOrNull(q.volume) !== null)
+        qtext += '<span class="report-quote-item">成交量 ' +
+          escapeHtml(String(q.volume)) + '</span>';
+      if (previous)
+        qtext += '<span class="report-quote-note">（' +
+          escapeHtml(q.date || q.timestamp || '未知日期') +
+          '，不是盘中实时价）</span>';
+      html += qtext + '</span>';
     } else {
-      html+='<p class="quote">有效股价暂缺，不能判断当前股票赔率。</p>';
+      html += '<span class="report-quote-inline quote">有效股价暂缺，不能判断当前股票赔率。</span>';
     }
+  }
+  html += '</div>';
+  if (isHistorical) {
+    html += '<p class="report-historical-note">结论只允许使用该日及之前已公开的信息；当前知识不会用于补全历史缺口。</p>';
   }
 
   const summary = report.summary || {};

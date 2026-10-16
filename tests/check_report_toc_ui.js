@@ -57,6 +57,18 @@ function verify(html){
 ctx.renderResult(base);
 let html=nodes.result.innerHTML, hrefs=verify(html);
 assert.ok(html.includes('<nav class="report-toc"'));
+const toc=html.split('<nav class="report-toc"',2)[1].split('</nav>',1)[0];
+assert.equal((toc.match(/研究目录/g)||[]).length,2); // aria-label and one visible h3
+assert.ok(toc.includes('<h3>研究目录</h3>'));
+for(const obsolete of ['CONTENTS','研究导览','报告目录','个章节','toc-eyebrow','toc-count'])
+  assert.ok(!toc.includes(obsolete),'old TOC label still displayed: '+obsolete);
+assert.ok(html.includes('<div class="report-header-inline"'));
+assert.ok(html.includes('<h2 id="report-top">模拟公司 (SH600000)</h2>'));
+assert.ok(html.includes('Live 研究'));
+assert.ok(html.includes('基准日 2026-10-13'));
+assert.ok(html.includes('最新价 12.3元'));
+assert.ok(!html.includes('<p class="quote">'));
+assert.ok(!html.includes('<div class="live-banner">'));
 assert.ok(html.includes('href="#report-verdict"'));
 assert.ok(html.includes('href="#report-charts"'));
 assert.ok(html.includes('href="#industryValuationLab"'));
@@ -108,3 +120,20 @@ assert.ok(!html.includes('href="#roe-discount-lab"'));
 assert.ok(!html.includes('href="#report-capital"'));
 
 console.log('Report TOC checks passed: dynamic chapters, 12 subsection links, unique anchors, missing section gates, report refresh.');
+
+
+// Historical pages keep the as-of restriction without becoming three large
+// stacked heading/banner/quote blocks.
+const past={...base,research_mode:'historical',as_of:'2025-06-30',
+  realtime_quote:{latest_price:17.5,change_pct:-1.8,volume:167000}};
+ctx.renderResult(past);
+const pastHtml=nodes.result.innerHTML;
+assert.ok(pastHtml.includes('<div class="report-header-inline"'));
+assert.ok(pastHtml.includes('<h2 id="report-top">模拟公司 (SH600000)</h2>'));
+assert.ok(pastHtml.includes('历史研究'));
+assert.ok(pastHtml.includes('截止日 2025-06-30'));
+assert.ok(pastHtml.includes('截止日收盘价 17.5元'));
+assert.ok(pastHtml.includes('涨跌幅 -1.8%'));
+assert.ok(pastHtml.includes('成交量 167000'));
+assert.ok(pastHtml.includes('report-historical-note'));
+assert.ok(!pastHtml.includes('<div class="historical-banner">'));
