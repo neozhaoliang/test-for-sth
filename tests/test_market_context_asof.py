@@ -128,7 +128,6 @@ async def test_stale_index_is_not_passed_off_as_contemporaneous(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ytd_high_uses_only_unadjusted_closes_and_asof_cutoff(monkeypatch):
-    from analysis.market_research_context import build_market_style_context
     dates = pd.bdate_range("2025-12-30", "2026-10-20")
     closes = [29.0 if x.year == 2025 else
               39.55 if str(x.date()) == "2026-02-27" else
