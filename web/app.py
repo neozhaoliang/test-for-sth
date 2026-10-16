@@ -2379,9 +2379,10 @@ function renderIssuerCapitalSection(report) {
     const intended=e.planned_use==='equity_incentive_or_employee_share_plan'?'（用于股权激励/员工持股）':'';
     const actual=numericOrNull(e.actual_amount_yuan);
     const shares=numericOrNull(e.shares);
-    const amount=actual!==null&&actual>0?fmt(actual)+' 元':
+    const amount=e.status==='plan_only'?'待实施，实际回购规模暂缺':
+      actual!==null&&actual>0?fmt(actual)+' 元':
       shares!==null&&shares>0?fmt(shares)+' 股':
-      e.status==='plan_only'?'实际执行金额待核实':'实际回购规模暂缺';
+      '实际回购规模暂缺';
     html+='<tr><td>'+escapeHtml(e.disclosed_at||'')+'</td><td>'+
       escapeHtml(desc+intended)+'</td><td>'+escapeHtml(amount)+'</td><td>'+
       (e.source_url?safeExternalLink(e.source_url,'公司公告'):'暂缺')+'</td></tr>';
@@ -2448,7 +2449,8 @@ function renderDimensionAnalysisSection(summary, report) {
     typeof analyses[key] === 'string' && analyses[key].trim());
   if (!valid.length) {
     // Older cached reports do not contain tool-generated per-dimension detail.
-    // Never repeat the top-line thesis under a second fake research heading.
+    // Do not fabricate twelve missing analyses or discard all existing charts:
+    // the separate evidence-only fallback is rendered below by renderResult.
     return '';
   }
   let html = '<section class="research-panel research-narrative" id="report-dimensions">' +
@@ -2472,6 +2474,34 @@ function renderDimensionAnalysisSection(summary, report) {
     html+='</article>';
   });
   return html + '</section>';
+}
+
+// Older cached reports may lack narrative dimensions altogether. In that
+// special case retain previously visible shareholder disclosures together in
+// a clearly evidence-only section, without inventing a model-generated review.
+function renderLegacyShareholderEvidence(report) {
+  const src=report||{};
+  const ledger=src.shareholder_capital_summary||{};
+  const facts=(src.fundamentals||{}).facts||{};
+  const hasChip=!!src.chip_price_context ||
+    (Array.isArray(facts.holder_count_series) && facts.holder_count_series.length>=2);
+  const hasReturns=(src.dividend_chart||[]).length ||
+    (src.dividend_history||[]).length ||
+    (src.buyback_history||[]).length ||
+    (ledger.completed_holder_sales||[]).length ||
+    (ledger.equity_issuances||[]).length ||
+    (ledger.corporate_buybacks||[]).length;
+  if(!hasChip&&!hasReturns)return '';
+  let html='<section class="research-panel research-narrative" id="report-shareholder-evidence">'+
+    '<h3>筹码与股东回报资料</h3>'+
+    '<p class="section-caption">旧版报告没有对应的分项分析文字；以下只展示已有证据，不补造投资结论。</p>';
+  if(hasChip){
+    html+='<div class="analysis-inline-evidence chip-analysis-evidence">'+
+      '<h5>股东人数与同期股价走势</h5>'+
+      renderChipPositionChart(src.chip_price_context,src)+'</div>';
+  }
+  if(hasReturns)html+=renderShareholderReturnEvidence(src);
+  return html+'</section>';
 }
 
 // The industry engine, not the old perpetual-ROE dividend toy, owns the
@@ -3171,6 +3201,7 @@ function renderReportToc(reportHtml) {
   const chapters=[
     ['report-verdict','投资结论'],
     ['report-charts','数据概览与维度图谱'],
+    ['report-shareholder-evidence','筹码与股东回报资料'],
     ['report-dimensions','多维度分析'],
     ['industryValuationLab','行业估值与市场环境'],
     ['report-investor-reference','投资者长期回报情景'],
@@ -3277,7 +3308,12 @@ function renderResult(report) {
   html += '</section>';
 
   html += renderDashboardCharts(report);
-  html += renderDimensionAnalysisSection(summary, report);
+  const hasDetailedAnalysis=Object.values(summary.dimension_analyses||{}).some(
+    value=>typeof value==='string' && value.trim()
+  );
+  html += hasDetailedAnalysis?
+    renderDimensionAnalysisSection(summary, report):
+    renderLegacyShareholderEvidence(report);
   html += renderIndustryValuationLab(report);
 
   // Insert the TOC after report metadata but before the first research section.
