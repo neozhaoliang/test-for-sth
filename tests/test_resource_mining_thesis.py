@@ -144,3 +144,36 @@ async def test_repair_rejects_leaking_original_author(monkeypatch):
     monkeypatch.setattr("backtest.llm_client.call_json_ex", fake_llm)
     draft = {"thesis_summary": "维持原判断", "stance": "bearish"}
     assert await repair_resource_summary(draft, report()) == draft
+
+
+@pytest.mark.asyncio
+async def test_resource_repair_accepts_long_explanatory_prose_above_old_500_char_limit(monkeypatch):
+    paragraphs = [
+        "我认可紫金矿业的矿山经营能力，但这个价格对应的买入赔率不够有吸引力。"
+        "公司质量和买入价格是两个问题，利润增长也需要结合所处的金铜周期评价。",
+        "黄金与铜属于美元报价的大宗商品，美元实际利率和流动性变化可能影响价格。"
+        "人民币升值还会改变美元价格折成人民币后的金额，但美元标价上涨可能抵消这一影响。"
+        "因此，不能简单把美国利率变动直接等同于公司的净利润变动。",
+        "在前期股价高位时，股东户数明显增加，随后回撤仍然维持较高水平。"
+        "这提示市场承接者可能更加分散，但不是机构已经集中派发的证据。",
+        "矿山扩张需要资本开支，现金流会先流出，回报可能经过多年才体现。"
+        "还需要观察新矿山的投产时间、成本和投资回报率能否经受商品下跌。",
+        "创始人的接班与团队独立经营能力尚待正式资料验证，这是需要持续跟踪的风险假设。"
+        "如果新增项目的现金流兑现改善，并且估值留出更大的安全边际，我会重新评价。",
+    ]
+    long_form = "\\n\\n".join(paragraphs) + "\\n\\n" + "\\n\\n".join(paragraphs)
+    assert len(long_form) > 500
+
+    async def fake_llm(prompt, **kwargs):
+        assert "自然段" in prompt
+        assert kwargs["max_tokens"] >= 2500
+        return {"thesis_summary": long_form}, "end_turn"
+
+    monkeypatch.setattr("backtest.llm_client.call_json_ex", fake_llm)
+    previous = {"thesis_summary": "财务不错，但赔率一般。", "stance": "neutral",
+                "company_quality_stance": "bullish", "current_odds_stance": "neutral"}
+    repaired = await repair_resource_summary(previous, report())
+    assert repaired["thesis_summary"] == long_form
+    assert repaired["stance"] == "neutral"
+    assert repaired["company_quality_stance"] == "bullish"
+    assert repaired["current_odds_stance"] == "neutral"
