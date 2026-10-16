@@ -2706,12 +2706,16 @@ function renderInvestmentStyleStrip(model) {
   if((style.sector_rotation||{}).status==='observed') {
     return renderSectorRotationStyleStrip(style);
   }
-  if(style.sector_rotation && style.sector_rotation.status==='insufficient_data') {
-    return '<div class="style-insight"><h4>当前市场在交易什么？</h4>'+
-      '<p class="section-caption">多行业同期行情覆盖不足，本次不能可靠判断市场的主导风格。'+
-      '不以固定的红利与科技指数替代全市场行业比较。</p></div>';
+  if(style.sector_rotation && style.sector_rotation.status!=='observed') {
+    const partial=renderLimitedMarketStyleStrip(style);
+    if(partial)return partial;
   }
-  if(style.status!=='observed')return '';
+  if(style.status!=='observed') {
+    if(!style.sector_rotation)return '';
+    return '<div class="style-insight"><h4>当前市场在交易什么？</h4>'+
+      '<p class="section-caption">行业和指数数据源本次均未返回有日期的可比涨跌幅。'+
+      '无法量化这段期间的市场风格，不代表市场没有出现轮动。</p></div>';
+  }
   const events=style.dated_market_events || [];
   const redObserved=(style.dividend_index_return_pct===null ||
     style.dividend_index_return_pct===undefined)?null:Number(style.dividend_index_return_pct);
