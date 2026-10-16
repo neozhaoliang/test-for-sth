@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from datetime import date
 from typing import Any, Iterable, Mapping, Optional
+from analysis.verified_governance_events import verified_transition
 
 # Require both an office and an action to reduce unrelated AGM/board notices.
 _OFFICE = re.compile(r"董事长|总经理|总裁|首席执行官|CEO|实际控制人|核心管理人员|高管")
@@ -36,6 +37,7 @@ def build_succession_evidence(
     primary_evidence: Optional[Iterable[Mapping[str, Any]]] = None,
     executive_profile: Optional[Mapping[str, Any]] = None,
     as_of: Optional[date] = None,
+    stock_code: str = "",
 ) -> dict:
     """Surface independently verifiable succession signals, not assumed defects."""
     cutoff = as_of or date.today()
@@ -69,12 +71,21 @@ def build_succession_evidence(
         })
     relevant.sort(key=lambda x: x["published_at"], reverse=True)
 
+    transition = verified_transition(stock_code, as_of=cutoff)
     person = (executive_profile or {}).get("chairman")
+    verified_chair = (transition or {}).get("chairman_appointed")
+    from_profile = str(person).strip()[:70] if person else None
+    result_status = ("confirmed_transition" if (transition or {}).get("status") == "completed"
+                     else "proposed_transition" if transition else
+                     "related_disclosures" if relevant else "no_verified_transition_details")
     return {
         "as_of": cutoff.isoformat(),
-        "status": "related_disclosures" if relevant else "no_verified_transition_details",
-        "current_chairman_name": str(person).strip()[:70] if person else None,
-        "founder_identity_verified": False,
+        "status": result_status,
+        "verified_transition": transition,
+        "current_chairman_name": verified_chair or from_profile,
+        "f10_chairman_name": from_profile,
+        "chairman_source_conflict": bool(verified_chair and from_profile and verified_chair != from_profile),
+        "founder_identity_verified": bool(transition),
         "successor_competence_verified": False,
         "related_announcements": relevant[:8],
         "disclosure_count_in_available_evidence": len(relevant),
@@ -97,6 +108,39 @@ def succession_prompt_block(data: Optional[Mapping[str, Any]]) -> str:
     """Mandatory but bounded evidence digest for the management dimension."""
     if not data:
         return "创始人依赖与管理层传承：本次未取得可核验的接班证据，暂不能判断。"
+    transition = data.get("verified_transition") or {}
+    if transition.get("status") == "completed":
+        rows = [
+            "创始人依赖与管理层传承：正式换届已完成，不属于资料缺口。",
+            f"{transition.get('effective_at')}：创始人{transition.get('founder')}卸任董事长、执行董事；"
+            f"{transition.get('chairman_appointed')}当选董事长，{transition.get('president_appointed')}获聘总裁。",
+            "卸任创始人继续担任终身荣誉董事长、高级顾问，保留一定战略指导作用，"
+            "但不再担任公司法定董事长。",
+            f"原始公告日期={transition.get('published_at')}；官方文件={transition.get('source_url')}",
+            "换届事实已经证实。新团队能否独立延续完整金铜周期的资本配置、矿山建设、"
+            "矿权获取能力，仍需未来经营记录检验，不能预设成功或失败。",
+        ]
+        if transition.get("corroborating_source_url"):
+            rows.append(
+                f"复核公告={transition.get('corroborating_source_url')} "
+                f"（发布{transition.get('corroborating_published_at')}）"
+            )
+        if data.get("chairman_source_conflict"):
+            rows.append(
+                f"旧F10董事长画像为{data.get('f10_chairman_name')}，"
+                f"与换届时官方选举结果不一致；不得沿用过期画像。"
+            )
+        rows.append(
+            "论述时必须区分已确认的人事交接和未来独立经营能力的不确定性，"
+            "禁止写接班安排或继任者身份资料暂缺。"
+        )
+        return "\n".join(rows)
+    if transition.get("status") == "proposed":
+        return (
+            "创始人依赖与管理层传承：截至该研究日仅有换届提议，不能当作已经生效。\n"
+            f"{transition.get('description')}\n"
+            f"官方文件={transition.get('source_url')}。不得预知后来的人事结果。"
+        )
     rows = [
         "创始人依赖与管理层传承（管理层评价必须讨论，不可因没有公告而宣称无风险）：",
         f"分析基准日：{data.get('as_of') or '未注明'}；"

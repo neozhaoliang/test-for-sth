@@ -288,6 +288,7 @@ def build_management_capital_record(
     executive_profile: Optional[Dict] = None,
     profitability_trend: Optional[Dict] = None,
     as_of: Optional[date] = None,
+    stock_code: str = "",
 ) -> Dict:
     """
     Build one evidence record used by both management-quality and shareholder-return analysis.
@@ -320,6 +321,7 @@ def build_management_capital_record(
         primary_evidence=primary_evidence,
         executive_profile=executive_profile,
         as_of=as_of,
+        stock_code=stock_code,
     )
 
     alignment = {
@@ -331,7 +333,30 @@ def build_management_capital_record(
         "chairman_education": executive_profile.get("chairman_education"),
     }
 
+    if succession.get("chairman_source_conflict"):
+        # Lagging F10 role-specific tenure/salary/shares cannot be assigned
+        # to the newly elected chairman. Keep an audit note and avoid falsely
+        # merging two different executives' biographies.
+        alignment = {
+            "chairman": succession.get("current_chairman_name"),
+            "joined_year": None,
+            "tenure_years": None,
+            "chairman_salary_wan": None,
+            "chairman_shares": None,
+            "chairman_education": None,
+            "f10_chairman_name": succession.get("f10_chairman_name"),
+            "chairman_verified_as_of": (
+                (succession.get("verified_transition") or {}).get("effective_at")
+            ),
+            "biography_pending": True,
+        }
+
     notes: List[str] = []
+    if succession.get("chairman_source_conflict"):
+        notes.append(
+            "F10高管画像与正式换届公告冲突；已按原始公告纠正董事长姓名，"
+            "未将前任董事长薪酬、持股与任期误记到继任者名下。"
+        )
     if not executive_profile:
         notes.append("高管任期/薪酬/持股资料暂缺，不能据此评价利益绑定。")
     if not primary_evidence:

@@ -177,3 +177,53 @@ async def test_resource_repair_accepts_long_explanatory_prose_above_old_500_char
     assert repaired["stance"] == "neutral"
     assert repaired["company_quality_stance"] == "bullish"
     assert repaired["current_odds_stance"] == "neutral"
+
+
+
+def test_old_private_founder_discussion_is_recalled_but_not_publicly_attributed():
+    from analysis.resource_mining_thesis import select_resource_succession_excerpts
+    from analysis.report_social import _retain_resource_monetary_sources
+
+    historical = excerpt(
+        "紫金矿业创始人陈景河退出董事长后，继任团队能否延续跨周期的矿权资本配置能力值得观察。",
+        "2026-01-09", author="买股票的老木匠",
+    )
+    unrelated = excerpt("另一家消费公司管理层交班", "2026-03-01")
+    future = excerpt("陈景河与紫金矿业交班", "2026-12-01")
+    assert select_resource_succession_excerpts(
+        [historical, unrelated, future], as_of="2026-10-16",
+    ) == [historical]
+    retained = _retain_resource_monetary_sources(
+        [], [historical, unrelated, future],
+        archetype="cyclical", industry_name="贵金属", stock_name="紫金矿业",
+    )
+    assert historical in retained
+    ctx = report(excerpts=[historical], with_pairs=False)
+    ctx.management_capital = {"succession": {
+        "verified_transition": {
+            "status": "completed", "effective_at": "2025-12-31",
+            "founder": "陈景河", "chairman_appointed": "邹来昌",
+            "president_appointed": "林泓富",
+            "source_url": "https://www1.hkexnews.hk/listedco/listconews/sehk/2025/1231/2025123102223.pdf",
+        },
+    }}
+    prompt = resource_miner_prompt_block(ctx)
+    assert "本地知识库确有该矿业公司创始人" in prompt
+    assert "邹来昌当选董事长" in prompt
+    assert "交接事实不是缺口" in prompt
+    assert "买股票的老木匠" not in prompt
+    assert "私人观点" not in prompt
+    assert "private.invalid" not in prompt
+    assert "private_source_id" not in prompt
+    omissions = resource_summary_omissions(
+        "我看好金铜长期供需；但股票现在并不便宜。"
+        "美元利率影响黄金，股东户数值得留意，"
+        "矿山资本开支有压力，接班后的管理层表现尚待观察。",
+        ctx,
+    )
+    assert "succession" in omissions  # Name and completed event omitted.
+    assert "succession" not in resource_summary_omissions(
+        "利率和美元对黄金定价重要，股东户数增加，扩产要考虑资本开支。"
+        "陈景河于2025年底卸任董事长，邹来昌接任，新团队长期经营仍需观察。",
+        ctx,
+    )
