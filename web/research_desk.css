@@ -372,6 +372,59 @@ body, input, select, textarea, button { font-family:inherit; }
 }
 
 
+/* Report identity, research mode/date and quote share a single compact row.
+   Narrow screens scroll this row horizontally rather than stacking it. */
+#result .report-header-inline {
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  flex-wrap:nowrap;
+  gap:10px 16px;
+  width:100%;
+  min-width:0;
+  overflow-x:auto;
+  scrollbar-width:thin;
+  padding:8px 2px;
+}
+#result .report-header-inline h2 {
+  margin:0;
+  flex:0 0 auto;
+  white-space:nowrap;
+  font-size:clamp(20px,2vw,28px);
+  line-height:1.35;
+  letter-spacing:-.035em;
+  color:#17324f;
+}
+#result .report-header-inline .report-mode-inline {
+  display:inline-flex;
+  align-items:center;
+  flex:0 0 auto;
+  white-space:nowrap;
+  padding:5px 10px;
+  margin:0;
+  font-size:12px;
+  line-height:1.5;
+  border-radius:8px;
+}
+#result .report-header-inline .report-meta-divider {margin:0 5px;color:#8ca0be;}
+#result .report-header-inline .report-quote-inline {
+  display:inline-flex;
+  align-items:center;
+  flex:0 0 auto;
+  gap:10px;
+  white-space:nowrap;
+  margin:0;
+  font-size:13px;
+  line-height:1.55;
+  font-weight:700;
+  color:#233c5c;
+  font-variant-numeric:tabular-nums;
+}
+#result .report-quote-item {padding-left:10px;border-left:1px solid #ccd9e9;}
+#result .report-quote-note {font-size:11px;color:#647792;font-weight:500;}
+#result .report-historical-note {font-size:12px;color:#76624a;margin:0 2px;}
+
+/* Single visible TOC heading: 研究目录, without an English eyebrow or count. */
 /* Linked article-style contents panel; limited to the 840px research column. */
 #result .report-toc {
   padding:22px 24px 20px;
@@ -399,7 +452,7 @@ body, input, select, textarea, button { font-family:inherit; }
   letter-spacing:.10em;
 }
 .report-toc h3 {
-  margin:3px 0 0;
+  margin:0;
   font-size:19px;
   font-weight:800;
   color:#233a5e;
