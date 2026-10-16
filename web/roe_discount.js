@@ -62,11 +62,13 @@ function renderRoeDiscountLab(model) {
     slide('discount','投资者要求收益率／贴现率',4,25,.25,10)+
     '<div class="lab-actions"><button type="button" id="roe-reset">恢复初始假设</button></div>'+
     '</div><div class="lab-result roe-discount-result" aria-live="polite" aria-atomic="false">'+
-    '<h4>ROE十年衰减 · 压力情景价格</h4>'+
-    '<div class="lab-price" id="roe-price">—</div>'+
+    '<h4>两种盈利持续性假设（不是公司合理价）</h4>'+
+    '<div class="roe-scenarios">'+
+    '<div class="roe-scenario"><span>10年后优势消退</span><strong class="lab-price" id="roe-price">—</strong></div>'+
+    '<div class="roe-scenario"><span>ROE长期维持</span><strong class="lab-price" id="roe-steady">—</strong></div></div>'+
     '<div class="lab-stat-grid">'+
     '<div><span>压力情景参数扰动</span><b id="roe-band">—</b></div>'+
-    '<div><span>ROE长期不降的理想化对照</span><b id="roe-steady">—</b></div>'+
+    '<div><span>末年隐含派息率</span><b id="roe-payout-end">—</b></div>'+
     '<div><span>隐含派息率</span><b id="roe-payout">—</b></div>'+
     '<div><span>10年末净资产终值占比</span><b id="roe-terminal">—</b></div></div>'+
     '<div class="lab-foot" id="roe-note">—</div></div></div>';
@@ -96,7 +98,7 @@ function activateRoeDiscountLab(model) {
     keys.forEach(k=>display(k+'-value',x[k].toFixed(2)+'%'));
     const main=roeDiscountCompute(m.book_per_share,x.roe,x.growth,x.discount);
     if(!main) {
-      ['price','band','steady','payout','terminal'].forEach(k=>display(k,'—'));
+      ['price','band','steady','payout','payout-end','terminal'].forEach(k=>display(k,'—'));
       display('note','参数不满足约束：增长率须≥0、低于ROE且至少比贴现率低0.5个百分点。');
       return;
     }
@@ -112,6 +114,7 @@ function activateRoeDiscountLab(model) {
     display('band',lo.toFixed(2)+'—'+hi.toFixed(2)+'元');
     display('steady',main.steady.toFixed(2)+'元/股');
     display('payout',main.payoutPct.toFixed(1)+'%');
+    display('payout-end',main.payoutFinalPct.toFixed(1)+'%');
     display('terminal',main.terminalPct==null?'—':main.terminalPct.toFixed(1)+'%');
     const notes=['10年压力情景：ROE从'+x.roe.toFixed(2)+'%逐年下降至'+
       x.discount.toFixed(2)+'%，此后超额ROE为0（不是ROE归零）；'+
