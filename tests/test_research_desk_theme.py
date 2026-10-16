@@ -126,3 +126,20 @@ def test_wechat_style_reading_column_applies_to_entire_page_without_wide_breakou
     assert "#result .lab-layout { grid-template-columns:minmax(0,1fr); }" in css
     assert "#result .lab-result { position:static; }" in css
     assert "@media(max-width:420px)" in css
+
+
+def test_report_toc_chapters_and_subsections_are_single_column():
+    """The TOC reads 01 → 02 → 03 vertically at all viewport widths."""
+    import re
+    css = (ROOT / "web" / "research_desk.css").read_text(encoding="utf-8")
+    for selector in (".report-toc .toc-chapters", ".report-toc .toc-subsections ol"):
+        matches = re.findall(re.escape(selector) + r"\s*\{([^}]*)\}", css)
+        assert matches, f"Missing selector {selector}"
+        assert all(
+            re.search(r"grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s*;", block)
+            for block in matches
+        ), f"{selector} must stay a single column"
+        assert not any("repeat(2" in block for block in matches)
+    # The existing ordered list and native anchor destinations are preserved.
+    js = (ROOT / "web" / "app.py").read_text(encoding="utf-8")
+    assert "'<ol class=\"toc-chapters\">'+chapters.map(entry).join('')+'</ol>'" in js
