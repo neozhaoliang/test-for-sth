@@ -205,7 +205,11 @@ assert.ok(legacyChipHtml.includes('同花顺F10'));
 assert.ok(legacyChipHtml.includes('F10参考股价'));
 assert.ok(legacyChipHtml.includes('不是独立行情接口核验的收盘价'));
 assert.ok(!legacyChipHtml.includes('已披露股东户数与对应统计截止日之前最近交易日的实际收盘价'));
-assert.ok(ctx.renderDashboardCharts(f10Legacy).includes('131.84'));
+assert.ok(!ctx.renderDashboardCharts(f10Legacy).includes('131.84'));
+ctx.renderResult(f10Legacy);
+assert.ok(nodes.result.innerHTML.includes('131.84'));
+assert.ok(nodes.result.innerHTML.includes('id="report-shareholder-evidence"'));
+assert.ok(!nodes.result.innerHTML.includes('id="report-dimension-chip_flow"'));
 // Historical replay must never backfill as-of charts from a live F10 webpage.
 const historicalChip=ctx.renderChipPositionChart(undefined,{
   ...f10Legacy,research_mode:'historical',
@@ -249,6 +253,92 @@ const whyEmpty=ctx.renderInvestmentStyleStrip({style_context:{
   causal_knowledge_status:'no_matching_distilled_knowledge',causal_drivers:[],
 }});
 assert.ok(whyEmpty.includes('背后的资金流向还缺少可靠证据'));
+
+
+// Each support panel must be INSIDE its own dimension, directly AFTER
+// its analysis prose. It must not also appear in the generic chart grid
+// or as a standalone trailing corporate-capital chapter.
+const orderlyKeys=['management','fundamentals','rd','chip_flow','price_position',
+ 'cycle_position','policy_geopolitics','retail_sentiment','shareholder_returns',
+ 'growth_elasticity','a_share_structure','risk_quality'];
+const orderedReport={
+ ...report,
+ summary:{stance:'neutral',thesis_summary:'公司优秀不等于价格便宜。',
+   dimension_scores:[],dimension_analyses:Object.fromEntries(
+     orderlyKeys.map(k=>[k,'TEXT_FOR_'+k.toUpperCase()+'_END']))},
+ chip_price_context:{price_holder_series:[
+   {period:'2025-12-31',holders:584983,price:34.47},
+   {period:'2026-03-31',holders:1252002,price:32.72},
+   {period:'2026-06-30',holders:1318365,price:25.14},
+ ]},
+ dividend_chart:[{year:'2025',dividend_per_10:4,buyback_per_10:1,
+    total_per_10:5,yield_pct:4}],
+ shareholder_capital_summary:{
+   completed_holder_sales:[{actor:'模拟大股东',disclosed_at:'2026-06-01',
+     shares:250000,average_sale_price_yuan:29,
+     source_url:'https://example.com/company_sale'}],
+   equity_issuances:[{disclosed_at:'2026-04-10',shares:100000,
+     document_title:'向特定对象发行股票结果公告',
+     source_url:'https://example.com/private_placement'}],
+   corporate_buybacks:[{status:'completed',disclosed_at:'2026-04-11',
+     actual_amount_yuan:10000000,source_url:'https://example.com/buyback'},
+     {status:'plan_only',disclosed_at:'2026-05-01',
+     actual_amount_yuan:1000000,source_url:'https://example.com/plan'}],
+ },
+};
+ctx.renderResult(orderedReport);
+const ordered=nodes.result.innerHTML;
+const stockPart=ordered.split('id="report-dimension-chip_flow"')[1]
+  .split('id="report-dimension-price_position"')[0];
+const returnPart=ordered.split('id="report-dimension-shareholder_returns"')[1]
+  .split('id="report-dimension-growth_elasticity"')[0];
+const overviewPart=ordered.split('id="report-charts"')[1]
+  .split('id="report-dimensions"')[0];
+assert.ok(stockPart.indexOf('TEXT_FOR_CHIP_FLOW_END') <
+  stockPart.indexOf('股东人数与同期股价走势'));
+assert.ok(stockPart.indexOf('股东人数与同期股价走势') <
+  stockPart.indexOf('aria-label="股东人数'));
+assert.ok(stockPart.includes('131.84'));
+assert.ok(stockPart.includes('25.14'));
+assert.ok(returnPart.indexOf('TEXT_FOR_SHAREHOLDER_RETURNS_END') <
+  returnPart.indexOf('历年分红与回购'));
+assert.ok(returnPart.includes('年度分红与回购柱状图'));
+assert.ok(returnPart.includes('回购、股东减持与股权融资公告记录'));
+assert.ok(returnPart.includes('模拟大股东'));
+assert.ok(returnPart.includes('250,000'));
+assert.ok(returnPart.includes('公司定向增发'));
+assert.ok(returnPart.includes('10,000,000 元'));
+assert.ok(returnPart.includes('待实施，实际回购规模暂缺'));
+assert.ok(returnPart.includes('https://example.com/company_sale'));
+assert.ok(returnPart.includes('https://example.com/private_placement'));
+assert.ok(returnPart.includes('https://example.com/buyback'));
+assert.ok(!overviewPart.includes('年度分红与回购柱状图'));
+assert.ok(!overviewPart.includes('股东人数（万户'));
+assert.ok(!overviewPart.includes('模拟大股东'));
+assert.equal((ordered.match(/aria-label="年度分红与回购柱状图"/g)||[]).length,1);
+assert.equal((ordered.match(/aria-label="股东人数（万户/g)||[]).length,1);
+assert.equal((ordered.match(/id="report-capital"/g)||[]).length,1);
+assert.ok(!ordered.includes('href="#report-capital"'));
+
+// Dividend-chart fallback must render the dated source rows adjacent to
+// shareholder-returns prose, without inventing payouts where none exist.
+const datedFallback={
+ ...orderedReport,dividend_chart:[],
+ dividend_history:[{announce_date:'2026-09-01',dividend_per_10_shares:1.4,
+   progress:'已实施'}],
+ shareholder_capital_summary:{},
+ buyback_history:[{announce_date:'2026-08-12',progress:'回购完成',
+   actual_amount:'3000000元'}],
+};
+ctx.renderResult(datedFallback);
+const fallbackReturns=nodes.result.innerHTML.split(
+  'id="report-dimension-shareholder_returns"')[1].split(
+  'id="report-dimension-growth_elasticity"')[0];
+assert.ok(fallbackReturns.includes('2026-09-01'));
+assert.ok(fallbackReturns.includes('每10股现金分红 1.4 元'));
+assert.ok(fallbackReturns.includes('2026-08-12'));
+assert.ok(fallbackReturns.includes('减持与定增：本次没有返回'));
+assert.ok(!fallbackReturns.includes('id="report-capital"'));
 
 const dividends=ctx.renderDividendChart([{year:'2025',dividend_per_10:4,
   buyback_per_10:1,total_per_10:5,yield_pct:4}]);
