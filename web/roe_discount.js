@@ -22,6 +22,7 @@ function roeDiscountCompute(book, roePct, growthPct, discountPct, horizon=10) {
      Math.abs(finite-(pvDividend+terminal))>1e-7*Math.max(1,Math.abs(finite)))
     return null;
   return {finite,steady,payoutPct:payout*100,
+    payoutFinalPct:(1-g/k)*100,residualPv:pvResidual,
     terminalPct:finite>0?100*terminal/finite:null};
 }
 
@@ -109,10 +110,14 @@ function activateRoeDiscountLab(model) {
     display('steady',main.steady.toFixed(2)+'元/股');
     display('payout',main.payoutPct.toFixed(1)+'%');
     display('terminal',main.terminalPct==null?'—':main.terminalPct.toFixed(1)+'%');
-    const notes=['主模型假设10年后超额ROE为0、PB=1。'];
+    const notes=['10年压力情景：ROE从'+x.roe.toFixed(2)+'%逐年下降至'+
+      x.discount.toFixed(2)+'%，此后超额ROE为0（不是ROE归零）；'+
+      '账面净资产'+Number(m.book_per_share).toFixed(2)+'元，十年超额盈利现值'+
+      main.residualPv.toFixed(2)+'元。',
+      '理想化对照要求初始ROE与增长率长期不变，不是预测。'];
     if(m.defaults.roe_pct==null)notes.push('ROE初值为示例，不是实测正常化ROE。');
     if(m.defaults.growth_pct==null)notes.push('增长率初值为零增长压力情景。');
-    notes.push('贴现率为用户可修改的要求收益率，不由股价回测得到。');
+    notes.push('权益按滑块增长，隐含派息随ROE变化；贴现率由用户设定，不是公司已核实资本成本。');
     if(estimates.length<27)notes.push('部分极端组合违反增长约束而被排除。');
     if(main.terminalPct>70)notes.push('期末净资产占比较高，结果对终值敏感。');
     display('note',notes.join(' '));
