@@ -225,6 +225,7 @@ async def _fetch_china_lpr(as_of: Optional[date] = None) -> Optional[Dict]:
 async def get_macro_rate_context(
     *,
     as_of: Optional[date] = None,
+    allow_verified_live_fallback: bool = False,
 ) -> Optional[Dict]:
     us, china = await asyncio.gather(
         _fetch_us_rates(as_of=as_of),
@@ -235,8 +236,8 @@ async def get_macro_rate_context(
     # limited bridge is intentionally live-only; archived historical research
     # cannot use a 2026 reference as if it had been published in the past.
     fallback_used = []
-    if as_of is None:
-        reference_us = us_reference()
+    if as_of is None or allow_verified_live_fallback:
+        reference_us = us_reference(today=as_of or _today())
         if reference_us:
             current = dict(us or {})
             urls = dict(current.get("source_urls") or {})
@@ -274,7 +275,7 @@ async def get_macro_rate_context(
                 fallback_used.extend(supplemented)
                 us = current
         if not china or not (china.get("freshness") or {}).get("fresh"):
-            reference_china = china_reference()
+            reference_china = china_reference(today=as_of or _today())
             if reference_china:
                 china = reference_china
                 fallback_used.append("China LPR")
