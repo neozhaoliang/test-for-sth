@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from datetime import date
 from typing import Any, Iterable, Mapping, Optional
+from analysis.verified_governance_events import verified_transition
 
 # Require both an office and an action to reduce unrelated AGM/board notices.
 _OFFICE = re.compile(r"董事长|总经理|总裁|首席执行官|CEO|实际控制人|核心管理人员|高管")
@@ -36,6 +37,7 @@ def build_succession_evidence(
     primary_evidence: Optional[Iterable[Mapping[str, Any]]] = None,
     executive_profile: Optional[Mapping[str, Any]] = None,
     as_of: Optional[date] = None,
+    stock_code: str = "",
 ) -> dict:
     """Surface independently verifiable succession signals, not assumed defects."""
     cutoff = as_of or date.today()
@@ -69,12 +71,21 @@ def build_succession_evidence(
         })
     relevant.sort(key=lambda x: x["published_at"], reverse=True)
 
+    transition = verified_transition(stock_code, as_of=cutoff)
     person = (executive_profile or {}).get("chairman")
+    verified_chair = (transition or {}).get("chairman_appointed")
+    from_profile = str(person).strip()[:70] if person else None
+    result_status = ("confirmed_transition" if (transition or {}).get("status") == "completed"
+                     else "proposed_transition" if transition else
+                     "related_disclosures" if relevant else "no_verified_transition_details")
     return {
         "as_of": cutoff.isoformat(),
-        "status": "related_disclosures" if relevant else "no_verified_transition_details",
-        "current_chairman_name": str(person).strip()[:70] if person else None,
-        "founder_identity_verified": False,
+        "status": result_status,
+        "verified_transition": transition,
+        "current_chairman_name": verified_chair or from_profile,
+        "f10_chairman_name": from_profile,
+        "chairman_source_conflict": bool(verified_chair and from_profile and verified_chair != from_profile),
+        "founder_identity_verified": bool(transition),
         "successor_competence_verified": False,
         "related_announcements": relevant[:8],
         "disclosure_count_in_available_evidence": len(relevant),
