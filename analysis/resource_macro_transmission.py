@@ -44,6 +44,7 @@ def build_resource_macro_transmission(*, stock_name="", archetype="",
     fed_lower = observation("fed_target_lower_pct")
     fed_upper = observation("fed_target_upper_pct")
     fed_change = observation("fed_target_change_180d_pp")
+    fed_last_decision = observation("fed_target_last_decision_change_pp")
     us10y = observation("us_10y_yield_pct")
     us10y_change = observation("us10y_change_30d_pp")
     fed_date = (observations.get("fed_target_upper_pct") or {}).get("as_of")
@@ -52,7 +53,11 @@ def build_resource_macro_transmission(*, stock_name="", archetype="",
     policy = (
         "近180天目标利率上限上调" if fed_change is not None and fed_change > .005
         else "近180天目标利率上限下调" if fed_change is not None and fed_change < -.005
-        else "近180天目标利率上限未变" if fed_change is not None else "政策利率方向未核实"
+        else "近180天目标利率上限未变" if fed_change is not None
+        else "最近一次已核验会议加息" if fed_last_decision is not None and fed_last_decision > .005
+        else "最近一次已核验会议降息" if fed_last_decision is not None and fed_last_decision < -.005
+        else "最近一次已核验会议维持利率" if fed_last_decision is not None
+        else "政策利率方向未核实"
     )
     # Classify *products*, not just an index. Zijin has both gold and copper.
     signature = str(stock_name or "") + " " + str(industry or "")
@@ -111,7 +116,8 @@ def build_resource_macro_transmission(*, stock_name="", archetype="",
         "fx": {"usd_cny": usd_cny, "change_30obs_pct": fx_change,
                "as_of": fx_date, "unit_price_scenario_pct": unhedged_unit_price_effect_pct},
         "fed": {"lower_pct":fed_lower, "upper_pct":fed_upper,
-                "change_180d_pp":fed_change, "as_of":fed_date,
+                "change_180d_pp":fed_change,
+                "last_decision_change_pp":fed_last_decision, "as_of":fed_date,
                 "direction":policy, "us10y_pct":us10y, "us10y_change_30d_pp":us10y_change},
         "currency_reading": currency_reading,
         "rate_reading": rate_reading,
