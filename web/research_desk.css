@@ -416,8 +416,7 @@ body, input, select, textarea, button { font-family:inherit; }
 }
 .report-toc .toc-chapters {
   display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
-  column-gap:11px;
+  grid-template-columns:minmax(0,1fr);
   row-gap:7px;
   counter-reset:toc-section;
 }
@@ -464,8 +463,8 @@ body, input, select, textarea, button { font-family:inherit; }
 }
 .report-toc .toc-subsections ol {
   display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:6px 10px;
+  grid-template-columns:minmax(0,1fr);
+  row-gap:6px;
   margin-top:11px;
 }
 .report-toc .toc-subsections li { min-width:0; }
