@@ -1783,78 +1783,84 @@ function renderDividendChart(data) {
 // 股东户数(柱,蓝) + 同期股价(线,橙) 走势图。两条序列都以首期=100 指数化、
 // 共用一条 y 轴 (避免双轴混标); 悬停显示原始数值, 图下附原始数据表。
 function renderHolderChart(series, priceSource='daily_close') {
-  const f10Reference = priceSource === 'ths_f10';
-  const n = series.length;
-  const W = 720, H = 250, padL = 52, padR = 16, padT = 30, padB = 36;
-  const plotW = W - padL - padR, plotH = H - padT - padB;
-  const first = series[0];
-  const idxHolders = series.map(p => (p.holders / first.holders) * 100);
-  const idxPrice = series.map(p => (p.price / first.price) * 100);
-  let min = Math.min(...idxHolders, ...idxPrice);
-  let max = Math.max(...idxHolders, ...idxPrice);
-  const spread = (max - min) * 0.15 || 5;
-  min -= spread; max += spread;
-  const yOf = v => padT + plotH - ((v - min) / (max - min)) * plotH;
-  const slot = plotW / n;
-  const barW = Math.min(slot * 0.5, 36);
-
-  let bars = '', linePts = '', dots = '';
-  series.forEach((p, i) => {
-    const xc = padL + slot * i + slot / 2;
-    const yTop = yOf(idxHolders[i]);
-    bars += '<rect class="holder-mark" x="' + (xc - barW / 2).toFixed(1) + '" y="' + yTop.toFixed(1) +
-      '" width="' + barW.toFixed(1) + '" height="' + (padT + plotH - yTop).toFixed(1) +
-      '" fill="#1a73e8" fill-opacity="0.85" data-tip="' +
-      escapeHtml(p.period) + ': 股东户数 ' + p.holders + ' 户 (指数 ' + idxHolders[i].toFixed(1) + ')"/>';
-    const py = yOf(idxPrice[i]);
-    linePts += (linePts ? ' ' : '') + xc.toFixed(1) + ',' + py.toFixed(1);
-    dots += '<circle class="holder-mark" cx="' + xc.toFixed(1) + '" cy="' + py.toFixed(1) +
-      '" r="4.5" fill="#d97706" stroke="#fff" stroke-width="1.5" data-tip="' +
-      escapeHtml(p.period) + ': 股价 ' + p.price + ' 元 (指数 ' + idxPrice[i].toFixed(1) + ')"/>';
-  });
-
-  let xLabels = '';
-  series.forEach((p, i) => {
-    if (n > 6 && i % 2 === 1) return;  // 标签过密时抽稀
-    const xc = padL + slot * i + slot / 2;
-    xLabels += '<text x="' + xc.toFixed(1) + '" y="' + (H - 12).toFixed(1) +
-      '" text-anchor="middle" font-size="11" fill="#444">' +
-      escapeHtml(String(p.period).slice(0, 10)) + '</text>';
-  });
-
-  let grid = '';
-  const steps = 4;
-  for (let s = 0; s <= steps; s++) {
-    const v = min + (max - min) * s / steps;
-    const y = yOf(v);
-    grid += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) +
-      '" stroke="' + (s === 0 || s === steps ? '#d9d9d9' : '#eeeeee') + '" stroke-width="1"/>';
-    grid += '<text x="' + (padL - 8) + '" y="' + (y + 4).toFixed(1) +
-      '" text-anchor="end" font-size="11" fill="#999">' + Math.round(v) + '</text>';
+  // Absolute values on independent axes. Never mix account counts and yuan
+  // on a shared normalized ('首期=100') scale; there is no detail table below.
+  const f10Reference=priceSource==='ths_f10';
+  const rows=(series||[]).filter(p=>numericOrNull(p.holders)>0 &&
+    numericOrNull(p.price)>0 && /^\d{4}-\d{2}-\d{2}$/.test(String(p.period||'')));
+  if(rows.length<2)return '';
+  const n=rows.length;
+  const W=740,H=295,L=62,R=57,T=55,B=47;
+  const plotW=W-L-R,plotH=H-T-B,baseline=T+plotH;
+  const holders=rows.map(p=>Number(p.holders)/10000);
+  const prices=rows.map(p=>Number(p.price));
+  const maximum=Math.max(...holders);
+  const unit=Math.pow(10,Math.floor(Math.log10(maximum/5)));
+  const step=[1,2,2.5,5,10].map(v=>v*unit).find(v=>v>=maximum/5)||unit*10;
+  const top=step*Math.ceil(maximum/step);
+  const minPrice=Math.min(...prices),maxPrice=Math.max(...prices);
+  const padding=Math.max((maxPrice-minPrice)*.15,maxPrice*.035,.05);
+  const priceLow=Math.max(0,minPrice-padding);
+  const priceHigh=maxPrice+padding;
+  const yH=v=>baseline-v/top*plotH;
+  const yP=v=>baseline-(v-priceLow)/(priceHigh-priceLow)*plotH;
+  const slot=plotW/n,barW=Math.min(slot*.54,42);
+  const center=i=>L+slot*(i+.5);
+  const fmtH=v=>v.toFixed(2);
+  const fmtP=v=>v.toFixed(2);
+  let grid='',bars='',linePts='',dots='',dateLabels='';
+  const ticks=Math.round(top/step);
+  for(let k=0;k<=ticks;k++){
+    const v=k*step,y=yH(v);
+    grid+='<line x1="'+L+'" y1="'+y.toFixed(1)+'" x2="'+(W-R)+'" y2="'+y.toFixed(1)+
+      '" stroke="#e3eaf2" stroke-width="1"/>'+
+      '<text x="'+(L-9)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" font-size="11" fill="#527399">'+
+      Number(v.toFixed(3))+'</text>';
   }
-
-  const legend = '<g font-size="12" fill="#444">' +
-    '<rect x="' + padL + '" y="10" width="12" height="12" fill="#1a73e8" fill-opacity="0.85"/>' +
-    '<text x="' + (padL + 18) + '" y="20">股东户数 (首期=100)</text>' +
-    '<circle cx="' + (padL + 168) + '" cy="16" r="4.5" fill="#d97706"/>' +
-    '<text x="' + (padL + 180) + '" y="20">股价 (首期=100)</text></g>';
-
-  const table = '<div class="chip-holder-table"><table><thead><tr><th>统计截止日</th>'+
-    '<th>股东户数</th><th>'+(f10Reference?'F10参考股价（元）':'收盘价（元）')+
-    '</th><th>'+(f10Reference?'数据来源':'价格日期')+'</th></tr></thead><tbody>'+
-    series.map(p=>'<tr><td>'+escapeHtml(String(p.period).slice(0,10))+
-      '</td><td>'+Number(p.holders).toLocaleString('zh-CN')+'</td><td>'+
-      Number(p.price).toFixed(2)+'</td><td>'+
-      (f10Reference?'同花顺F10':escapeHtml(String(p.price_date||p.period).slice(0,10)))+
-      '</td></tr>').join('')+'</tbody></table></div>';
-
-  return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" style="max-width:100%;"' +
-    ' role="img" aria-label="股东户数与同期股价走势 (首期=100 指数化)">' +
-    grid + bars +
-    '<polyline points="' + linePts + '" fill="none" stroke="#d97706" stroke-width="2"/>' +
-    dots + xLabels + legend + '</svg>' + table;
+  for(let k=0;k<=4;k++){
+    const v=priceLow+(priceHigh-priceLow)*k/4;
+    const y=baseline-k*plotH/4;
+    grid+='<text x="'+(W-R+8)+'" y="'+(y+4).toFixed(1)+'" font-size="11" fill="#bc6708">'+
+      fmtP(v)+'</text>';
+  }
+  rows.forEach((p,i)=>{
+    const h=holders[i],price=prices[i],x=center(i),bh=baseline-yH(h);
+    const date=String(p.period).slice(0,10);
+    const priceDate=String(p.price_date||p.period).slice(0,10);
+    const priceLabel=f10Reference?'F10参考股价':'同期收盘价';
+    const tip=date+'：股东户数 '+fmtH(h)+' 万户；'+priceLabel+' '+
+      fmtP(price)+' 元'+(f10Reference?'':'（价格日期 '+priceDate+'）');
+    bars+='<rect class="holder-mark" x="'+(x-barW/2).toFixed(1)+
+      '" y="'+yH(h).toFixed(1)+'" width="'+barW.toFixed(1)+'" height="'+
+      Math.max(0,bh).toFixed(1)+'" fill="#3987eb" fill-opacity=".87" '+
+      'data-tip="'+escapeHtml(tip)+'"/>';
+    // Show actual counts directly above bars; tooltip keeps dates + prices.
+    bars+='<text x="'+x.toFixed(1)+'" y="'+Math.max(T+12,yH(h)-7).toFixed(1)+
+      '" text-anchor="middle" font-size="10" font-weight="600" fill="#2464b5">'+
+      fmtH(h)+'</text>';
+    const yp=yP(price);
+    linePts+=(linePts?' ':'')+x.toFixed(1)+','+yp.toFixed(1);
+    dots+='<circle class="holder-mark" cx="'+x.toFixed(1)+'" cy="'+yp.toFixed(1)+
+      '" r="4.3" fill="#d97706" stroke="#fff" stroke-width="1.5" '+
+      'data-tip="'+escapeHtml(tip)+'"/>';
+    if(n<=9 || i===0 || i===n-1 || i%2===0){
+      dateLabels+='<text x="'+x.toFixed(1)+'" y="'+(H-19)+
+        '" text-anchor="middle" font-size="'+(n<=9?'9':'10')+'" fill="#66778d">'+
+        escapeHtml(n<=9?date:date.slice(0,7))+'</text>';
+    }
+  });
+  const legend='<g font-size="12" fill="#40516e">'+
+    '<rect x="'+L+'" y="14" width="12" height="12" fill="#3987eb"/>'+
+    '<text x="'+(L+18)+'" y="24">股东人数（万户）</text>'+
+    '<circle cx="'+(L+202)+'" cy="19.5" r="4.8" fill="#d97706"/>'+
+    '<text x="'+(L+214)+'" y="24">股价（元）</text></g>';
+  return '<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" '+
+    'aria-label="股东人数（万户，左轴）与同期股价（元，右轴）实际数值走势图">'+
+    legend+grid+bars+
+    '<polyline points="'+linePts+'" fill="none" stroke="#d97706" stroke-width="2.4" '+
+      'stroke-linejoin="round" stroke-linecap="round"/>'+
+    dots+dateLabels+'</svg>';
 }
-
 // 十二维度雷达图 (内联 SVG): 顶点=维度, 值=-10(利空)~+10(利多)。
 // 极性除颜色外还有位置(相对0环)与数字双重编码; 正红负绿沿用本界面方向色。
 function renderDimensionRadar(scores) {
@@ -2259,7 +2265,8 @@ function renderChipPositionChart(context, report) {
       '</div>'+
       '<p class="section-caption chip-data-note">区间 '+escapeHtml(first.period)+'—'+
       escapeHtml(last.period)+'。'+note+
-      ' 两项数据以首期=100展示，不插值；跨分红、送转或拆股时，价格需要复权后才能作严格比较。</p>'+
+      ' 左轴显示股东人数（万户），右轴显示股价（元），均为实际数值，不插值；'+
+      '跨分红、送转或拆股时，价格需要复权后才能作严格比较。</p>'+
       renderHolderChart(aligned,f10Reference?'ths_f10':'daily_close')+
       '<p class="section-caption">股东户数是账户数量，不等于散户人数或持股数量；'+
       '集中与分散只是结构线索，不能单凭这张图认定机构派发或吸筹。</p>';
