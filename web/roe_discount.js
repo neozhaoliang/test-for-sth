@@ -30,11 +30,14 @@ function renderRoeDiscountLab(model) {
   const m=((model||{}).investor_reference||{}).roe_discount_lab;
   if(!m) return '';
   const book=Number(m.book_per_share);
+  const cyclical=m.industry_archetype==='cyclical';
   let html='<div class="evidence-block" id="roe-discount-lab" style="margin-top:16px;">'+
     '<h4>ROE × 增长 × 贴现率 · 假设对照（非目标价）</h4>'+
     '<p class="section-caption">估值不使用历史股价或PE/PB拟合。'+
-    '主模型假设超额ROE在10年内逐步回归权益资本成本，期末PB=1；'+
-    '另以无限期稳定经营作为对照。以下价格是条件情景，并非精准买点。</p>';
+    '低值是假设ROE在10年内逐渐降到要求收益率，之后不再赚超额利润；'+
+    '另一数值是假设当前ROE长期不降。两者都是条件试算，不是合理价结论。</p>'+
+    (cyclical?'<p class="roe-cycle-caveat">矿业股还需要核验储量、矿石品位、金铜价格、'+
+    '开采成本、未来资本开支和中周期现金流；仅凭账面净资产及ROE不能估出合理股价。</p>':'');
   if(m.status==='missing_book'||!Number.isFinite(book)||book<=0)
     return html+'<p>缺少可靠每股净资产，不能生成价格。请先核实财报。</p></div>';
   const d=m.defaults||{}, a=m.roe_anchor||{};
@@ -118,6 +121,7 @@ function activateRoeDiscountLab(model) {
     if(m.defaults.roe_pct==null)notes.push('ROE初值为示例，不是实测正常化ROE。');
     if(m.defaults.growth_pct==null)notes.push('增长率初值为零增长压力情景。');
     notes.push('权益按滑块增长，隐含派息随ROE变化；贴现率由用户设定，不是公司已核实资本成本。');
+    if(cyclical)notes.push('这不是矿山资源NAV或中周期自由现金流估值。');
     if(estimates.length<27)notes.push('部分极端组合违反增长约束而被排除。');
     if(main.terminalPct>70)notes.push('期末净资产占比较高，结果对终值敏感。');
     display('note',notes.join(' '));
