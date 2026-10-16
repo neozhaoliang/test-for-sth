@@ -68,6 +68,14 @@ const headlineStrip=metricsHtml.split('class="metric-strip primary-kpis"')[1]
   ?.split('<div class="chart-grid"')[0] || '';
 assert.ok(headlineStrip.includes('role="group" aria-label="股票主要财务指标"'));
 assert.equal((headlineStrip.match(/class="metric"/g)||[]).length,4);
+const css=fs.readFileSync('web/research_desk.css','utf8');
+const cell=css.match(/#result \.dashboard-charts \.primary-kpis \.metric\s*\{([^}]+)\}/);
+const amount=css.match(/#result \.dashboard-charts \.primary-kpis \.metric strong\s*\{([^}]+)\}/);
+assert.ok(cell && amount, 'scoped compact metrics CSS is required');
+assert.ok(/padding\s*:\s*7px\s+10px/.test(cell[1]));
+assert.ok(/clamp\(15px,1\.7vw,18px\)/.test(amount[1]));
+assert.ok(css.includes('grid-template-columns:repeat(4,minmax(117px,1fr))'));
+assert.ok(css.includes('.stock-ytd-position-meta'));
 for(const fact of ['参考股价','30.40 元','2026-10-13','市净率 PB','3.98 倍',
                    '2026-10-09','F10 披露ROE','19.60%',
                    '现金流/归母净利','1.42 倍','2026-06-30']) {
@@ -334,6 +342,10 @@ report.valuation_model.style_context={
     source_url:'https://xueqiu.com/4780688814/410221558'}],
   investment_principles:[{id:'position_and_trading',principle:'高位关注回撤'}],
   stock_20d_pct:4.3,stock_20d_as_of:'2026-10-09',
+  stock_ytd_close_high:39.55,stock_ytd_close_high_date:'2026-02-27',
+  stock_ytd_latest_close:29.92,stock_ytd_close_as_of:'2026-10-09',
+  stock_ytd_close_drawdown_pct:-24.35,
+  stock_ytd_close_basis:'unadjusted_daily_close',
 };
 ctx.renderResult(report);
 const newer=nodes.result.innerHTML;
@@ -351,7 +363,10 @@ for(const forbidden of ['军师祭咖啡','齐鲁银行','腾讯','601665',
   'xueqiu.com/4780688814','跨公司例子']){
   assert.ok(!newer.includes(forbidden),'Raw KOL contents leaked: '+forbidden);
 }
-assert.ok(newer.includes('本股近20个交易日'));
+assert.ok(newer.includes('距年内最高收盘价'));
+assert.ok(newer.includes('24.35%'));
+assert.ok(newer.includes('2026-02-27'));
+assert.ok(!newer.includes('本股近20个交易日'));
 assert.ok(!newer.includes('1366.03元'));
 report.realtime_quote={
   latest_price:775.29,change_pct:null,volume:null,date:'2026-10-09',
