@@ -130,8 +130,18 @@ async def _get_sector_series(*, as_of: Optional[date] = None) -> Dict[str, pd.Se
 
     results = await asyncio.gather(*(collect(n) for n in SECTOR_SAMPLE))
     found = dict(row for row in results if row)
-    # Avoid repeated network spikes when all backends fail; stay fail-closed.
-    _sector_cache[cache_key] = (time.time(), found)
+    # Retry quickly on a provider outage, rather than caching an empty board
+    # universe for six hours and leaving every report without sector context.
+    if found:
+        _sector_cache[cache_key] = (time.time(), found)
+    else:
+        logger.warning(
+            "[market_context] %d sector-board requests returned no usable history; "
+            "keeping index evidence and retrying sector provider on next report",
+            len(SECTOR_SAMPLE),
+        )
+    logger.info("[market_context] dated sector board coverage: %d/%d",
+                len(found), len(SECTOR_SAMPLE))
     return found
 
 
@@ -242,26 +252,48 @@ async def get_market_context(
             stock["hist_low_date"] = str(s.idxmin().date())
             stock["hist_start"] = str(s.index[0].date())
 
-    if not index_series and stock is None and rotation["status"] != "observed":
+    if not index_series and stock is None and not rotation.get("sectors"):
         return None
 
     indices = [_summary(s) | {"name": name} for name, s in index_series.items()]
-    # Style benchmarks can compete for attention with metals, healthcare, and
-    # other industries; none is mandatory. Same 20-trading-day close basis.
-    benchmarks = []
-    if rotation["status"] == "observed":
-        anchor = date.fromisoformat(rotation["as_of"])
-        for row in indices:
-            when = row.get("latest_date")
-            delta = row.get("d20_pct")
-            try:
-                diff = abs((anchor - date.fromisoformat(str(when))).days)
-            except ValueError:
+    # Keep independently verified index evidence even when *all* industry
+    # providers fail. Align to the latest available trading day and reject
+    # stale/misaligned observations, not just rows without a sector anchor.
+    candidates = []
+    for row in indices:
+        when, delta = row.get("latest_date"), row.get("d20_pct")
+        try:
+            day = date.fromisoformat(str(when))
+            pct = float(delta)
+            if not (day <= (as_of or date.today()) and
+                    0 <= ((as_of or date.today()) - day).days <= 7 and
+                    -100 <= pct < float("inf")):
                 continue
-            if delta is not None and diff <= 3:
-                benchmarks.append({
-                    "name": row["name"], "d20_pct": delta,
-                    "latest_date": when, "category": "style_index",
-                })
+        except (ValueError, TypeError, OverflowError):
+            continue
+        candidates.append({
+            "name": row["name"], "d20_pct": pct,
+            "previous_d20_pct": row.get("previous_d20_pct"),
+            "latest_date": when, "category": "style_index",
+        })
+    freshest = max((date.fromisoformat(r["latest_date"]) for r in candidates),
+                   default=None)
+    benchmarks = [
+        r for r in candidates if freshest and
+        (freshest - date.fromisoformat(r["latest_date"])).days <= 3
+    ]
+    # Do not compare close series separated by different return windows.
+    if rotation.get("as_of") and benchmarks:
+        sector_day = date.fromisoformat(rotation["as_of"])
+        benchmarks = [r for r in benchmarks if
+                      abs((date.fromisoformat(r["latest_date"]) - sector_day).days) <= 3]
     rotation["benchmarks"] = benchmarks
+    rotation["index_coverage"] = len(benchmarks)
+    rotation["evidence_tier"] = (
+        "multi_sector" if rotation["status"] == "observed"
+        else "partial_sector_with_indices" if rotation.get("sectors") and benchmarks
+        else "partial_sector_only" if rotation.get("sectors")
+        else "indices_only" if benchmarks
+        else "none"
+    )
     return {"indices": indices, "stock": stock, "sector_rotation": rotation}
