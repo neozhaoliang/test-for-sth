@@ -90,7 +90,7 @@ def _prose_layout(text: str) -> dict[str, int]:
         for item in sentences
     )
     packed_paras = sum(
-        len(para) >= 340 and (
+        len(para) >= 230 and (
             len(_numbers(para)) >= 8 or
             para.count("；") + para.count(";") >= 3
         )
