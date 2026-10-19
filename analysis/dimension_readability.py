@@ -36,7 +36,7 @@ def _max_sentence_numbers(text: str) -> int:
     """Peak number of financial figures crammed into one sentence."""
     return max(
         (len(_numbers(sentence)) for sentence in
-         re.split(r"[。！？\\n]+", str(text or ""))),
+         re.split(r"[。！？\n]+", str(text or ""))),
         default=0,
     )
 
