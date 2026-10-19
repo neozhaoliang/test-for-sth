@@ -107,7 +107,7 @@ def _prose_layout(text: str) -> dict[str, int]:
 # actual reason for the stance. These are factual themes, NOT stock verdicts.
 _MATERIAL_THEMES = {
     "cash_collection": (
-        re.compile(r"经营(?:活动)?现金流|现金流[/／]净利润|现金回款|回款不足"),
+        re.compile(r"经营(?:活动)?现金(?:流)?|现金流[/／]净利润|现金回款|回款不足|利润[^。]{0,18}变成现金"),
         re.compile(r"现金流|回款|现金收"),
     ),
     "foreign_policy": (
@@ -132,7 +132,7 @@ _MATERIAL_THEMES = {
         ),
     ),
     "insider_sale": (
-        re.compile(r"(?:实控人|大股东|高管|董事长).{0,8}减持"),
+        re.compile(r"(?:实控人|大股东|控股股东|高管|董事长|常务副总裁).{0,48}减持"),
         re.compile(r"减持|卖出"),
     ),
 }
