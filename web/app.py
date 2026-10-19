@@ -2435,7 +2435,38 @@ function renderShareholderReturnEvidence(report) {
   return html+'</div>';
 }
 
-function renderDimensionAnalysisSection(summary, report) {
+function renderThesisWithInlineChipEvidence(thesis, report) {
+  const source=String(thesis||'').trim();
+  if(!source)return {html:'',chipEvidenceInserted:false};
+  let paragraphs=source.split(/\n\s*\n/).map(p=>p.trim()).filter(Boolean);
+  // Some cached reports use single newlines rather than blank-line paragraph
+  // separators. Preserve their intended paragraph structure as well.
+  if(paragraphs.length===1 && source.includes('\n'))
+    paragraphs=source.split(/\n+/).map(p=>p.trim()).filter(Boolean);
+
+  // Prefer the paragraph with actual holder-count/account evidence. Only use
+  // a general "筹码" paragraph if the thesis has no explicit holder reference.
+  let chipIndex=paragraphs.findIndex(p=>/(股东户数|股东人数|股东账户|持股账户|账户数)/.test(p));
+  if(chipIndex<0)chipIndex=paragraphs.findIndex(p=>/(筹码结构|筹码分散|筹码集中|筹码)/.test(p));
+  if(chipIndex<0){
+    return {html:'<p class="verdict-summary">'+escapeHtml(source).replace(/\n/g,'<br>')+'</p>',
+      chipEvidenceInserted:false};
+  }
+
+  let html='';
+  paragraphs.forEach((paragraph,index)=>{
+    html+='<p class="verdict-summary">'+escapeHtml(paragraph).replace(/\n/g,'<br>')+'</p>';
+    if(index===chipIndex){
+      html+='<div class="analysis-inline-evidence chip-analysis-evidence thesis-chip-evidence">'+
+        '<h5>股东人数与同期股价走势</h5>'+
+        renderChipPositionChart((report||{}).chip_price_context,report)+
+        '</div>';
+    }
+  });
+  return {html,chipEvidenceInserted:true};
+}
+
+function renderDimensionAnalysisSection(summary, report, includeChipEvidence = true) {
   const analyses = (summary || {}).dimension_analyses || {};
   const order = [
     ['management','管理层与接班传承'], ['fundamentals','经营基本面'],
@@ -2464,7 +2495,7 @@ function renderDimensionAnalysisSection(summary, report) {
       '<div class="analysis-prose">' +
       (detail ? escapeHtml(detail) : '<span class="section-caption">该项分析暂缺</span>') +
       '</div>';
-    if(key==='chip_flow'){
+    if(key==='chip_flow' && includeChipEvidence){
       html+='<div class="analysis-inline-evidence chip-analysis-evidence">'+
         '<h5>股东人数与同期股价走势</h5>'+
         renderChipPositionChart((report||{}).chip_price_context, report)+
@@ -2479,12 +2510,12 @@ function renderDimensionAnalysisSection(summary, report) {
 // Older cached reports may lack narrative dimensions altogether. In that
 // special case retain previously visible shareholder disclosures together in
 // a clearly evidence-only section, without inventing a model-generated review.
-function renderLegacyShareholderEvidence(report) {
+function renderLegacyShareholderEvidence(report, includeChipEvidence = true) {
   const src=report||{};
   const ledger=src.shareholder_capital_summary||{};
   const facts=(src.fundamentals||{}).facts||{};
-  const hasChip=!!src.chip_price_context ||
-    (Array.isArray(facts.holder_count_series) && facts.holder_count_series.length>=2);
+  const hasChip=includeChipEvidence && (!!src.chip_price_context ||
+    (Array.isArray(facts.holder_count_series) && facts.holder_count_series.length>=2));
   const hasReturns=(src.dividend_chart||[]).length ||
     (src.dividend_history||[]).length ||
     (src.buyback_history||[]).length ||
@@ -3302,8 +3333,11 @@ function renderResult(report) {
   // Never silently hide a long verdict merely because detailed analyses exist.
   // Old reports and new reports are both displayed in full.
   const thesis=String(summary.thesis_summary || '').trim();
+  let thesisChipEvidenceInserted=false;
   if (thesis) {
-    html += '<p class="verdict-summary">' + escapeHtml(thesis) + '</p>';
+    const renderedThesis=renderThesisWithInlineChipEvidence(thesis,report);
+    html += renderedThesis.html;
+    thesisChipEvidenceInserted=renderedThesis.chipEvidenceInserted;
   }
   html += '</section>';
 
@@ -3312,8 +3346,8 @@ function renderResult(report) {
     value=>typeof value==='string' && value.trim()
   );
   html += hasDetailedAnalysis?
-    renderDimensionAnalysisSection(summary, report):
-    renderLegacyShareholderEvidence(report);
+    renderDimensionAnalysisSection(summary, report, !thesisChipEvidenceInserted):
+    renderLegacyShareholderEvidence(report, !thesisChipEvidenceInserted);
   html += renderIndustryValuationLab(report);
 
   // Insert the TOC after report metadata but before the first research section.
