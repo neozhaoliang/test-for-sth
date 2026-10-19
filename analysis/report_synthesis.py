@@ -57,6 +57,7 @@ from analysis.resource_mining_thesis import (
 from analysis.macro_rates import get_international_policy_rates
 from analysis.resource_macro_transmission import build_resource_macro_transmission, resource_macro_prompt_block
 from analysis.thesis_readability import polish_thesis_prose
+from analysis.dimension_readability import polish_dimension_prose
 
 
 _PROCESS_TERM_RE = re.compile(r"六查|第[一二三四五六七八九十\d]+步|检查项\d*")
@@ -476,6 +477,14 @@ async def _generate_summary(
         # fact/stance review; detailed dimensions retain the complete audit.
         parsed = await polish_thesis_prose(parsed, inputs)
 
+    # Keep the reviewed research text for scoring; only the publicly displayed
+    # dimension prose gets a bounded, fact-preserving copy edit.
+    readable_analyses = (
+        await polish_dimension_prose(analyses, inputs)
+        if getattr(inputs, "research_mode", "") != "historical"
+        else dict(analyses or {})
+    )
+
     lynch_category = parsed.get("lynch_category", "")
     if lynch_category not in _VALID_LYNCH_CATEGORIES:
         lynch_category = "unclear"
@@ -495,7 +504,7 @@ async def _generate_summary(
         ),
         risk_notes=_scrub_process_terms(parsed.get("risk_notes", "") or "", inputs.stock_code),
         dimension_scores=dimension_scores,
-        dimension_analyses=analyses or None,
+        dimension_analyses=readable_analyses or None,
     )
     # Data validity is enforced in report validation. A deterministic screening
     # rule must NEVER overwrite the LLM's portfolio-manager conclusion.
