@@ -241,7 +241,9 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
     if (original_signals["scripted_tone"] and
             edited_signals["scripted_score"] >= original_signals["scripted_score"]):
         return False
-    if original and len(revised) < min(130, len(original) * .20):
+    # A 1000-character evidence dump may legitimately become a concise
+    # 120-character conclusion if its real reasons survive the edit.
+    if original and len(revised) < min(110, len(original) * .20):
         return False
     # Verified succession details remain in management analysis. A brief
     # reader thesis may omit them when a different issue drives the price.
