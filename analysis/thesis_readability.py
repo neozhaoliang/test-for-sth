@@ -110,6 +110,37 @@ def _preserves_material_themes(original: str, revised: str) -> bool:
     )
 
 
+
+def _quote_price(inputs: Any) -> Decimal | None:
+    """The actual as-of quote, not a historical holder observation."""
+    try:
+        raw = (getattr(inputs, "quote", None) or {}).get("latest_price")
+        price = Decimal(str(raw))
+        if price.is_finite() and price > 0:
+            return price
+    except (ValueError, TypeError, InvalidOperation):
+        pass
+    return None
+
+
+_LEAD_PRICE = re.compile(
+    r"^\\s*(?:现价|按|以|现在|当前)?\\s*"
+    r"(?P<price>\\d+(?:\\.\\d+)?)\\s*元"
+    r"(?=买|对应|的股票|这个价格|的市盈率|的市净率|，)"
+)
+
+
+def _lead_price_conflicts(text: str, inputs: Any) -> bool:
+    reference = _quote_price(inputs)
+    if reference is None:
+        return False
+    match = _LEAD_PRICE.search(str(text or ""))
+    if not match:
+        return False
+    stated = Decimal(match.group("price"))
+    return abs(stated - reference) > max(Decimal("0.15"), reference * Decimal("0.02"))
+
+
 def readability_signals(text: str) -> dict:
     """A trigger, not a language-quality score or automated investment stance."""
     raw = str(text or "")
@@ -122,14 +153,16 @@ def readability_signals(text: str) -> dict:
     )
     # Neither length nor paragraph count is a measure of human speech.
     overloaded = (
-        len(nums) >= 22
-        or (len(nums) >= 13 and long_dense >= 2)
-        or (len(raw) >= 800 and long_dense >= 3)
+        len(nums) >= 16
+        or (len(nums) >= 11 and long_dense >= 2)
+        or (len(raw) >= 760 and long_dense >= 2)
     )
+    verbose = len(raw) > 850
     tone_score = _scripted_score(raw)
     return {
-        "needs_edit": overloaded or tone_score >= 2,
+        "needs_edit": overloaded or verbose or tone_score >= 2,
         "numeric_overload": overloaded,
+        "too_long": verbose,
         "scripted_tone": tone_score >= 2,
         "scripted_score": tone_score,
         "numeric_mentions": len(nums),
@@ -156,21 +189,25 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
     if not isinstance(edited, str):
         return False
     revised = edited.strip()
-    if len(revised) < 110 or len(revised) > 2400:
+    if len(revised) < 110 or len(revised) > 850:
         return False
     if _PRIVATE.search(revised):
         return False
     if not _preserves_material_themes(original, revised):
         return False
-    old_nums, new_nums = _numbers(original), _numbers(revised)
-    if old_nums and not set(new_nums).issubset(set(old_nums)):
+    if _lead_price_conflicts(revised, inputs):
         return False
-    if not old_nums and new_nums:
+    old_nums, new_nums = _numbers(original), _numbers(revised)
+    allowed_nums = set(old_nums)
+    quote_price = _quote_price(inputs)
+    if quote_price is not None:
+        allowed_nums.add(quote_price)
+    if not set(new_nums).issubset(allowed_nums):
         return False
     original_signals = readability_signals(original)
     edited_signals = readability_signals(revised)
-    if (original_signals["numeric_overload"] and len(old_nums) >= 13
-            and len(new_nums) > min(9, int(len(old_nums) * .5))):
+    if (original_signals["numeric_overload"] and len(old_nums) >= 11
+            and len(new_nums) > min(8, int(len(old_nums) * .5))):
         return False
     if edited_signals["needs_edit"]:
         return False
@@ -179,9 +216,8 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
         return False
     if original and len(revised) < min(130, len(original) * .20):
         return False
-    for name in _verified_names(inputs):
-        if name not in revised:
-            return False
+    # Verified succession details remain in management analysis. A brief
+    # reader thesis may omit them when a different issue drives the price.
     # An otherwise well-written edit with no recognisable price or company
     # quality distinction is not a complete investment judgment.
     if not re.search(r"价格|价位|现价|买入|估值|赔率", revised):
@@ -195,50 +231,54 @@ async def polish_thesis_prose(parsed: dict, inputs: Any = None) -> dict:
     """Optional post-review, post-miner stage. Changes ONLY thesis_summary."""
     original = str(parsed.get("thesis_summary") or "")
     stats = readability_signals(original)
-    if not stats["needs_edit"]:
+    if not (stats["needs_edit"] or _lead_price_conflicts(original, inputs)):
         return parsed
     stances = {key:parsed.get(key) for key in (
         "stance", "company_quality_stance", "current_odds_stance"
     )}
     try:
         from backtest.llm_client import call_json_ex
+
+        quote_price = _quote_price(inputs)
+        quote_context = (
+            "本次已核实的行情基准价：" + str(quote_price) + "元。"
+            "原稿开头的价格如果与此冲突，必须舍弃原稿错价，"
+            "可使用此基准价，也可以不在正文报买入价格。"
+            if quote_price is not None else
+            "本次缺少可靠行情基准价，不要复述没有证实的具体当前买入价。"
+        )
         prompt = (
-            "把下面的股票判断改成正常投资讨论里的中文，保留原有投资判断。"
-            "不需要扮演老师、老朋友、股评人，不要追求‘像真人说话’。"
-            "这项工作是删掉不必要的表演和结构，不是换一种新的口语模板。\n"
-            "优先处理：\n"
-            "- 不必段段先抛判断，再给理由，再收一个漂亮的结尾。"
-            "不要每只股票都套上公司质量、现金流、股东、技术、筹码、条件反转的统一顺序。\n"
-            "- 不刻意制造‘我不怀疑……我怀疑的是……’‘这不是……而是……’"
-            "‘单看……合在一起……’这种对称句式；不用设问转场"
-            "‘什么会让我改变看法’，不靠‘我最不满意的是’之类句子表演个人态度。\n"
-            "- 哪里真正有问题，就把事实、具体动作和后果放在那里说。"
-            "一句话说得清就一句话，必要时讲几段；段落长短可以不齐。"
-            "不要用'公司基本面坚实但风险仍需关注''风险与机遇并存'的公关腔，"
-            "不要把'总负债增长'写成'资本结构阶段性承压'。"
-            "不要写固定数量的理由，不必强迫结尾交代未来条件。\n"
-            "- 以下仅是写法对照，不是本公司数据，不得照搬："
-            "生硬：'经营表现亮眼，但现金转换仍待改善，未来需关注回款质量。'"
-            "自然：'利润涨得快，钱却没收回来多少。先看应收和存货，才能知道增长占用了多少现金。'"
-            "不要把自然理解成每段都写一遍这个句式。\n"
-            "- 原文中的关键财务和公司事实不能变，特别不能删掉决定性的"
-            "客户、海外政策、机构集中、现金回款、内部人交易等主题。"
-            "保留左右结论的关键依据以及审慎限定；数字太密时删掉非决定性数字，"
-            "细节已经在专项章节。不要新增数字、金额、比例、日期、名称、职务、"
-            "事件、价格目标或假设。\n"
-            "- 保留股票当前可买与否的原立场，"
-            "不要替原文添加第一人称立场、感叹号、俏皮话、道德训诫、万能免责声明。"
-            "只许删除和改写冗余措辞，不得动结构化字段。\n"
-            "- 不要引用、模仿或泄露知识库中任何特定作者的原话、账号或视频。\n"
-            "只返回JSON对象，字段为thesis_summary。\n\n"
+            "这是一份投资研究初稿，不是可以直接给人看的结论。"
+            "请重新组织成正常人愿意读的投资评论，不要按原文逐句换同义词。\\n"
+            "先想明白：在这个价格下，这只股票最重要的一两件事是什么？"
+            "围绕这些事写清'发生了什么—为什么—影响买入决定'。"
+            "完整财务数据、宏观背景、筹码和接班等资料已经在详细章节，"
+            "这里不必逐个汇报，也不必将所有研究问题塞进结论。\\n"
+            "通常写200—500字，内容复杂可以略长，但必须明显短于原稿；"
+            "不规定段落数或顺序，不要列清单。最多选约三到六个真正关键的数字，"
+            "数字后面要解释意思。删掉非关键项目名称、重复百分比和研究术语。"
+            "千万别写'正常化盈利收益率''分母造出来的便宜''能力连续性风险'"
+            "'原始未复权同步性观察''资料缺口尚待验证'这类生硬说法。"
+            "对没有核实的风险，可以一句话提醒，别铺开整个核验过程。\\n"
+            "语气像认真讨论股票，不演投资大师，不用'我最担心的是'、"
+            "'这不是而是'之类作秀句，也不用'公司表现亮眼但风险仍存'、"
+            "'整体来看'、'后续需要关注'等空话。"
+            "可以直说这只股票值不值得现在买及原因；不强行说正反两面。\\n"
+            "原稿的总体看多/看空/中性立场不可变。重要的现金回款、客户、"
+            "基金抱团、地缘政策等关键问题如在原稿里明确成立，不能被删没。"
+            "允许删掉非决定性的事实和全部非关键数字；不允许新增任何未经确认的"
+            "人名、百分比、日期、事件或资金流动。不能照搬知识库作者的说法。\\n"
+            + quote_context + "\\n"
             "不可修改的立场字段：" + str(stances) +
-            "\n待修改的原文：\n" + original
+            "\\n原始研究记录：\\n" + original +
+            "\\n只输出包含thesis_summary字符串的JSON对象。"
         )
         result, _ = await call_json_ex(
-            prompt, max_tokens=2400,
+            prompt, max_tokens=2200,
             repair_requirements=(
-                "只能输出包含thesis_summary的JSON对象；原立场、数字、人物、日期与事实不可更改。"
-                "不得使用刻意的对仗、反问、扮演式第一人称和同质化段落模板，也不可引用知识库作者。"
+                "只能输出包含thesis_summary的JSON对象，字数宜精简。"
+                "不得编造数字或未核实事实，可删无关细节并使用提供的已核实行情基准价。"
+                "不能更改总体投资立场，不得套话、模仿知识库作者。"
             ),
         )
         new_text = result.get("thesis_summary") if isinstance(result, Mapping) else None
