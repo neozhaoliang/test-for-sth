@@ -635,7 +635,9 @@ _INDEX_HTML = """<!DOCTYPE html>
   .verdict-summary { margin:16px 0 0; color:#344762; line-height:1.85; font-size:15px; white-space:pre-wrap; overflow-wrap:anywhere; }
 
   /* Charts in the verdict are evidence summaries, never new model estimates. */
-  .verdict-figures { margin:18px 0 22px; }
+  .verdict-figures { margin:12px 0 22px; }
+  .verdict-summary + .inline-verdict-figures { margin-top:12px; }
+  .inline-verdict-figures .verdict-figure { background:#fafdff; }
   .verdict-figures-title { font-weight:750; color:#2c3e58; font-size:15px; margin:0 0 4px; }
   .verdict-figures-note { font-size:12px; color:var(--muted); margin:0 0 12px; }
   .verdict-figure-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
@@ -2600,18 +2602,81 @@ function collectVerdictFigures(report) {
   }
   return figures;
 }
-function renderVerdictFigures(report) {
+// Match each factual chart to the paragraph that actually discusses it.
+// Figures are grounded in report fields; only their placement uses prose.
+const VERDICT_FIGURE_PARAGRAPH_RULES = {
+  cash: [
+    [/(?:经营(?:活动)?现金流|经营现金|现金流.{0,12}净利润|净利润.{0,15}现金流|利润.{0,12}现金流|利润.{0,12}变成现金|现金回款)/, 10],
+    [/(?:现金回笼|现金转换|回款情况|现金流质量)/, 8],
+  ],
+  valuation: [
+    [/(?:市盈率|市净率|PE.{0,12}PB|PB.{0,12}PE|估值.{0,10}分位|估值.{0,10}高位|估值.{0,10}低位|历史估值|估值水平)/i, 10],
+    [/(?:估值.{0,10}贵|当前估值|估值.{0,10}便宜|PE\b|PB\b)/i, 7],
+  ],
+  dividends: [
+    [/(?:现金分红|每股分红|年度分红|历年分红|股息率|派息|股息|红利|分红)/, 10],
+    [/股东回报/, 6],
+  ],
+  debt: [
+    [/(?:资产负债率|负债率|有息负债|净负债|偿债压力|财务杠杆)/, 10],
+    [/(?:债务负担|资产负债表)/, 6],
+  ],
+  customers: [
+    [/(?:前五大客户|客户集中度|客户营收占比|海外收入占比|境外收入占比|海外营收|境外营收)/, 11],
+    [/(?:客户结构|收入结构|客户占比|海外客户|主要客户|客户依赖)/, 7],
+  ],
+  earnings_power: [
+    [/(?:历史EPS|历史盈利.{0,15}PE|历史PE.{0,15}盈利|盈利.{0,12}情景|历史.{0,8}条件价|历史参照价格|历史.{0,8}参考价格)/i, 12],
+    [/(?:盈利能力压力|不同盈利.{0,8}价格|盈利.{0,8}估值情景)/, 9],
+  ],
+  price_refs: [
+    [/(?:历史PB.{0,12}(?:中位|参考|中枢)|PB.{0,10}(?:历史中位|参考价|中枢)|市净率.{0,10}(?:历史中位|中枢)|历史市净率.{0,8}中位)/i, 12],
+    [/(?:PB估值参考价|资产估值参考价|PB回到.{0,8}中位)/i, 10],
+  ],
+};
+
+function scoreVerdictFigureParagraph(figure, paragraph) {
+  const rules=VERDICT_FIGURE_PARAGRAPH_RULES[figure.id]||[];
+  let best=0;
+  for(const [pattern,score] of rules)
+    if(pattern.test(paragraph))best=Math.max(best,score);
+  return best;
+}
+
+function assignVerdictFiguresToParagraphs(paragraphs, report) {
+  const slots=paragraphs.map(()=>[]);
   const figures=collectVerdictFigures(report);
+  const candidates=[];
+  figures.forEach((figure,figureIndex)=>{
+    paragraphs.forEach((paragraph,paragraphIndex)=>{
+      const score=scoreVerdictFigureParagraph(figure,paragraph);
+      if(score>=6)candidates.push({figure,figureIndex,paragraphIndex,score});
+    });
+  });
+  // Assign globally: a passing mention in paragraph one must not steal a
+  // chart from a later paragraph about that precise financial issue.
+  candidates.sort((a,b)=>b.score-a.score||
+    a.paragraphIndex-b.paragraphIndex||a.figureIndex-b.figureIndex);
+  const used=new Set();
+  for(const candidate of candidates){
+    if(used.has(candidate.figure.id) ||
+       slots[candidate.paragraphIndex].length>=2)continue;
+    used.add(candidate.figure.id);
+    slots[candidate.paragraphIndex].push(candidate.figure);
+  }
+  for(const slot of slots){
+    slot.sort((a,b)=>figures.findIndex(v=>v.id===a.id)-
+      figures.findIndex(v=>v.id===b.id));
+  }
+  return slots;
+}
+
+function renderVerdictFigureGroup(figures) {
   if(!figures.length)return '';
-  const text=String(((report.summary||{}).thesis_summary)||'');
-  const ranked=figures.map((item,index)=>({
-    ...item,rank:item.match.test(text)?1:0,index,
-  })).sort((a,b)=>b.rank-a.rank||a.index-b.index).slice(0,7);
-  return '<div class="verdict-figures" role="group" aria-label="投资结论相关数据图表">'+
-    '<p class="verdict-figures-title">先看关键数字</p>'+
-    '<p class="verdict-figures-note">图表使用本报告已返回的财务和估值数据；不从生成的文字中猜数。'
-      +'图表下方标明各自期间，不同期间的数据不能直接比较。</p>'+
-    '<div class="verdict-figure-grid">'+ranked.map(x=>x.html).join('')+'</div></div>';
+  return '<div class="verdict-figures inline-verdict-figures" role="group" '+
+    'aria-label="上段文字对应的财务与估值图表">'+
+    '<div class="verdict-figure-grid">'+
+    figures.map(figure=>figure.html).join('')+'</div></div>';
 }
 
 // Keep each piece of supporting evidence adjacent to the discussion it
@@ -2663,14 +2728,13 @@ function renderThesisWithInlineChipEvidence(thesis, report) {
   if(paragraphs.length===1 && source.includes('\\n'))
     paragraphs=source.split(/\\n+/).map(p=>p.trim()).filter(Boolean);
 
+  // Keep figures adjacent to the paragraph they support, not all up front.
+  const figureSlots=assignVerdictFiguresToParagraphs(paragraphs,report);
+  
   // Prefer the paragraph with actual holder-count/account evidence. Only use
   // a general "筹码" paragraph if the thesis has no explicit holder reference.
   let chipIndex=paragraphs.findIndex(p=>/(股东户数|股东人数|股东账户|持股账户|账户数)/.test(p));
   if(chipIndex<0)chipIndex=paragraphs.findIndex(p=>/(筹码结构|筹码分散|筹码集中|筹码)/.test(p));
-  if(chipIndex<0){
-    return {html:'<p class="verdict-summary">'+escapeHtml(source).replace(/\\n/g,'<br>')+'</p>',
-      chipEvidenceInserted:false};
-  }
 
   let html='';
   paragraphs.forEach((paragraph,index)=>{
@@ -2681,8 +2745,9 @@ function renderThesisWithInlineChipEvidence(thesis, report) {
         renderChipPositionChart((report||{}).chip_price_context,report)+
         '</div>';
     }
+    html+=renderVerdictFigureGroup(figureSlots[index]);
   });
-  return {html,chipEvidenceInserted:true};
+  return {html,chipEvidenceInserted:chipIndex>=0};
 }
 
 function renderDimensionAnalysisSection(summary, report, includeChipEvidence = true) {
@@ -3546,7 +3611,6 @@ function renderResult(report) {
     html += '<span class="verdict-industry">' + escapeHtml(profile.industry) + '</span>';
   }
   html += '</div>';
-  html += renderVerdictFigures(report);
   // The investment thesis is authored by the model. Screening indicators
   // remain available to the research logic, not as a programmatic verdict.
   // The thesis is a reader-facing, potentially multi-paragraph explanation.
