@@ -634,6 +634,35 @@ _INDEX_HTML = """<!DOCTYPE html>
   .verdict-industry { color:var(--muted); font-size:13px; }
   .verdict-summary { margin:16px 0 0; color:#344762; line-height:1.85; font-size:15px; white-space:pre-wrap; overflow-wrap:anywhere; }
 
+  /* Charts in the verdict are evidence summaries, never new model estimates. */
+  .verdict-figures { margin:18px 0 22px; }
+  .verdict-figures-title { font-weight:750; color:#2c3e58; font-size:15px; margin:0 0 4px; }
+  .verdict-figures-note { font-size:12px; color:var(--muted); margin:0 0 12px; }
+  .verdict-figure-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .verdict-figure { padding:16px 17px 13px; background:#fff; border:1px solid var(--line);
+    border-radius:13px; min-width:0; }
+  .verdict-figure h4 { margin:0 0 3px; font-size:14px; font-weight:750; }
+  .verdict-figure .figure-period { margin:0 0 12px; font-size:11px; color:var(--muted); line-height:1.55; }
+  .verdict-figure .figure-foot { margin:12px 0 0; font-size:11px; line-height:1.65; color:#637188; }
+  .verdict-bars { display:flex; flex-direction:column; gap:12px; }
+  .verdict-bar-head { display:flex; justify-content:space-between; gap:8px; align-items:baseline;
+    font-size:12px; margin-bottom:4px; }
+  .verdict-bar-head b { font-size:15px; font-variant-numeric:tabular-nums; }
+  .verdict-track { height:12px; background:#e8edf6; border-radius:7px; overflow:hidden; }
+  .verdict-track > span { display:block; height:100%; border-radius:7px; min-width:1px; }
+  .verdict-yearbars { display:flex; justify-content:space-around; align-items:flex-end; gap:8px;
+    height:135px; border-bottom:1px solid #dfe5ef; margin-top:9px; }
+  .verdict-yearcol { flex:1; min-width:0; max-width:74px; display:flex; flex-direction:column;
+    align-items:center; justify-content:flex-end; height:100%; font-size:11px; color:var(--muted); }
+  .verdict-yearcol b { font-size:11px; font-variant-numeric:tabular-nums; color:#334764; }
+  .verdict-yearcol .stick { display:block; width:55%; min-width:13px; max-width:35px;
+    background:#5266c9; border-radius:4px 4px 0 0; }
+  .verdict-yearcol .year { font-size:11px; margin-top:5px; white-space:nowrap; }
+  .verdict-rail-marker { display:flex; justify-content:space-between; font-size:10px; color:#8090a9; margin-top:2px; }
+  @media(max-width:730px){.verdict-figure-grid{grid-template-columns:1fr;}
+    .verdict-figure{padding:14px;} }
+
+
   .dashboard-charts h3, .valuation-lab h3 { margin:0 0 5px; font-size:21px; }
   .section-caption { font-size:12px; color:var(--muted); margin:0 0 16px; }
   .metric-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:0; }
@@ -2395,6 +2424,196 @@ function renderIssuerCapitalSection(report) {
   return html;
 }
 
+
+// Figures for the investment verdict use ONLY source-backed report fields.
+// They work with existing cached reports, and never extract arbitrary values
+// from LLM-authored prose or fabricate missing observations.
+function verdictNumber(v) {
+  const n=numericOrNull(v);
+  return n!==null && Number.isFinite(n)?n:null;
+}
+function verdictFixed(v, dp=2) {
+  return Number(v).toFixed(dp);
+}
+function verdictFigure(title, period, body, foot) {
+  return '<section class="verdict-figure"><h4>'+escapeHtml(title)+'</h4>'+
+    '<p class="figure-period">'+escapeHtml(period)+'</p>'+
+    body+(foot?'<p class="figure-foot">'+escapeHtml(foot)+'</p>':'')+'</section>';
+}
+function verdictBar(label, value, upper, unit, color) {
+  const width=Math.min(100,Math.max(0,upper>0?Math.abs(value)/upper*100:0));
+  return '<div class="verdict-bar">'+
+    '<div class="verdict-bar-head"><span>'+escapeHtml(label)+'</span><b>'+
+      escapeHtml(verdictFixed(value)+unit)+'</b></div>'+
+    '<div class="verdict-track"><span style="width:'+width.toFixed(2)+'%;background:'+
+      color+'"></span></div></div>';
+}
+function verdictPercentile(label, pct, metric, years) {
+  const width=Math.max(0,Math.min(100,pct));
+  return '<div class="verdict-bar">'+
+    '<div class="verdict-bar-head"><span>'+escapeHtml(label+'（近'+years+'年）')+
+      '</span><b>'+escapeHtml(verdictFixed(pct,1)+'%')+'</b></div>'+
+    '<div class="verdict-track"><span style="width:'+width.toFixed(1)+
+      '%;background:'+(pct>=80?'#c27d45':'#6076bf')+'"></span></div>'+
+    '<div class="verdict-rail-marker"><span>'+
+      escapeHtml(metric===null?'历史低位':'现值 '+verdictFixed(metric,2)+' 倍')+
+      '</span><span>历史高位</span></div></div>';
+}
+function verdictPercentileRow(rows) {
+  if(!Array.isArray(rows))return null;
+  for(const n of [5,10,3]) {
+    const r=rows.find(x=>x && Number(x.years)===n &&
+      verdictNumber(x.percentile)!==null && verdictNumber(x.percentile)>=0 &&
+      verdictNumber(x.percentile)<=100);
+    if(r)return r;
+  }
+  return null;
+}
+function collectVerdictFigures(report) {
+  const facts=((report.fundamentals||{}).facts)||{};
+  const hist=report.valuation_history||{};
+  const val=report.valuation||{};
+  const figures=[];
+
+  const profit=verdictNumber(facts.net_profit);
+  const cash=verdictNumber(facts.operating_cash_flow);
+  if(profit!==null && cash!==null && profit>0) {
+    const net=profit/1e8, operating=cash/1e8;
+    const max=Math.max(net,Math.abs(operating),.001);
+    const ratio=verdictNumber(facts.cash_to_profit_ratio);
+    figures.push({id:'cash',match:/现金流|净利润|利润|回款|经营现金/,
+      html:verdictFigure('利润与经营现金流',
+        String(facts.cash_profit_period||facts.finance_period||'报告期未注明'),
+        '<div class="verdict-bars">'+
+          verdictBar('净利润',net,max,'亿元','#5266c9')+
+          verdictBar('经营现金流',operating,max,'亿元',operating<0?'#c65f54':'#238f8a')+'</div>',
+        (ratio===null?'':('经营现金流／净利润：'+verdictFixed(ratio,2)+'倍。'))+
+          '同一报告期金额对比，经营现金流不等于自由现金流。'+
+          (operating<0?'负值柱长按绝对金额画，负号仍保留。':''))});
+  }
+
+  const pe=verdictPercentileRow(hist.pe_percentiles);
+  const pb=verdictPercentileRow(hist.pb_percentiles);
+  const peNow=verdictNumber(hist.current_pe_ttm);
+  const pbNow=verdictNumber(hist.current_pb);
+  if(pe || pb) {
+    let body='<div class="verdict-bars">';
+    if(pe)body+=verdictPercentile('市盈率 PE',Number(pe.percentile),peNow,pe.years);
+    if(pb)body+=verdictPercentile('市净率 PB',Number(pb.percentile),pbNow,pb.years);
+    body+='</div>';
+    figures.push({id:'valuation',match:/估值|市盈率|市净率|PE|PB|分位|价格|便宜|贵/,
+      html:verdictFigure('估值处于历史什么位置',
+        String(hist.as_of||val.valuation_as_of||'估值日期未知'),body,
+        '分位数越高，表示当前比过去更多交易日的估值更高。PE和PB分开比较，不直接相除。')});
+  }
+
+  const payout=Array.isArray(report.dividend_chart)?
+    report.dividend_chart.filter(r=>r && verdictNumber(r.dividend_per_10)!==null &&
+      verdictNumber(r.dividend_per_10)>=0 && Number.isFinite(Number(r.year))):[];
+  if(payout.length>=2){
+    const points=payout.slice().sort((a,b)=>Number(a.year)-Number(b.year)).slice(-6);
+    const max=Math.max(.001,...points.map(p=>Number(p.dividend_per_10)));
+    let bars='<div class="verdict-yearbars" role="img" aria-label="按公告年度统计的每10股现金分红柱状图">';
+    points.forEach(p=>{
+      const v=Number(p.dividend_per_10);
+      const h=Math.max(1,Math.round(v/max*91));
+      bars+='<div class="verdict-yearcol"><b>'+verdictFixed(v,2)+
+        '</b><span class="stick" style="height:'+h+'px"></span>'+
+        '<span class="year">'+escapeHtml(String(p.year))+'</span></div>';
+    });
+    bars+='</div>';
+    figures.push({id:'dividends',match:/分红|股息|派息|股东回报|股息率/,
+      html:verdictFigure('每10股现金分红（元）','按公告年度归集',bars,
+        '仅包含已返回的年度分红数据。回购不计入现金分红，也不将待实施方案当作已到账款。')});
+  }
+
+  const debtRows=((report.profitability_trend||{}).periods||[])
+    .filter(row=>row && row.period &&
+      verdictNumber(row.debt_ratio_pct)!==null &&
+      verdictNumber(row.debt_ratio_pct)>=0 && verdictNumber(row.debt_ratio_pct)<=100)
+    .slice().sort((a,b)=>String(a.period).localeCompare(String(b.period)));
+  if(debtRows.length>=2) {
+    const first=debtRows[0],last=debtRows[debtRows.length-1];
+    const v0=Number(first.debt_ratio_pct),v1=Number(last.debt_ratio_pct);
+    figures.push({id:'debt',match:/负债|资产|并购|收购|增发|杠杆/,
+      html:verdictFigure('资产负债率前后比较',
+        String(first.period)+' → '+String(last.period),
+        '<div class="verdict-bars">'+
+          verdictBar(String(first.period),v0,100,'%','#7a88a6')+
+          verdictBar(String(last.period),v1,100,'%','#c27d45')+'</div>',
+        '资产负债率是资产负债表的时点指标，不能单凭升降判断收购回报。')});
+  }
+
+  const client=verdictNumber(facts.top5_customer_pct);
+  const overseas=verdictNumber(facts.overseas_revenue_pct);
+  if((client!==null&&client>=0&&client<=100)||
+     (overseas!==null&&overseas>=0&&overseas<=100)){
+    let body='<div class="verdict-bars">';
+    if(client!==null && client>=0 && client<=100)
+      body+=verdictBar('前五大客户营收占比',client,100,'%','#6076bf');
+    if(overseas!==null && overseas>=0 && overseas<=100)
+      body+=verdictBar('海外收入占比',overseas,100,'%','#238f8a');
+    body+='</div>';
+    figures.push({id:'customers',match:/客户|煤电|航运|海外|收入结构|出口|集中度/,
+      html:verdictFigure('客户和收入分布',
+        String((report.fundamentals||{}).concentration_period||
+          facts.finance_period||'披露期间未注明'),body,
+        '两条比例的分母与分类不同，不可相加。海外收入不等于某一国家的收入。')});
+  }
+
+  const ref=((report.valuation_model||{}).investor_reference)||{};
+  const earningsPower=ref.earnings_power||{};
+  const scenarios=(
+    earningsPower.status==='historical_sensitivity_only' &&
+    Array.isArray(earningsPower.scenarios)
+  )?earningsPower.scenarios.filter(row=>row &&
+    verdictNumber(row.conditional_price_yuan)!==null &&
+    verdictNumber(row.conditional_price_yuan)>0):[];
+  if(scenarios.length>=2) {
+    const market=verdictNumber(earningsPower.market_price_yuan);
+    const upper=Math.max(...scenarios.map(row=>Number(row.conditional_price_yuan)),
+      market===null?0:market);
+    let body='<div class="verdict-bars">';
+    if(market!==null&&market>0)
+      body+=verdictBar('本次参考价',market,upper,'元','#6076bf');
+    scenarios.slice(0,3).forEach(row=>{
+      body+=verdictBar(String(row.name||'条件情景'),
+        Number(row.conditional_price_yuan),upper,'元','#c27d45');
+    });
+    body+='</div>';
+    figures.push({id:'earnings_power',match:/利润|盈利|估值|价位|参考价|股价/,
+      html:verdictFigure('历史盈利 × PE 条件价格',
+        String(earningsPower.pe_as_of||report.as_of||'价格日期未知'),body,
+        '以历史EPS和PE分位数计算的敏感性对照，非公司合理价值；不同分位的组合不代表真实发生概率。')});
+  }
+  const price=verdictNumber((report.realtime_quote||{}).latest_price);
+  const pbAnchor=verdictNumber((ref.historical_pb_anchor||{}).median_pb_reference_price);
+  if(price!==null&&price>0&&pbAnchor!==null&&pbAnchor>0){
+    const upper=Math.max(price,pbAnchor);
+    figures.push({id:'price_refs',match:/参考价|估值|买入|合理|安全边际|价格/,
+      html:verdictFigure('现价与历史PB参考价',
+        String(ref.as_of||report.as_of||'参考日期未知'),
+        '<div class="verdict-bars">'+
+          verdictBar('当前行情价',price,upper,'元','#6076bf')+
+          verdictBar('历史PB中位对应价',pbAnchor,upper,'元','#c27d45')+'</div>',
+        '历史PB对应价只是假设估值回到历史中位数时的结果，不是内在价值或推荐买入价。')});
+  }
+  return figures;
+}
+function renderVerdictFigures(report) {
+  const figures=collectVerdictFigures(report);
+  if(!figures.length)return '';
+  const text=String(((report.summary||{}).thesis_summary)||'');
+  const ranked=figures.map((item,index)=>({
+    ...item,rank:item.match.test(text)?1:0,index,
+  })).sort((a,b)=>b.rank-a.rank||a.index-b.index).slice(0,7);
+  return '<div class="verdict-figures" role="group" aria-label="投资结论相关数据图表">'+
+    '<p class="verdict-figures-title">先看关键数字</p>'+
+    '<p class="verdict-figures-note">图表使用本报告已返回的财务和估值数据；不从生成的文字中猜数。'
+      +'图表下方标明各自期间，不同期间的数据不能直接比较。</p>'+
+    '<div class="verdict-figure-grid">'+ranked.map(x=>x.html).join('')+'</div></div>';
+}
+
 // Keep each piece of supporting evidence adjacent to the discussion it
 // supports. These blocks share the same pre-existing verified report data;
 // no extra price retrieval, synthetic numbers or independently inferred events.
@@ -3327,6 +3546,7 @@ function renderResult(report) {
     html += '<span class="verdict-industry">' + escapeHtml(profile.industry) + '</span>';
   }
   html += '</div>';
+  html += renderVerdictFigures(report);
   // The investment thesis is authored by the model. Screening indicators
   // remain available to the research logic, not as a programmatic verdict.
   // The thesis is a reader-facing, potentially multi-paragraph explanation.
