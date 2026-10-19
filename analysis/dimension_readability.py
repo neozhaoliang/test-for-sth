@@ -32,6 +32,21 @@ def _numeric_units(text: str) -> set[tuple[Decimal, str]]:
     }
 
 
+def _max_sentence_numbers(text: str) -> int:
+    """Peak number of financial figures crammed into one sentence."""
+    return max(
+        (len(_numbers(sentence)) for sentence in
+         re.split(r"[。！？\\n]+", str(text or ""))),
+        default=0,
+    )
+
+
+def _needs_dimension_edit(text: str) -> bool:
+    return _scripted_score(text) >= 2 or (
+        len(text) >= 150 and _max_sentence_numbers(text) >= 9
+    )
+
+
 def accept_dimension_edit(original: str, edited: Any) -> bool:
     """All numeric claims and essential themes survive; tone must improve."""
     if not isinstance(original, str) or not isinstance(edited, str):
@@ -53,8 +68,13 @@ def accept_dimension_edit(original: str, edited: Any) -> bool:
         return False
     old_score = _scripted_score(original)
     new_score = _scripted_score(new)
-    if old_score < 2 or new_score >= old_score or new_score >= 2:
+    if old_score >= 2 and (new_score >= old_score or new_score >= 2):
         return False
+    if old_score < 2:
+        if _max_sentence_numbers(original) < 9:
+            return False
+        if _max_sentence_numbers(new) >= _max_sentence_numbers(original):
+            return False
     return new != original.strip()
 
 
@@ -73,7 +93,7 @@ async def polish_dimension_prose(
             for key, text in result.items()
             if isinstance(text, str)
             and len(text.strip()) >= 60
-            and _scripted_score(text) >= 2
+            and _needs_dimension_edit(text)
         ),
         key=lambda kv: _scripted_score(kv[1]),
         reverse=True,
@@ -92,6 +112,7 @@ async def polish_dimension_prose(
             "不增加、不减少事实和数字，不增删日期、金额、百分比、估值倍数、"
             "公司名称、名单事件，也不能把风险假设写成已发生的事实。\n"
             "原稿里所有数字及其单位必须保留，不能新增任何数字。"
+            "数字挤在一句话时可以拆成几句，把数字与原因和后果讲清，但不要删。"
             "原因和后果要具体说清，不用'经营韧性'、'风险与机遇并存'、"
             "'整体而言'等套话，不能段段套'先表态、再列数字、最后说仍需关注'。"
             "不要故意扮演股民、模仿任何知识库作者，"
