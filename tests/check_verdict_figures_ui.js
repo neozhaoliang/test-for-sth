@@ -151,6 +151,15 @@ assert.equal((scenarioHtml.match(/class="verdict-figure"/g)||[]).length,7);
 scenarioReport.valuation_model.investor_reference.earnings_power.status='insufficient_history';
 assert.ok(!ctx.renderVerdictFigures(scenarioReport).includes('历史盈利 × PE 条件价格'));
 
+// Negative operating cash flow must not be hidden or shown as positive.
+const cashNegative=JSON.parse(JSON.stringify(report));
+cashNegative.fundamentals.facts.operating_cash_flow=-12000000000;
+cashNegative.fundamentals.facts.cash_to_profit_ratio=-0.42;
+const negativeHtml=ctx.renderVerdictFigures(cashNegative);
+assert.ok(negativeHtml.includes('-120.00亿元'));
+assert.ok(negativeHtml.includes('负值柱长按绝对金额画'));
+assert.ok(negativeHtml.includes('#c65f54'));
+
 // Escape untrusted dates/labels even though values are strict numeric.
 const hostile=JSON.parse(JSON.stringify(report));
 hostile.fundamentals.concentration_period='<svg onload=alert(1)>';
