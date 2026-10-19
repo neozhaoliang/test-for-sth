@@ -468,13 +468,13 @@ async def _generate_summary(
         )
     review = review_dimension_analyses(analyses, evidence)
     parsed = await _apply_review_to_draft(parsed, review, inputs.stock_code)
-    # Do not rewrite investment stance or post-fix a summary using invented facts.
-    # If four material mining risks were lost in the short thesis, revise prose once.
+    # The twelve analyses are the research record. Do not run the old
+    # resource-summary omission repair here: it forced monetary policy,
+    # shareholder counts, expansion AND succession into every mining thesis,
+    # burying the actual buy/no-buy argument under an audit checklist.
+    # Keep all those findings in their relevant detailed analyses; the reader
+    # verdict should choose the few decision-critical causes.
     if getattr(inputs, "research_mode", "") != "historical":
-        parsed = await repair_resource_summary(parsed, inputs)
-        # A long, number-heavy verdict is an evidence dump even if every
-        # required topic is technically present. Condense only its prose after
-        # fact/stance review; detailed dimensions retain the complete audit.
         parsed = await polish_thesis_prose(parsed, inputs)
 
     # Keep the reviewed research text for scoring; only the publicly displayed
