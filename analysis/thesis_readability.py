@@ -203,6 +203,75 @@ def align_verified_lead_price(parsed: dict, inputs: Any = None) -> dict:
     return {**parsed, "thesis_summary": corrected}
 
 
+_SHARE_SALE_TOTAL = re.compile(
+    r"(?P<count>两|二|三|四|五|六)笔[^。！？；\n]{0,18}?合计"
+    r"\s*(?P<total>\d+(?:\.\d+)?)\s*万股"
+)
+_SHARES_BEFORE_TOTAL = re.compile(
+    r"(?<![\d.])(?P<amount>\d+(?:\.\d+)?)\s*万股"
+)
+_CHINESE_COUNT = {"两": 2, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6}
+
+
+def inconsistent_share_sale_totals(text: str) -> list[dict]:
+    """Check only explicit N-transaction 万股 totals with N previous quantities.
+
+    This is deliberately conservative: it does not infer ownership of separate
+    trades, currency proceeds, unrelated counts or issuer financing.
+    """
+    result = []
+    raw = str(text or "")
+    for match in _SHARE_SALE_TOTAL.finditer(raw):
+        n = _CHINESE_COUNT[match.group("count")]
+        preceding = raw[max(0, match.start() - 480): match.start()]
+        quantities = [
+            Decimal(v.group("amount"))
+            for v in _SHARES_BEFORE_TOTAL.finditer(preceding)
+        ][-n:]
+        if len(quantities) != n:
+            continue
+        expected = sum(quantities, Decimal("0"))
+        stated = Decimal(match.group("total"))
+        if abs(expected - stated) > Decimal("0.02"):
+            result.append({
+                "start": match.start(), "end": match.end(),
+                "stated": stated, "expected": expected,
+            })
+    return result
+
+
+def suppress_invalid_share_sale_totals(parsed: dict) -> dict:
+    """Remove a demonstrably wrong total instead of publishing it.
+
+    This doesn't silently 'correct' the sum: multiple listed trades may overlap
+    in a way the input data has not verified. It also avoids carrying forward
+    a claimed aggregate cash proceeds from that same unsupported total.
+    """
+    raw = str(parsed.get("thesis_summary") or "")
+    errors = inconsistent_share_sale_totals(raw)
+    if not errors:
+        return parsed
+    for issue in reversed(errors):
+        start, end = issue["start"], issue["end"]
+        tail = raw[end:]
+        proceeds = re.match(
+            r"[、，]?卖方拿到约\d+(?:\.\d+)?亿元(?:，进的是个人账户)?",
+            tail,
+        )
+        if proceeds:
+            end += proceeds.end()
+        raw = (
+            raw[:start] +
+            "相关减持的合计数量及金额需要核对，不能直接采用" +
+            raw[end:]
+        )
+        logger.warning(
+            "[analysis.thesis_readability] inconsistent share sale total: %s vs %s",
+            issue["stated"], issue["expected"],
+        )
+    return {**parsed, "thesis_summary": raw}
+
+
 def readability_signals(text: str) -> dict:
     """A trigger, not a language-quality score or automated investment stance."""
     raw = str(text or "")
@@ -269,6 +338,8 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
         return False
     if not _preserves_material_themes(original, revised):
         return False
+    if inconsistent_share_sale_totals(revised):
+        return False
     if _lead_price_conflicts(revised, inputs):
         return False
     old_nums, new_nums = _numbers(original), _numbers(revised)
@@ -320,7 +391,8 @@ async def polish_thesis_prose(parsed: dict, inputs: Any = None) -> dict:
     """Optional post-review, post-miner stage. Changes ONLY thesis_summary."""
     original = str(parsed.get("thesis_summary") or "")
     stats = readability_signals(original)
-    if not (stats["needs_edit"] or _lead_price_conflicts(original, inputs)):
+    if not (stats["needs_edit"] or _lead_price_conflicts(original, inputs)
+            or inconsistent_share_sale_totals(original)):
         return parsed
     stances = {key:parsed.get(key) for key in (
         "stance", "company_quality_stance", "current_odds_stance"
@@ -363,7 +435,13 @@ async def polish_thesis_prose(parsed: dict, inputs: Any = None) -> dict:
             "允许删掉非决定性的事实和全部非关键数字；不允许新增任何未经确认的"
             "人名、百分比、日期、事件或资金流动。不能照搬知识库作者的说法。\n"
             + quote_context + "\n"
-            "不可修改的立场字段：" + str(stances) +
+            + (
+                "原稿中有减持数量合计不等于逐笔数量之和的错误。"
+                "请不要使用有争议的合计股数、套现金额或基于它们作判断；"
+                "逐笔数据若对立场重要可以保留，但必须分开叙述。\n"
+                if inconsistent_share_sale_totals(original) else ""
+            )
+            + "不可修改的立场字段：" + str(stances) +
             "\n原始研究记录：\n" + original +
             "\n只输出包含thesis_summary字符串的JSON对象。"
         )
