@@ -92,6 +92,13 @@ large.summary.thesis_summary=longThesis;
 large.shareholder_capital_summary={
   corporate_buybacks:[{status:'implemented',shares:123,disclosed_at:'2026-10-01'}]
 };
+large.chip_price_context={
+  price_holder_series:[
+    {period:'2025-06-30',holders:335659,price:19.50},
+    {period:'2026-02-28',holders:1108965,price:39.55},
+    {period:'2026-06-30',holders:1318365,price:25.14}
+  ]
+};
 large.valuation_model.investor_reference={
   dividend_basis:{years:[2024,2025],observed_median_cash_dividend_per_share:.3}
 };
@@ -100,9 +107,18 @@ ctx.activateRoeDiscountLab=()=>{};
 ctx.renderResult(large);
 html=nodes.result.innerHTML;
 hrefs=verify(html);
-assert.ok(html.includes(longThesis), 'full long-form investment thesis must be visible');
-assert.ok(html.includes('\\n\\n')===false, 'paragraph breaks should not be rendered as literal slash-n');
-assert.ok(html.includes('\n\n'), 'plain-text paragraph breaks are preserved');
+for(const paragraph of longThesis.split(/\n\s*\n/))
+  assert.ok(html.includes(paragraph), 'every long-form thesis paragraph must remain visible');
+assert.ok(!html.includes('\\n\\n'), 'paragraph breaks should not be rendered as literal slash-n');
+const chipParagraphEnd=html.indexOf('股东人数变化与估值情景的关系。');
+const inlineChipChart=html.indexOf('class="analysis-inline-evidence chip-analysis-evidence thesis-chip-evidence"');
+const followingParagraph=html.indexOf('因此我目前对买入赔率保持谨慎');
+assert.ok(chipParagraphEnd>=0&&chipParagraphEnd<inlineChipChart&&inlineChipChart<followingParagraph,
+  'holder chart must appear immediately after the thesis paragraph discussing shareholder counts');
+assert.equal((html.match(/class="analysis-inline-evidence chip-analysis-evidence/g)||[]).length,1,
+  'holder chart must not be duplicated in the later chip-flow dimension');
+assert.ok(html.includes('aria-label="股东人数（万户，左轴）与同期股价（元，右轴）实际数值走势图"'),
+  'inline chart must use actual aligned holder/price data');
 for(const id of ['report-dimensions','report-investor-reference','roe-discount-lab'])
   assert.ok(hrefs.includes(id),'missing main section '+id);
 assert.ok(html.includes('id="report-capital"'), 'capital disclosures stay available');
@@ -117,6 +133,19 @@ for(const key of fields)
 assert.ok(html.includes('展开 12 项分析子目录'));
 assert.ok(html.includes('href="#report-dimension-management"'));
 assert.ok(html.includes('href="#report-dimension-risk_quality"'));
+
+// When the main thesis has no holder-count paragraph, keep the chart directly
+// below the dedicated chip-flow analysis instead of losing it or duplicating it.
+const thesisWithoutChip=JSON.parse(JSON.stringify(large));
+thesisWithoutChip.summary.thesis_summary='公司基本面稳健，当前估值仍需进一步观察。';
+ctx.renderResult(thesisWithoutChip);
+const fallbackChipHtml=nodes.result.innerHTML;
+const chipDimensionStart=fallbackChipHtml.indexOf('id="report-dimension-chip_flow"');
+const fallbackChipChart=fallbackChipHtml.indexOf('class="analysis-inline-evidence chip-analysis-evidence"');
+assert.ok(chipDimensionStart>=0&&chipDimensionStart<fallbackChipChart,
+  'without a thesis chip paragraph, chart must remain under the chip-flow analysis');
+assert.equal((fallbackChipHtml.match(/class="analysis-inline-evidence chip-analysis-evidence/g)||[]).length,1,
+  'fallback chart must also render exactly once');
 
 // Changing a report replaces the whole nav rather than preserving stale links.
 delete ctx.renderRoeDiscountLab;
