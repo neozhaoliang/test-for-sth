@@ -56,7 +56,7 @@ from analysis.resource_mining_thesis import (
 )
 from analysis.macro_rates import get_international_policy_rates
 from analysis.resource_macro_transmission import build_resource_macro_transmission, resource_macro_prompt_block
-from analysis.thesis_readability import polish_thesis_prose
+from analysis.thesis_readability import polish_thesis_prose, align_verified_lead_price
 from analysis.dimension_readability import polish_dimension_prose
 
 
@@ -476,6 +476,10 @@ async def _generate_summary(
     # verdict should choose the few decision-critical causes.
     if getattr(inputs, "research_mode", "") != "historical":
         parsed = await polish_thesis_prose(parsed, inputs)
+
+    # Guard against the generator accidentally dropping the first digit of the
+    # current share price. The as-of quote is the only allowed correction source.
+    parsed = align_verified_lead_price(parsed, inputs)
 
     # Keep the reviewed research text for scoring; only the publicly displayed
     # dimension prose gets a bounded, fact-preserving copy edit.
