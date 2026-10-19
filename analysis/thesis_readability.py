@@ -163,7 +163,7 @@ async def polish_thesis_prose(parsed: dict, inputs: Any = None) -> dict:
             "确实影响买卖的未知因素，放在它影响判断的地方用普通话讲清楚。\n"
             "6. 只能使用原稿已有的事实和数字，不得改变事实、管理层姓名、职务或已经核实的交接情况；"
             "不得提及私人知识库作者、帖子、工具或内部审查。\n"
-            "返回JSON：{\\"thesis_summary\\":\\"改写后的自然中文结论\\"}。\n\n"
+            "返回JSON：{\"thesis_summary\":\"改写后的自然中文结论\"}。\n\n"
             "不能更改的结构化判断：" + str(stances) +
             "\n原结论：\n" + original
         )
