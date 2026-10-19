@@ -240,7 +240,7 @@ async def test_very_long_report_is_rewritten_not_force_padded(monkeypatch):
         "净利润却增68%，矿产金只增13.4%、矿产铜降了5.7%。"
         "跨周期ROE中位22.58%，正常化盈利收益率5.75%，"
         "在建工程尚未核实。"
-    ) * 8
+    ) * 9
     assert readability_signals(original)["too_long"]
     out = (
         "按29.72元看，紫金今年利润涨得快，金铜价格上涨是重要原因。"
