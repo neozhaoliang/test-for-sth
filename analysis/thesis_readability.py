@@ -141,6 +141,33 @@ def _lead_price_conflicts(text: str, inputs: Any) -> bool:
     return abs(stated - reference) > max(Decimal("0.15"), reference * Decimal("0.02"))
 
 
+def align_verified_lead_price(parsed: dict, inputs: Any = None) -> dict:
+    """Replace only a provably wrong *opening current quote* with the input quote.
+
+    Do not alter historical prices in the shareholder series or silently
+    recalculate PE/PB: valuation ratios remain governed by their own as-of
+    source. This prevents an obviously invalid '9.85元买' from reaching readers
+    when the as-of market quote says 29.xx.
+    """
+    original = str(parsed.get("thesis_summary") or "")
+    if not _lead_price_conflicts(original, inputs):
+        return parsed
+    match = _LEAD_PRICE.search(original)
+    reference = _quote_price(inputs)
+    if not match or reference is None:
+        return parsed
+    reference_text = format(reference.normalize(), "f")
+    corrected = (
+        original[:match.start("price")] + reference_text +
+        original[match.end("price"):]
+    )
+    logger.warning(
+        "[analysis.thesis_readability] corrected inconsistent opening quote: %s -> %s",
+        match.group("price"), reference_text,
+    )
+    return {**parsed, "thesis_summary": corrected}
+
+
 def readability_signals(text: str) -> dict:
     """A trigger, not a language-quality score or automated investment stance."""
     raw = str(text or "")
