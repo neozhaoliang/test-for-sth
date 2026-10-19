@@ -45,6 +45,7 @@ _SCRIPTED_PHRASES = (
     (re.compile(r"(?:仍需(?:持续)?关注|后续(?:需要|仍需)(?:持续)?(?:关注|跟踪)|需要重点跟踪)"), 1),
     (re.compile(r"(?:从(?:基本面|估值|风险|资金面|筹码)角度来看)"), 1),
     (re.compile(r"(?:首先[^。！？]{0,160}其次|一方面[^。！？]{0,160}另一方面)"), 1),
+    (re.compile(r"(?:本质是在买|这一侧我认可|立场给(?:中性|看多|看空)|几个方向同时逆风)"), 2),
 )
 
 
@@ -246,8 +247,9 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
     if (original_signals["scripted_tone"] and
             edited_signals["scripted_score"] >= original_signals["scripted_score"]):
         return False
-    if (edited_signals["scripted_score"] >= 3 and
-            edited_signals["scripted_score"] >= original_signals["scripted_score"] * .65):
+    # A rewrite that still contains a conspicuous rhetorical script is no
+    # improvement, even if it is shorter and uses fewer figures.
+    if edited_signals["scripted_score"] >= 2:
         return False
     # Prevent erasing the investment argument; long, substantive explanations
     # are welcome as long as they remain grounded in the source figures.
