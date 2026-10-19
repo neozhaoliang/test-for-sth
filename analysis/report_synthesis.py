@@ -56,7 +56,10 @@ from analysis.resource_mining_thesis import (
 )
 from analysis.macro_rates import get_international_policy_rates
 from analysis.resource_macro_transmission import build_resource_macro_transmission, resource_macro_prompt_block
-from analysis.thesis_readability import polish_thesis_prose, align_verified_lead_price
+from analysis.thesis_readability import (
+    polish_thesis_prose, align_verified_lead_price,
+    suppress_invalid_share_sale_totals,
+)
 from analysis.dimension_readability import polish_dimension_prose
 
 
@@ -480,6 +483,9 @@ async def _generate_summary(
     # Guard against the generator accidentally dropping the first digit of the
     # current share price. The as-of quote is the only allowed correction source.
     parsed = align_verified_lead_price(parsed, inputs)
+    # Do not publish demonstrably incorrect arithmetic ("three sales total X"
+    # when the three disclosed quantities do not add to X).
+    parsed = suppress_invalid_share_sale_totals(parsed)
 
     # Keep the reviewed research text for scoring; only the publicly displayed
     # dimension prose gets a bounded, fact-preserving copy edit.
