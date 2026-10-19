@@ -80,3 +80,23 @@ async def test_dimension_polish_skips_already_plain_text(monkeypatch):
     assert await polish_dimension_prose({"fundamentals": text}) == {
         "fundamentals": text
     }
+
+
+def test_numeric_density_can_be_split_without_dropping_data():
+    old = (
+        "财务报告显示营业收入100亿元、净利润20亿元、经营现金流15亿元、"
+        "应收账款30亿元、存货25亿元、总负债40亿元、营业成本60亿元、"
+        "资本开支8亿元、研发支出3亿元、现金分红2亿元，"
+        "企业已连续多个季度维持较高的收入和净利润增长率，"
+        "但经营现金流仍显著落后于净利润，"
+        "在这种情况下只用利润增速作为投资依据会忽略回款与扩产占款。"
+    )
+    edited = (
+        "公司收入100亿元，净利润20亿元，经营现金流15亿元。"
+        "应收账款30亿元、存货25亿元，总负债40亿元。"
+        "营业成本60亿元，资本开支8亿元、研发支出3亿元，现金分红2亿元。"
+        "报表上的收入和利润涨得快，可经营现金流没跟上。"
+        "要看应收账款、存货和扩产占用的资金怎样回流，"
+        "只看利润增长还不够。"
+    )
+    assert accept_dimension_edit(old, edited)
