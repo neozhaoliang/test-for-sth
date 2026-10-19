@@ -129,6 +129,28 @@ assert.ok(!smaller.includes('现价与历史PB参考价'));
 assert.ok(smaller.includes('市净率 PB'),'a real PB percentile remains visible');
 assert.ok(!smaller.includes('市盈率 PE'),'no fabricated PE percentile');
 
+// Only emit price sensitivity bars when the Python model has supplied
+// explicit historical EPS×PE conditional scenarios.
+const scenarioReport=JSON.parse(JSON.stringify(report));
+scenarioReport.valuation_model.investor_reference.earnings_power={
+  status:'historical_sensitivity_only',
+  market_price_yuan:51.5,
+  pe_as_of:'2026-10-15',
+  scenarios:[
+    {name:'历史较弱',conditional_price_yuan:32.80},
+    {name:'历史中枢',conditional_price_yuan:42.60},
+    {name:'历史较强',conditional_price_yuan:50.14}
+  ]
+};
+const scenarioHtml=ctx.renderVerdictFigures(scenarioReport);
+assert.ok(scenarioHtml.includes('历史盈利 × PE 条件价格'));
+assert.ok(scenarioHtml.includes('32.80元'));
+assert.ok(scenarioHtml.includes('42.60元'));
+assert.ok(scenarioHtml.includes('50.14元'));
+assert.equal((scenarioHtml.match(/class="verdict-figure"/g)||[]).length,7);
+scenarioReport.valuation_model.investor_reference.earnings_power.status='insufficient_history';
+assert.ok(!ctx.renderVerdictFigures(scenarioReport).includes('历史盈利 × PE 条件价格'));
+
 // Escape untrusted dates/labels even though values are strict numeric.
 const hostile=JSON.parse(JSON.stringify(report));
 hostile.fundamentals.concentration_period='<svg onload=alert(1)>';
