@@ -60,7 +60,7 @@ def test_screen_rejects_new_financial_facts_but_allows_numerical_selection():
     assert not accept_readable_edit(original,answer.replace("392亿元","9000亿元"))
     assert not accept_readable_edit(original,answer+"\n\n2027年净利润将达到8000亿元。")
     assert not accept_readable_edit(original,answer.replace(
-        "紫金矿业确实", "买股票的老木匠认为紫金矿业确实"
+        "29.92元的紫金矿业", "买股票的老木匠认为29.92元的紫金矿业"
     ))
     assert not accept_readable_edit(original,
         "紫金很好，现价不便宜。金价是最大风险。")
@@ -170,7 +170,7 @@ async def test_scripted_voice_triggers_polish_without_numeric_dump(monkeypatch):
         captured.append(prompt)
         assert "不需要扮演老师" in prompt
         assert "不可修改的立场字段" in prompt
-        assert "原始" not in prompt or "原文" not in prompt
+        assert "老朋友" not in prompt
         return {"thesis_summary":human_rewrite()}, "end_turn"
     monkeypatch.setattr("backtest.llm_client.call_json_ex",edit)
     before={"thesis_summary":old,"stance":"neutral",
