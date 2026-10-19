@@ -350,3 +350,103 @@ async def test_rewriter_does_not_force_200_to_500_characters(monkeypatch):
     assert len(received) == 1
     assert edited["thesis_summary"] == revised
     assert edited["stance"] == source["stance"]
+
+
+def zhongji_dense_sample():
+    # Regression adapted from an actual investor-facing report. It was
+    # technically data-rich but painful to read, and contained a wrong total.
+    return "\n\n".join([
+        "660.7元的中际旭创，最该先回答的不是收入还能跑多快，而是两件事："
+        "赚到的利润能不能变成现金，以及45.84%的毛利率是不是这一轮扩产周期的高点。"
+        "1.6T硅光规模放量，在多家头部云厂商保持供应位置；"
+        "毛利率从2019年的27.91%抬到2026年上半年的45.84%，"
+        "净利率35.27%，ROE34.25%。但这些优势更像工程化交付和短缺期的定价权，"
+        "不是底层标准制定权；供应商又在扩产，毛利率往哪走比收入增长更重要。",
+        "现金这一关更刺眼。2026年上半年净利润136.51亿元，"
+        "经营现金只收回18.00亿元，利润只有13.2%变成现金；"
+        "同期总资产增52.23%、总负债增82.00%，7月底通过H股"
+        "募到约528.91亿港元净额。具体是应收账款还是存货占了大头没有资料拆清；"
+        "下半年现金能不能回来，是判断这批利润质量的关键。"
+        "TTM市盈率38倍、按上半年年化约29倍，股价从1382.33元回撤51.5%，"
+        "PB募资后约8.5倍、ROE30%以上。",
+        "还有两条会直接改变买入决定。控股股东以521.73元均价减持550万股，"
+        "常务副总裁以414.24元减持70.86万股，苏州益兴福减持463.41万股，"
+        "三笔已实施合计620.86万股、卖方拿到约31.63亿元，进的是个人账户；"
+        "公司9月回购49.97亿元用于激励并不注销。"
+        "2026年6月10日被列入美国国防部1260H名单，"
+        "94.82%的海外收入和前五大客户75.98%的集中度带来采购风险；"
+        "融资余额6天从313.6亿元降至261.47亿元，"
+        "6月末股东户数205678户、环比增长33.2%，当时股价1270元。"
+    ])
+
+
+def zhongji_readable_sample():
+    return "\n\n".join([
+        "中际旭创的产品现在卖得很好，新一代光模块也已经开始批量交付。"
+        "公司在生产、交货和客户认证上有积累。不过，行业内的竞争对手也在扩产，"
+        "目前45.84%的毛利率能保持多久，暂时不能只靠今年的订单来判断。",
+        "财报里还有一项需要弄清楚。上半年公司赚了136.51亿元利润，"
+        "经营现金流却只有18亿元。这种差距有可能跟备货、客户账期或扩产有关，"
+        "但单凭这两个数还不能知道钱具体压在哪里。"
+        "想用现在的利润给股票估值，最好先把应收、存货和后续回款查明白。",
+        "在660.7元这个价格上，投资者实际上需要相信利润还能维持在较高水平。"
+        "如果行业供应增加、产品售价下降，估值和盈利都可能受到影响。"
+        "它是有竞争力的供应商，但现在买入也承担了较高的盈利预期。",
+        "海外客户是另一件需要注意的事。公司已进入美国国防部1260H名单，"
+        "这不代表已经遭到全面商业禁售。"
+        "可是海外收入占比高，如果今后采购政策进一步收紧，订单确实会受到影响。"
+        "控股股东已经有减持记录，具体减持数量和股价需要看公告逐笔核对，"
+        "不能靠未经核实的合计金额作判断。"
+    ])
+
+
+def test_zhongji_evidence_dump_triggers_rewrite():
+    from analysis.thesis_readability import inconsistent_share_sale_totals
+    raw = zhongji_dense_sample()
+    signals = readability_signals(raw)
+    assert signals["needs_edit"]
+    assert signals["dense_sentences"] >= 2
+    assert signals["packed_paragraphs"] >= 1
+    errors = inconsistent_share_sale_totals(raw)
+    assert len(errors) == 1
+    assert str(errors[0]["stated"]) == "620.86"
+    assert str(errors[0]["expected"]) == "1084.27"
+
+
+def test_zhongji_natural_rewrite_is_accepted_and_preserves_key_risks():
+    original = zhongji_dense_sample()
+    revised = zhongji_readable_sample()
+    assert accept_readable_edit(
+        original, revised, SimpleNamespace(quote={"latest_price": 660.7})
+    )
+    assert not accept_readable_edit(original, original)
+
+
+def test_inconsistent_share_sale_total_does_not_reach_readers():
+    from analysis.thesis_readability import suppress_invalid_share_sale_totals
+    original = zhongji_dense_sample()
+    result = suppress_invalid_share_sale_totals({"thesis_summary": original})
+    fixed = result["thesis_summary"]
+    assert "620.86万股" not in fixed
+    assert "卖方拿到约31.63亿元" not in fixed
+    assert "减持550万股" in fixed
+    assert "减持70.86万股" in fixed
+    assert "减持463.41万股" in fixed
+
+
+@pytest.mark.asyncio
+async def test_second_edit_attempt_can_repair_first_dense_rewrite(monkeypatch):
+    original = zhongji_dense_sample()
+    revised = zhongji_readable_sample()
+    prompts = []
+    async def fake_llm(prompt, **kwargs):
+        prompts.append(prompt)
+        return {"thesis_summary": original if len(prompts) == 1 else revised}, "end_turn"
+    monkeypatch.setattr("backtest.llm_client.call_json_ex", fake_llm)
+    result = await polish_thesis_prose(
+        {"thesis_summary": original, "stance": "bearish"},
+        SimpleNamespace(quote={"latest_price": 660.7}),
+    )
+    assert len(prompts) == 2
+    assert "刚才的改写未通过" in prompts[1]
+    assert result["thesis_summary"] == revised
