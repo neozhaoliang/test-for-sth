@@ -36,19 +36,12 @@ def overloaded_example():
 
 def human_rewrite():
     return (
-        "紫金矿业确实有很强的经营能力，不过29.92元这个价格，我还是想等一等。"
-        "公司这些年矿山运营和现金创造都做得不错，上半年赚了392亿元，"
-        "而且现金流也跟得上，这不是一家只靠故事支撑股价的公司。\n\n"
-        "我犹豫的原因主要在金价。紫金的金铜业务利润与商品行情密切相关，"
-        "这轮高盈利有相当一部分来自黄金价格的上涨。"
-        "在金价高位时，市盈率看起来很低，并不一定说明股票很便宜；"
-        "一旦价格回落，利润缩水可能比我们想象的快。\n\n"
-        "公司还在不断扩张矿山，钱要先花出去，新增产能和盈利却要等以后才能兑现。"
-        "股东人数在前期上涨过程中又明显增多，让我不太愿意把这次回调"
-        "直接看成捡便宜的机会。这不证明机构一定在卖，但值得保持耐心。\n\n"
-        "所以我并不否定公司长期价值。我只是希望，要么未来金铜价格和新项目"
-        "的兑现能证明今天的利润可以持续，要么买入价格再便宜一些。"
-        "在那之前，我不会因为公司优秀就急着买入。"
+        "29.92元的紫金矿业，我暂时不买。上半年有392亿元利润，现金流也很好，"
+        "矿山经营的底子没什么可挑剔的。问题是这里面有多少是金价涨出来的。"
+        "矿业企业行情好时利润增长很快，按这样的利润去看市盈率，很容易误判价格。\n\n"
+        "紫金还在不断建设新矿山，这些投入不是当年花完就有回报。"
+        "后面金价、铜价和新增产量怎么走，才是买入时要考虑的账。"
+        "现价我不想赌这些事情都顺利，也没必要因为股价从高点回落就急着接。"
     )
 
 
@@ -132,3 +125,60 @@ async def test_clear_short_answer_does_not_trigger_extra_llm(monkeypatch):
     monkeypatch.setattr("backtest.llm_client.call_json_ex",should_not_run)
     parsed={"thesis_summary":human_rewrite(),"stance":"neutral"}
     assert await polish_thesis_prose(parsed)==parsed
+
+
+def performance_rhetoric_example():
+    # A plausible 650-yuan-like thesis, with few numbers but painfully
+    # predictable AI stage directions and symmetric rhetorical statements.
+    return (
+        "29.92元的这只股票，我不怀疑它有利润，我怀疑的是利润能不能变成钱。"
+        "上半年392亿元利润，这个数据值得看，但不能就此推断股价便宜。\n\n"
+        "我最不满意的是现金流跟利润的关系。管理层有自己的解释，"
+        "没有应收和库存细项时这些解释没法全部核验。"
+        "这不是经营能力的问题，而是买入价格的问题。\n\n"
+        "什么会让我改变看法？未来新项目投产、收入兑现，"
+        "再结合价格位置，才可能改变今天的取舍。"
+    )
+
+
+def test_scripted_analyst_performance_triggers_without_numeric_overload():
+    report=performance_rhetoric_example()
+    score=readability_signals(report)
+    assert score["numeric_mentions"] < 13
+    assert score["numeric_overload"] is False
+    assert score["scripted_tone"] is True
+    assert score["scripted_score"] >= 4
+    assert score["needs_edit"] is True
+    assert readability_signals(human_rewrite())["needs_edit"] is False
+
+
+def test_edited_prose_must_remove_stilted_rhetoric_without_new_numbers():
+    old=performance_rhetoric_example()
+    assert accept_readable_edit(old, human_rewrite())
+    bad=human_rewrite()+"\n\n我不怀疑这家公司，我怀疑的是估值。"
+    assert not accept_readable_edit(old,bad)
+    assert not accept_readable_edit(old, human_rewrite().replace(
+        "392亿元", "900亿元"
+    ))
+
+
+@pytest.mark.asyncio
+async def test_scripted_voice_triggers_polish_without_numeric_dump(monkeypatch):
+    old=performance_rhetoric_example()
+    captured=[]
+    async def edit(prompt,**kwargs):
+        captured.append(prompt)
+        assert "不需要扮演老师" in prompt
+        assert "不可修改的立场字段" in prompt
+        assert "原始" not in prompt or "原文" not in prompt
+        return {"thesis_summary":human_rewrite()}, "end_turn"
+    monkeypatch.setattr("backtest.llm_client.call_json_ex",edit)
+    before={"thesis_summary":old,"stance":"neutral",
+            "company_quality_stance":"bullish",
+            "current_odds_stance":"neutral"}
+    after=await polish_thesis_prose(before)
+    assert len(captured)==1
+    assert after["thesis_summary"]==human_rewrite()
+    assert after["stance"]==before["stance"]
+    assert after["company_quality_stance"]==before["company_quality_stance"]
+    assert after["current_odds_stance"]==before["current_odds_stance"]
