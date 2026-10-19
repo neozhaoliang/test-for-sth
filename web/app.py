@@ -2438,24 +2438,24 @@ function renderShareholderReturnEvidence(report) {
 function renderThesisWithInlineChipEvidence(thesis, report) {
   const source=String(thesis||'').trim();
   if(!source)return {html:'',chipEvidenceInserted:false};
-  let paragraphs=source.split(/\n\s*\n/).map(p=>p.trim()).filter(Boolean);
+  let paragraphs=source.split(/\\n\\s*\\n/).map(p=>p.trim()).filter(Boolean);
   // Some cached reports use single newlines rather than blank-line paragraph
   // separators. Preserve their intended paragraph structure as well.
-  if(paragraphs.length===1 && source.includes('\n'))
-    paragraphs=source.split(/\n+/).map(p=>p.trim()).filter(Boolean);
+  if(paragraphs.length===1 && source.includes('\\n'))
+    paragraphs=source.split(/\\n+/).map(p=>p.trim()).filter(Boolean);
 
   // Prefer the paragraph with actual holder-count/account evidence. Only use
   // a general "筹码" paragraph if the thesis has no explicit holder reference.
   let chipIndex=paragraphs.findIndex(p=>/(股东户数|股东人数|股东账户|持股账户|账户数)/.test(p));
   if(chipIndex<0)chipIndex=paragraphs.findIndex(p=>/(筹码结构|筹码分散|筹码集中|筹码)/.test(p));
   if(chipIndex<0){
-    return {html:'<p class="verdict-summary">'+escapeHtml(source).replace(/\n/g,'<br>')+'</p>',
+    return {html:'<p class="verdict-summary">'+escapeHtml(source).replace(/\\n/g,'<br>')+'</p>',
       chipEvidenceInserted:false};
   }
 
   let html='';
   paragraphs.forEach((paragraph,index)=>{
-    html+='<p class="verdict-summary">'+escapeHtml(paragraph).replace(/\n/g,'<br>')+'</p>';
+    html+='<p class="verdict-summary">'+escapeHtml(paragraph).replace(/\\n/g,'<br>')+'</p>';
     if(index===chipIndex){
       html+='<div class="analysis-inline-evidence chip-analysis-evidence thesis-chip-evidence">'+
         '<h5>股东人数与同期股价走势</h5>'+
