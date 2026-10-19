@@ -293,3 +293,60 @@ def test_quote_guard_does_not_erase_correct_price_or_unverified_history():
     inp = SimpleNamespace(quote={"latest_price": 29.72})
     assert align_verified_lead_price(current, inp) == current
     assert align_verified_lead_price(historical, inp) == historical
+
+
+def test_reader_voice_contract_is_first_and_has_no_word_quota():
+    from analysis.report_contract import _PROMPT_TEMPLATE, _SUBMIT_REPORT_TOOL
+    assert _PROMPT_TEMPLATE.startswith("【先遵守：面向用户的中文表达")
+    assert "没有固定字数、段落数、数字数量" in _PROMPT_TEMPLATE[:1300]
+    assert "不设字数" in _SUBMIT_REPORT_TOOL["description"]
+    assert "投资总结不需要交代看多多少条" in _PROMPT_TEMPLATE
+    assert "不要求投资总结复述票数" in _PROMPT_TEMPLATE
+
+
+def long_natural_example():
+    return "\n\n".join([
+        "29.92元的紫金矿业，我暂时不买。上半年有392亿元利润，经营现金流555亿元，现金回笼情况不错。矿山经营确实赚到了钱，不过矿产金只增长13.4%，矿产铜还下降了5.7%，这些增长背后商品价格贡献有多大，不能只看利润同比就下结论。",
+        "金价上涨时，矿山企业的毛利率很容易改善。今年上半年毛利率到了34.66%，利润数字自然比往年漂亮。市场通常会拿最新利润计算市盈率，11.76倍似乎便宜，但这需要金价长期维持高位。如果下一阶段黄金价格回落，利润下降以后，同一股价下的市盈率会重新升高。买股票时需要想的是几年能赚多少钱，而不只是这一年。",
+        "这家公司已经不是经营质量需要怀疑的阶段。资产负债率49.55%，现金流还高于账面利润，说明当期赚到的钱并非都停留在应收账款上。财务报表里能确认的经营能力可以认可，但企业质量并不能自动证明现在的股价合适。利润越处在景气高位，越需要认真考虑下一次价格下降会发生什么。",
+        "扩建新矿山也有两面性。行情好的时候投资，矿山投产后能增加产量，企业可能继续增长。但项目从建设到产生现金回报往往需要几年，建设花钱时的金属价格与投产时可能完全不同。如果在成本高的时候投入大量资金，等新产能出来恰好遇上商品价格回落，新增利润可能不及当年的设想。具体要看建设支出的进度和未来矿山的实际产量。",
+        "资本市场并不一定按当期利润决定股票价格。市场愿意给一个高市净率，隐含了对未来回报率的信心。过去公司的利润和分红一直改善，确实能支撑一部分溢价，不过给得太高就要求后面越来越顺利。投资者买的是以后持续分配给股东的现金，不能只把今年的盈利增速往后延伸。",
+        "还有管理层交接。陈景河卸任，邹来昌接任，这件事已经完成，不能把它写成没人知道未来由谁管理。更实际的问题是以后收购矿山、建设大型项目时，新班子能否保持过去的资本配置水平。这个问题需要几年经营记录才能看出来，现阶段没有必要仅凭交接就认定经营会变差。",
+        "所以按29.92元，我愿意承认紫金的经营能力和长期资源禀赋，也不着急按照最好年份的利润去买。现在决定投资回报的仍是金价、铜价、项目投入和未来可持续盈利。如果价格出现更充分的回撤，或者正常年份的利润水平有了更可靠的依据，再谈安全边际会更有意义。"
+    ])
+
+def test_long_natural_investment_discussion_has_no_850_character_ceiling():
+    from analysis.thesis_readability import _numbers
+    original = overloaded_example()
+    revised = long_natural_example()
+    assert len(revised) > 850
+    assert len(_numbers(revised)) > 8
+    assert accept_readable_edit(
+        original, revised, SimpleNamespace(quote={"latest_price": 29.92})
+    )
+
+
+@pytest.mark.asyncio
+async def test_rewriter_does_not_force_200_to_500_characters(monkeypatch):
+    original = overloaded_example()
+    revised = long_natural_example()
+    received = []
+    async def responder(prompt, **kwargs):
+        received.append(prompt)
+        assert "通常写200—500字" not in prompt
+        assert "最多选约三到六个" not in prompt
+        assert "没有固定字数" in prompt
+        assert kwargs["max_tokens"] >= 4000
+        return {"thesis_summary": revised}, "end_turn"
+    monkeypatch.setattr("backtest.llm_client.call_json_ex", responder)
+    source = {
+        "thesis_summary": original, "stance": "neutral",
+        "company_quality_stance": "bullish",
+        "current_odds_stance": "neutral",
+    }
+    edited = await polish_thesis_prose(
+        source, SimpleNamespace(quote={"latest_price": 29.92})
+    )
+    assert len(received) == 1
+    assert edited["thesis_summary"] == revised
+    assert edited["stance"] == source["stance"]
