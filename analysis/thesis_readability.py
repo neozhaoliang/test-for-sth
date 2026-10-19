@@ -18,6 +18,8 @@ from typing import Any, Mapping
 
 logger = logging.getLogger(__name__)
 
+from analysis.thesis_voice import HUMAN_SPEECH_GUIDANCE
+
 _NUM = re.compile(r"(?<![A-Za-z0-9])\d+(?:,\d{3})*(?:\.\d+)?")
 _PRIVATE = re.compile(
     r"买股票的老木匠|军师祭咖啡|陈chensir|双木林叔|private_source_id|"
@@ -26,6 +28,20 @@ _PRIVATE = re.compile(
 _DENSE_INDICATORS = re.compile(
     r"(?:PE|PB|ROE|EPS|TTM|LPR|同比|环比|分位|股东户数|"
     r"融资余额|资产负债率|增长率|收益率|派息率)", re.I
+)
+
+# These are not forbidden Chinese constructions in themselves. They are trigger
+# signals when they appear in a verdict, where LLMs tend to stack them into a
+# polished, symmetrical "AI answer" instead of explaining the actual problem.
+_FORMULAIC_PATTERNS = (
+    re.compile(r"我不(?:怀疑|否认|否定).{0,55}(?:我怀疑|我只是|而是)"),
+    re.compile(r"这不是.{0,35}而是"),
+    re.compile(r"我并不(?:否定|否认).{0,55}我只是"),
+    re.compile(r"什么(?:会|能)让我改变看法"),
+    re.compile(r"如果.{0,55}反过来"),
+    re.compile(r"真正的问题(?:是|在于)"),
+    re.compile(r"所以我(?:并不|不是|只是).{0,45}(?:在那之前|我只是|而是)"),
+    re.compile(r"归根结底|综上所述|说到底"),
 )
 
 
@@ -60,11 +76,13 @@ def readability_signals(text: str) -> dict:
         or (len(nums) >= 13 and long_dense >= 2)
         or (len(raw) >= 800 and long_dense >= 3)
     )
+    formulaic_count = sum(len(pattern.findall(raw)) for pattern in _FORMULAIC_PATTERNS)
     return {
-        "needs_edit": overloaded,
+        "needs_edit": overloaded or formulaic_count > 0,
         "numeric_mentions": len(nums),
         "dense_paragraphs": long_dense,
         "paragraph_count": len(paras),
+        "formulaic_patterns": formulaic_count,
     }
 
 
@@ -97,7 +115,7 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
         return False
     if len(old_nums) >= 13 and len(new_nums) > min(9, int(len(old_nums) * .5)):
         return False
-    if len(_paragraphs(revised)) < 3:
+    if len(_paragraphs(revised)) < 2 and len(revised) > 360:
         return False
     if readability_signals(revised)["needs_edit"]:
         return False
@@ -127,28 +145,25 @@ async def polish_thesis_prose(parsed: dict, inputs: Any = None) -> dict:
     try:
         from backtest.llm_client import call_json_ex
         prompt = (
-            "你是投资讨论区里讲道理、说人话的老朋友，也是一位善于解释问题的老师。"
-            "请把下面的投资结论改写成一段真正有人愿意看完的中文回答，而不是审计报告。"
-            "你的任务是删减和组织信息，不是补做股票研究。\n"
-            "写作要求：\n"
-            "1. 第一段直接、自然地回答这个价格值不值得买；坚持原立场，"
-            "公司质量与买入赔率可以不同。不要用“我给中性”“这不是……而是……”等套话。\n"
-            "2. 从长串事实中只选择对结论最关键的3—5个理由，"
-            "每个理由用日常语言说清楚为什么重要。用3—6个自然段，不要小标题、编号或条目。\n"
-            "3. 全文一般保留3—7处真正不可缺少的数字（如现价、利润、估值或持有人变化），"
-            "日期非必要不用写到日；剩余财报细节在报告其他章节，不必重新逐条抄写。"
-            "不要接连罗列营业收入、增长率、利润、现金流、负债率、分红、回购、产量。\n"
-            "4. 多用完整中文句子，少用PE/PB/ROE/EPS/TTM等缩写、括号、斜杠、百分比串，"
-            "若提指标只解释它在投资决策中的含义。让复杂的货币周期、矿业资本开支"
-            "或筹码变化读起来像人与人谈话，而不是机械核查清单。\n"
-            "5. 不要写“本次资料里没有价格锚”“本次检索”“没有证据不能”"
-            "等机械免责声明；真正影响结论的未知风险，用一句正常话说清楚即可。\n"
-            "6. 不得改变判断方向，不得新增或修改任何数字、人名、日期、"
-            "公司事项、管理层职务或假定价格；允许删掉不重要数字，"
-            "但保留原稿最关键的已证实事实、最强反方理由及真正能改变判断的条件。"
-            "绝对不能凭空提出新的估值情景。\n"
-            "7. 不要泄露或提及私人知识库作者、帖子、工具或内部审查流程。\n"
-            "返回JSON：{\"thesis_summary\":\"自然、分段的回答\"}。\n\n"
+            "你在帮一位投资者把已经完成的判断整理成能直接向朋友解释的中文。"
+            "不是重新研究，也不是把原稿润色成更漂亮、更完整的标准研报；要改的是机器式的思路和句型。"
+            "请先看下面的表达校准，再处理原结论。\n\n"
+            + HUMAN_SPEECH_GUIDANCE
+            + "\n\n改写要求：\n"
+            "1. 保留原来的投资立场、企业质量判断、当前价格判断和关键事实；你只负责表达，不补做研究。"
+            "不要把每一段都写成一条结论加三条理由，也不要为了显得完整而把所有风险逐项列完。\n"
+            "2. 读者需要听懂的是：你为什么这么看、哪件事最影响判断、这件事会怎样影响生意或股东的钱。"
+            "让解释顺着这个问题自然展开，段落数和长短随内容变化，不设固定数量。\n"
+            "3. 留下有用的数字，删掉重复数字和无关日期。数字只能删减，不能新增、改写或拼出新估值情景。"
+            "不必凑某个数字数量，也不必把详细章节已经展示的资料再抄一遍。\n"
+            "4. 不要用‘我不怀疑……我怀疑的是……’、‘这不是……而是……’、"
+            "‘我并不否定……我只是……’或‘什么会让我改变看法’之类句型。"
+            "不要为了显得口语化而加口头禅、反问、对仗或故意不完整的句子。\n"
+            "5. 不要反复写‘本次资料里没有’、‘不能据此判断’等流程式免责声明。"
+            "确实影响买卖的未知因素，放在它影响判断的地方用普通话讲清楚。\n"
+            "6. 只能使用原稿已有的事实和数字，不得改变事实、管理层姓名、职务或已经核实的交接情况；"
+            "不得提及私人知识库作者、帖子、工具或内部审查。\n"
+            "返回JSON：{\\"thesis_summary\\":\\"改写后的自然中文结论\\"}。\n\n"
             "不能更改的结构化判断：" + str(stances) +
             "\n原结论：\n" + original
         )
