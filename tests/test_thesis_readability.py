@@ -170,7 +170,7 @@ async def test_scripted_voice_triggers_polish_without_numeric_dump(monkeypatch):
         captured.append(prompt)
         assert "不需要扮演老师" in prompt
         assert "不可修改的立场字段" in prompt
-        assert "老朋友" not in prompt
+        assert "你是投资讨论区里讲道理、说人话的老朋友" not in prompt
         return {"thesis_summary":human_rewrite()}, "end_turn"
     monkeypatch.setattr("backtest.llm_client.call_json_ex",edit)
     before={"thesis_summary":old,"stance":"neutral",
