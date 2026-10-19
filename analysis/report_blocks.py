@@ -65,27 +65,70 @@ def _build_knowledge_hypotheses_block(inputs: Any) -> str:
         fundamentals=fundamentals,
         limit=24,
     )
-    # Every hypothesis is reduced to a *company-specific question*.
-    # Do not transmit investor identities, raw claims, foreign tickers or URLs
-    # to the prose generator: it must reason from this company's data instead.
-    unique = []
+    # The old projection passed only questions to the final model. This lost
+    # the economic mechanism itself, so a directly relevant KB observation
+    # (crowded institutional ownership / overseas-policy dependence) rarely
+    # influenced the investment conclusion. Pass reusable *mechanisms*, never
+    # private source text, identities or assertions about this issuer.
+    mechanisms = {
+        "fund_flow": (
+            "基金抱团可能形成价格与业绩的正反馈；当持仓拥挤、边际买家变少，"
+            "相同盈利增长也可能对应较低估值。持仓市值随股价上涨不等于净买入；"
+            "要核对基金持股数量、主动与被动资金、成交和融资余额。"
+        ),
+        "valuation_reflexivity": (
+            "经营利润增长与主题溢价扩张可能同时推动股价；当市场预期降温，"
+            "盈利预期下调与估值收缩可能叠加，不能只按高增长期的PE判断便宜。"
+        ),
+        "customer_dependency": (
+            "客户集中且由客户主导技术选型时，供应商可能有量产和认证壁垒，"
+            "但未必有定价和路线控制权；大客户压价、导入第二供应商可影响利润率。"
+        ),
+        "policy_geopolitics": (
+            "海外订单的政策风险应拆成：最终客户所在国、订单和生产所在地、"
+            "关键上游器件来源、清单的具体法律效力，以及客户主动调整供应链的可能。"
+            "海外营收不等于北美营收；已列入某项名单不等于被全面禁售。"
+        ),
+        "demand_financing": (
+            "AI硬件需求由云厂商资本开支驱动；资本开支如果更多依赖举债，"
+            "投资放缓可能依次传导到订单、售价、备货、应收账款和现金回款。"
+        ),
+        "moat_control": (
+            "量产良率与客户认证是真实的竞争能力，但不自动等于掌握标准、"
+            "关键器件和底层知识产权；应分别评估替代难度与价格谈判权。"
+        ),
+        "accounting_quality": (
+            "利润暴增而经营现金流跟不上，可能是回款账期、应收、库存和扩产占款；"
+            "须核对资产负债表与现金流量表变动，不能直接认定利润造假。"
+        ),
+    }
+    topics = {tag for item in hypotheses for tag in (item.get("topics") or [])}
+    topic_labels = list(dict.fromkeys(
+        label for item in hypotheses for label in (item.get("topic_labels") or [])
+    ))
+    # Keep the upstream retrieval choice: no KB entry -> no invented KB view.
+    active_mechanisms = [mechanisms[tag] for tag in mechanisms if tag in topics]
+    unique_questions = []
     seen = set()
     for item in hypotheses:
         for question in item.get("verification_questions") or []:
             if question not in seen:
-                unique.append(question)
+                unique_questions.append(question)
                 seen.add(question)
-            if len(unique) >= 18:
+            if len(unique_questions) >= 12:
                 break
-        if len(unique) >= 18:
+        if len(unique_questions) >= 12:
             break
-    topic_hint = ("重点主题：终端需求质量与融资来源。\n"
-                  if profile.archetype == "technology" else "")
+    if not active_mechanisms:
+        return "本次没有检索到适用的知识库因果线索；依据公司事实和市场数据独立分析。"
     return (
-        "待核验假设（不是事实）与可复用的投资研究问题（不含原帖、账号或案例）：\n"
-        + topic_hint
-        + ("\n".join("· " + q for q in unique) if unique
-           else "暂无额外的特定问题，依据公司的财务与市场数据判断。")
+        "知识库启发的待核验假设与机制（不是本公司的已证实事实，不得引用作者或原帖）：\n"
+        + "相关主题：" + "、".join(topic_labels[:10]) + "\n"
+        + "\n".join("· " + x for x in active_mechanisms[:7])
+        + "\n可结合公司数据核验：\n"
+        + "\n".join("· " + q for q in unique_questions[:12])
+        + "\n只有当本公司财报、公告和有日期的资金证据支持时，"
+          "才将上述机制转为投资判断；也要评价反例，不能机械看空。"
     )
 
 def _build_margin_block(

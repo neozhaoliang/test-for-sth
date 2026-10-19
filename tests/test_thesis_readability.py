@@ -182,3 +182,27 @@ async def test_scripted_voice_triggers_polish_without_numeric_dump(monkeypatch):
     assert after["stance"]==before["stance"]
     assert after["company_quality_stance"]==before["company_quality_stance"]
     assert after["current_odds_stance"]==before["current_odds_stance"]
+
+
+def test_generic_research_conclusion_is_flagged_for_rewrite():
+    scripted = (
+        "总体来看，公司经营韧性较强，估值中枢有望改善，"
+        "但风险与机遇并存，后续仍需持续关注业绩兑现。"
+    )
+    score = readability_signals(scripted)
+    assert score["scripted_tone"] is True
+    assert score["needs_edit"] is True
+
+
+def test_prose_edit_cannot_erase_critical_fund_and_policy_arguments():
+    original = (
+        "当前价格需要谨慎。2026年上半年经营活动现金流只有18亿元，"
+        "公募基金持股高度集中，北美客户依赖和美国1260H清单需要考虑。"
+        "机构抱团抬升估值后，如果新增资金不足，股价可能比利润波动得更剧烈。"
+    )
+    loses_risks = (
+        "公司今年盈利不错，股票现价却已经不便宜。"
+        "虽然短期有一些不确定性，但从长期经营看仍然具备增长空间。"
+        "按照这个买入价格承担波动，缺少足够安全边际。"
+    )
+    assert not accept_readable_edit(original, loses_risks)

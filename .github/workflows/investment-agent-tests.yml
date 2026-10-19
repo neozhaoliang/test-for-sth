@@ -79,6 +79,7 @@ jobs:
             analysis/investment_method_distiller.py \
             analysis/resource_mining_thesis.py \
             analysis/thesis_readability.py \
+            analysis/dimension_readability.py \
             analysis/resource_macro_transmission.py \
             analysis/macro_rates.py \
             analysis/rd_team.py \
@@ -201,6 +202,7 @@ jobs:
             tests/test_investment_method_distiller.py \
             tests/test_resource_mining_thesis.py \
             tests/test_thesis_readability.py \
+            tests/test_dimension_readability.py \
             tests/test_resource_macro_transmission.py \
             tests/test_market_context_asof.py \
             tests/test_realtime_price_asof.py \

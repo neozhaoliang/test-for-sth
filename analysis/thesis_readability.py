@@ -40,6 +40,11 @@ _SCRIPTED_PHRASES = (
     (re.compile(r"(?:什么会让我改变看法|我最不满意的是|钱怎么流也让我警惕)"), 1),
     (re.compile(r"(?:公司质量我认|我给(?:中性|看多|看空)|容错空间太薄)"), 1),
     (re.compile(r"(?:先说公司质量|经营上确实有硬东西|最后再说买点)"), 1),
+    (re.compile(r"(?:综上所述|综合来看|总体来看|整体而言|值得注意的是|需要强调的是)"), 1),
+    (re.compile(r"(?:风险与(?:机遇|机会)并存|经营韧性|核心矛盾|结构性脆弱|赔率空间|边际催化)"), 1),
+    (re.compile(r"(?:仍需(?:持续)?关注|后续(?:需要|仍需)(?:持续)?(?:关注|跟踪)|需要重点跟踪)"), 1),
+    (re.compile(r"(?:从(?:基本面|估值|风险|资金面|筹码)角度来看)"), 1),
+    (re.compile(r"(?:首先[^。！？]{0,160}其次|一方面[^。！？]{0,160}另一方面)"), 1),
 )
 
 
@@ -61,6 +66,48 @@ def _numbers(text: str) -> list[Decimal]:
 
 def _paragraphs(text: str) -> list[str]:
     return [p.strip() for p in re.split(r"\n\s*\n+", text or "") if p.strip()]
+
+
+# An edit may remove less decisive figures, but must not silently erase the
+# actual reason for the stance. These are factual themes, NOT stock verdicts.
+_MATERIAL_THEMES = {
+    "cash_collection": (
+        re.compile(r"经营(?:活动)?现金流|现金流[/／]净利润|现金回款|回款不足"),
+        re.compile(r"现金流|回款|现金收"),
+    ),
+    "foreign_policy": (
+        re.compile(r"1260H|BIS|实体清单|制裁|出口管制|美国国防部", re.I),
+        re.compile(r"1260H|BIS|清单|制裁|出口管制|美国国防部", re.I),
+    ),
+    "overseas_revenue": (
+        re.compile(r"海外(?:营收|收入)|境外(?:营收|收入)"),
+        re.compile(r"海外|境外"),
+    ),
+    "north_american_customers": (
+        re.compile(r"北美(?:营收|客户|市场)|美国(?:客户|采购|市场)"),
+        re.compile(r"北美|美国"),
+    ),
+    "fund_crowding": (
+        re.compile(r"机构抱团|机构集中|公募.{0,10}(?:基金|重仓|持股)|基金.{0,12}(?:持股|重仓|抱团)|资金抱团"),
+        re.compile(
+            r"机构.{0,14}(?:抱团|集中|重仓|持仓|拥挤|买盘|退出)|"
+            r"公募.{0,16}(?:基金|持仓|重仓|买盘)|"
+            r"基金.{0,14}(?:持仓|抱团|重仓|集中|买盘)|"
+            r"资金.{0,8}抱团"
+        ),
+    ),
+    "insider_sale": (
+        re.compile(r"(?:实控人|大股东|高管|董事长).{0,8}减持"),
+        re.compile(r"减持|卖出"),
+    ),
+}
+
+
+def _preserves_material_themes(original: str, revised: str) -> bool:
+    return all(
+        not source.search(original or "") or bool(kept.search(revised or ""))
+        for source, kept in _MATERIAL_THEMES.values()
+    )
 
 
 def readability_signals(text: str) -> dict:
@@ -113,6 +160,8 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
         return False
     if _PRIVATE.search(revised):
         return False
+    if not _preserves_material_themes(original, revised):
+        return False
     old_nums, new_nums = _numbers(original), _numbers(revised)
     if old_nums and not set(new_nums).issubset(set(old_nums)):
         return False
@@ -154,7 +203,7 @@ async def polish_thesis_prose(parsed: dict, inputs: Any = None) -> dict:
     try:
         from backtest.llm_client import call_json_ex
         prompt = (
-            "把下面的股票判断中明显做作的表达改掉，保留原有的投资判断。"
+            "把下面的股票判断改成正常投资讨论里的中文，保留原有投资判断。"
             "不需要扮演老师、老朋友、股评人，不要追求‘像真人说话’。"
             "这项工作是删掉不必要的表演和结构，不是换一种新的口语模板。\n"
             "优先处理：\n"
@@ -163,10 +212,17 @@ async def polish_thesis_prose(parsed: dict, inputs: Any = None) -> dict:
             "- 不刻意制造‘我不怀疑……我怀疑的是……’‘这不是……而是……’"
             "‘单看……合在一起……’这种对称句式；不用设问转场"
             "‘什么会让我改变看法’，不靠‘我最不满意的是’之类句子表演个人态度。\n"
-            "- 哪里真正有问题，就把事实和判断放在那里说。"
+            "- 哪里真正有问题，就把事实、具体动作和后果放在那里说。"
             "一句话说得清就一句话，必要时讲几段；段落长短可以不齐。"
+            "不要用'公司基本面坚实但风险仍需关注''风险与机遇并存'的公关腔，"
+            "不要把'总负债增长'写成'资本结构阶段性承压'。"
             "不要写固定数量的理由，不必强迫结尾交代未来条件。\n"
-            "- 原文中的关键财务和公司事实不能变，"
+            "- 以下仅是写法对照，不是本公司数据，不得照搬："
+            "生硬：'经营表现亮眼，但现金转换仍待改善，未来需关注回款质量。'"
+            "自然：'利润涨得快，钱却没收回来多少。先看应收和存货，才能知道增长占用了多少现金。'"
+            "不要把自然理解成每段都写一遍这个句式。\n"
+            "- 原文中的关键财务和公司事实不能变，特别不能删掉决定性的"
+            "客户、海外政策、机构集中、现金回款、内部人交易等主题。"
             "保留左右结论的关键依据以及审慎限定；数字太密时删掉非决定性数字，"
             "细节已经在专项章节。不要新增数字、金额、比例、日期、名称、职务、"
             "事件、价格目标或假设。\n"
