@@ -66,13 +66,15 @@ def test_screen_rejects_new_financial_facts_but_allows_numerical_selection():
         "紫金很好，现价不便宜。金价是最大风险。")
 
 
-def test_verified_transition_names_do_not_disappear_in_copy_edit():
+def test_verified_transition_names_may_live_in_management_section_not_thesis():
     source=overloaded_example()
     inputs=SimpleNamespace(management_capital={"succession":{"verified_transition":{
         "status":"completed", "founder":"陈景河",
         "chairman_appointed":"邹来昌",
     }}})
-    assert not accept_readable_edit(source,human_rewrite(),inputs)
+    # The management dimension retains the dated transition; the top-line
+    # investment thesis is allowed to focus on prices, profits and capex.
+    assert accept_readable_edit(source,human_rewrite(),inputs)
     restated=human_rewrite()+"\n\n陈景河已经卸任，邹来昌接任董事长，交接的事实很清楚，"\
         "但下一任管理层的长期表现还需要观察。"
     assert accept_readable_edit(source,restated,inputs)
@@ -168,7 +170,7 @@ async def test_scripted_voice_triggers_polish_without_numeric_dump(monkeypatch):
     captured=[]
     async def edit(prompt,**kwargs):
         captured.append(prompt)
-        assert "不需要扮演老师" in prompt
+        assert "不演投资大师" in prompt
         assert "不可修改的立场字段" in prompt
         assert "你是投资讨论区里讲道理、说人话的老朋友" not in prompt
         return {"thesis_summary":human_rewrite()}, "end_turn"
@@ -206,3 +208,88 @@ def test_prose_edit_cannot_erase_critical_fund_and_policy_arguments():
         "按照这个买入价格承担波动，缺少足够安全边际。"
     )
     assert not accept_readable_edit(original, loses_risks)
+
+
+def test_bad_lead_price_triggers_rewrite_and_verified_quote_can_replace_it():
+    from analysis.thesis_readability import _lead_price_conflicts
+    inputs = SimpleNamespace(quote={"latest_price": 29.72})
+    original = (
+        "9.85元买的是3.94倍市净率和一份把上半年利润年化后的约10倍市盈率。"
+        "2026年上半年净利润大增，矿产金产量却没跟上，利润主要靠价格上涨。"
+        "公司仍在扩张，原材料价格高企，当前估值对应的风险没有降低。"
+        "扩张的资本成本和现金回报需要持续观察。"
+    )
+    revised = (
+        "按29.72元这个价格看，紫金矿业不能只拿今年上半年的利润算便宜。"
+        "公司净利润涨得快，矿山产量增长却跟不上，金铜涨价贡献不小。"
+        "公司还在投钱建新矿，项目要等投产才能看到现金回报。"
+        "如果金价回落，今年看着好看的利润就未必能长期维持。"
+        "现在按高景气的利润给估值，我会更谨慎。"
+    )
+    assert _lead_price_conflicts(original, inputs)
+    assert not _lead_price_conflicts(revised, inputs)
+    assert accept_readable_edit(original, revised, inputs)
+    assert not accept_readable_edit(original, original, inputs)
+
+
+@pytest.mark.asyncio
+async def test_very_long_report_is_rewritten_not_force_padded(monkeypatch):
+    from analysis.thesis_readability import readability_signals
+    original = (
+        "9.85元买的是3.94倍市净率，2026年上半年营收只增15.78%，"
+        "净利润却增68%，矿产金只增13.4%、矿产铜降了5.7%。"
+        "跨周期ROE中位22.58%，正常化盈利收益率5.75%，"
+        "在建工程尚未核实。"
+    ) * 9
+    assert readability_signals(original)["too_long"]
+    out = (
+        "按29.72元看，紫金今年利润涨得快，金铜价格上涨是重要原因。"
+        "矿山产量没有同样快地增长，公司还在建设新的项目。"
+        "现在按高景气利润计算市盈率，很容易把周期顶部当便宜。"
+        "如果商品价格回落，新增产能却迟迟不能贡献现金流，"
+        "这个价格未必有足够安全边际。"
+    )
+    called = []
+    async def responder(prompt, **kwargs):
+        called.append(prompt)
+        assert "29.72元" in prompt
+        assert "不必逐个汇报" in prompt
+        assert "允许删掉非决定性的事实" in prompt
+        return {"thesis_summary": out}, "end_turn"
+    monkeypatch.setattr("backtest.llm_client.call_json_ex", responder)
+    before = {
+        "thesis_summary": original,
+        "stance": "bearish",
+        "company_quality_stance": "bullish",
+        "current_odds_stance": "bearish",
+    }
+    after = await polish_thesis_prose(
+        before, SimpleNamespace(quote={"latest_price": 29.72})
+    )
+    assert len(called) == 1
+    assert after["thesis_summary"] == out
+    assert after["stance"] == "bearish"
+    assert after["company_quality_stance"] == "bullish"
+
+
+def test_verifiable_opening_price_is_corrected_without_changing_other_figures():
+    from analysis.thesis_readability import align_verified_lead_price
+    before = {
+        "thesis_summary": "9.85元买的是3.94倍PB，历史价格25.14元。"
+                          "矿山利润不错，但金价如果跌下来，风险会显现。",
+        "stance": "bearish",
+    }
+    inputs = SimpleNamespace(quote={"latest_price": 29.72})
+    after = align_verified_lead_price(before, inputs)
+    assert after["thesis_summary"].startswith("29.72元买的是3.94倍PB")
+    assert "历史价格25.14元" in after["thesis_summary"]
+    assert after["stance"] == before["stance"]
+
+
+def test_quote_guard_does_not_erase_correct_price_or_unverified_history():
+    from analysis.thesis_readability import align_verified_lead_price
+    current = {"thesis_summary": "29.72元买还要考虑矿业周期。"}
+    historical = {"thesis_summary": "2024年股价曾到9.85元。"}
+    inp = SimpleNamespace(quote={"latest_price": 29.72})
+    assert align_verified_lead_price(current, inp) == current
+    assert align_verified_lead_price(historical, inp) == historical
