@@ -175,6 +175,33 @@ assert.ok(scenarioHtml.includes('32.80元'));
 assert.ok(scenarioHtml.includes('42.60元'));
 assert.ok(scenarioHtml.includes('50.14元'));
 assert.equal(chartCount(scenarioHtml),7);
+// Regression based on the user's Shenhua screenshot: narrative paragraph,
+// related chart, next paragraph, related chart. Do not create one gallery.
+const shenhuaParagraphs=[
+  '中国神华煤电路港航一体化。2025年报前五大客户只占营收14.6%，2026年上半年经营现金流546.64亿元，是净利润的1.90倍。',
+  '问题在于买入价格。PE(TTM)20.69倍，PB2.477倍，五年分位99.4%，估值处在历史高位。',
+  '分红从2.55元降到2.01元，同时为了收购资产，资产负债率从23.31%抬到40.27%。',
+  '拿三种历史参照价格比较：PB回到五年中位对应36.99元；用历史较强每股盈利3.503元配14.31倍PE，对应50.14元。',
+  '公司业务不错，但能否买入还要看价格。'
+];
+const shenhua=JSON.parse(JSON.stringify(scenarioReport));
+shenhua.summary.thesis_summary=shenhuaParagraphs.join('\n\n');
+const grouped=ctx.assignVerdictFiguresToParagraphs(shenhuaParagraphs,shenhua);
+assert.equal(JSON.stringify(grouped.map(row=>row.map(item=>item.id))),
+  JSON.stringify([['cash','customers'],['valuation'],['dividends','debt'],
+    ['earnings_power','price_refs'],[]]));
+const reading=inline(shenhua);
+assert.equal(chartCount(reading),7);
+for(let i=0;i<shenhuaParagraphs.length-1;i++){
+  const here=reading.indexOf(shenhuaParagraphs[i]);
+  const next=reading.indexOf(shenhuaParagraphs[i+1]);
+  assert.ok(here>=0&&next>here,'all source paragraphs preserved in order');
+  if(grouped[i].length){
+    const chart=reading.indexOf(grouped[i][0].html,here);
+    assert.ok(here<chart&&chart<next,'supporting chart must immediately follow matching paragraph '+i);
+  }
+}
+
 scenarioReport.valuation_model.investor_reference.earnings_power.status='insufficient_history';
 assert.ok(!inline(scenarioReport).includes('历史盈利 × PE 条件价格'));
 
