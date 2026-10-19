@@ -69,6 +69,40 @@ def _paragraphs(text: str) -> list[str]:
     return [p.strip() for p in re.split(r"\n\s*\n+", text or "") if p.strip()]
 
 
+def _prose_layout(text: str) -> dict[str, int]:
+    """Detect unreadable delivery, not an arbitrary overall word count.
+
+    Large evidence inventories crammed into one breath are much harder to read
+    than long explanations with ordinary sentences and separate paragraphs.
+    A normal long-form report should not trigger just for having many words.
+    """
+    paras = _paragraphs(text)
+    sentences = [
+        item.strip()
+        for para in paras
+        for item in re.split(r"[。！？\n]+", para)
+        if item.strip()
+    ]
+    dense = sum(
+        (len(_numbers(item)) >= 5 and len(item) >= 65)
+        or (len(_numbers(item)) >= 3 and len(item) >= 120)
+        or len(item) >= 190
+        for item in sentences
+    )
+    packed_paras = sum(
+        len(para) >= 340 and (
+            len(_numbers(para)) >= 8 or
+            para.count("；") + para.count(";") >= 3
+        )
+        for para in paras
+    )
+    return {
+        "dense_sentences": dense,
+        "packed_paragraphs": packed_paras,
+        "longest_sentence_chars": max((len(v) for v in sentences), default=0),
+    }
+
+
 # An edit may remove less decisive figures, but must not silently erase the
 # actual reason for the stance. These are factual themes, NOT stock verdicts.
 _MATERIAL_THEMES = {
@@ -186,11 +220,18 @@ def readability_signals(text: str) -> dict:
         or (len(raw) >= 760 and long_dense >= 2)
     )
     tone_score = _scripted_score(raw)
-    # Length by itself is not a reason to shorten a well-explained report.
-    # This is only a trigger when the long text also reads like an evidence dump.
-    verbose = len(raw) > 850 and (long_dense >= 1 or tone_score >= 2)
+    layout = _prose_layout(raw)
+    # Length itself never forces a rewrite; packing and canned phrasing do.
+    verbose = len(raw) > 850 and (
+        layout["dense_sentences"] > 0 or layout["packed_paragraphs"] > 0
+        or tone_score >= 2
+    )
     return {
-        "needs_edit": overloaded or verbose or tone_score >= 2,
+        "needs_edit": (
+            overloaded or verbose or tone_score >= 2
+            or layout["dense_sentences"] >= 2
+            or layout["packed_paragraphs"] >= 1
+        ),
         "numeric_overload": overloaded,
         "too_long": verbose,
         "scripted_tone": tone_score >= 2,
@@ -198,6 +239,7 @@ def readability_signals(text: str) -> dict:
         "numeric_mentions": len(nums),
         "dense_paragraphs": long_dense,
         "paragraph_count": len(paras),
+        **layout,
     }
 
 
@@ -251,6 +293,14 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
     # improvement, even if it is shorter and uses fewer figures.
     if edited_signals["scripted_score"] >= 2:
         return False
+    # A rewrite that preserves every single figure in equally dense sentences
+    # is still the same evidence inventory in different words.
+    if original_signals["dense_sentences"] >= 2:
+        if edited_signals["dense_sentences"] >= original_signals["dense_sentences"]:
+            return False
+    if original_signals["packed_paragraphs"] >= 1:
+        if edited_signals["packed_paragraphs"] >= original_signals["packed_paragraphs"]:
+            return False
     # Prevent erasing the investment argument; long, substantive explanations
     # are welcome as long as they remain grounded in the source figures.
     if original and len(revised) < min(100, len(original) * .16):
