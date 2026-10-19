@@ -364,3 +364,62 @@ def test_knowledge_hypotheses_block_marks_kol_claims_as_hypotheses():
     assert "不是事实" in text
     assert "终端需求质量与融资来源" in text
     assert "下游资本开支由自由现金流还是新增债务" in text
+
+
+def test_kb_company_report_keeps_causal_crowding_and_geopolitics_without_source_leak():
+    inputs = SimpleNamespace(
+        stock_code="300308",
+        stock_name="中际旭创",
+        research_profile=ResearchProfile(
+            archetype="technology", label="科技/先进制造",
+            industry="通信设备", readiness=1.0,
+        ),
+        fundamentals={"facts": {
+            "sw_industry": "通信设备",
+            "overseas_revenue_pct": 94.82,
+            "top5_customer_pct": 75.98,
+        }},
+        knowledge_excerpts=[
+            KnowledgeExcerpt(
+                source="private_kol", title="科技基金抱团",
+                distilled=(
+                    "【原则】科技股公募抱团后边际买家可能变少。"
+                    "【机制】被动ETF与主动基金调仓会放大估值波动。"
+                    "【适用条件】科技股高估值行情。"
+                ),
+                published_at="2026-09-30 10:00:00",
+            ),
+            KnowledgeExcerpt(
+                source="private_kol", title="光模块海外风险",
+                distilled=(
+                    "【原则】海外客户集中时美国政策风险值得检验。"
+                    "【机制】客户主动更换供应商可能影响订单和毛利率。"
+                    "【适用条件】国际数据中心硬件供应商。"
+                ),
+                published_at="2026-09-30 10:00:00",
+            ),
+        ],
+    )
+    rendered = _build_knowledge_hypotheses_block(inputs)
+    assert "基金抱团可能形成价格与业绩的正反馈" in rendered
+    assert "基金持股数量" in rendered
+    assert "海外营收不等于北美营收" in rendered
+    assert "已列入某项名单不等于被全面禁售" in rendered
+    assert "不是本公司的已证实事实" in rendered
+    assert "private_kol" not in rendered
+    assert "原帖标题" not in rendered
+
+
+def test_kb_no_entries_does_not_invent_crowding_or_sanction_facts():
+    inputs = SimpleNamespace(
+        stock_code="300308", stock_name="中际旭创",
+        research_profile=ResearchProfile(
+            archetype="technology", label="科技/先进制造",
+            industry="通信设备", readiness=1.0,
+        ),
+        fundamentals={"facts": {"overseas_revenue_pct": 94.82}},
+        knowledge_excerpts=[],
+    )
+    rendered = _build_knowledge_hypotheses_block(inputs)
+    assert "没有检索到" in rendered
+    assert "基金抱团可能" not in rendered
