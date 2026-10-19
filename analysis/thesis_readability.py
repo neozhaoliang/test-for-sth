@@ -366,12 +366,10 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
         return False
     # A rewrite that preserves every single figure in equally dense sentences
     # is still the same evidence inventory in different words.
-    if original_signals["dense_sentences"] >= 2:
-        if edited_signals["dense_sentences"] >= 2:
-            return False
-    if original_signals["packed_paragraphs"] >= 1:
-        if edited_signals["packed_paragraphs"] >= 1:
-            return False
+    if edited_signals["dense_sentences"] >= 2:
+        return False
+    if edited_signals["packed_paragraphs"] >= 1:
+        return False
     # Prevent erasing the investment argument; long, substantive explanations
     # are welcome as long as they remain grounded in the source figures.
     if original and len(revised) < min(100, len(original) * .16):
