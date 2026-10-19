@@ -247,7 +247,7 @@ async def test_very_long_report_is_rewritten_not_force_padded(monkeypatch):
         "矿山产量没有同样快地增长，公司还在建设新的项目。"
         "现在按高景气利润计算市盈率，很容易把周期顶部当便宜。"
         "如果商品价格回落，新增产能却迟迟不能贡献现金流，"
-        "这个买价未必有足够安全边际。"
+        "这个价格未必有足够安全边际。"
     )
     called = []
     async def responder(prompt, **kwargs):
