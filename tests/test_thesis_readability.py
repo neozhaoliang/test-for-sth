@@ -411,6 +411,9 @@ def test_zhongji_evidence_dump_triggers_rewrite():
     assert len(errors) == 1
     assert str(errors[0]["stated"]) == "620.86"
     assert str(errors[0]["expected"]) == "1084.27"
+    # A correct explicit three-trade subtotal must not be flagged.
+    valid = raw.replace("三笔已实施合计620.86万股", "三笔已实施合计1084.27万股")
+    assert inconsistent_share_sale_totals(valid) == []
 
 
 def test_zhongji_natural_rewrite_is_accepted_and_preserves_key_risks():
