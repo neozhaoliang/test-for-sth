@@ -56,7 +56,7 @@ async def test_dimension_polish_only_updates_safe_sections(monkeypatch):
     edits = []
     async def fake_llm(prompt, **kwargs):
         edits.append(prompt)
-        assert "只能" in kwargs["repair_requirements"]
+        assert "只输出" in kwargs["repair_requirements"]
         assert "正常投资者讨论" in prompt
         return {"risk_quality": natural()}, "end_turn"
     monkeypatch.setattr("backtest.llm_client.call_json_ex", fake_llm)
