@@ -103,6 +103,9 @@ def _build_knowledge_hypotheses_block(inputs: Any) -> str:
         ),
     }
     topics = {tag for item in hypotheses for tag in (item.get("topics") or [])}
+    topic_labels = list(dict.fromkeys(
+        label for item in hypotheses for label in (item.get("topic_labels") or [])
+    ))
     # Keep the upstream retrieval choice: no KB entry -> no invented KB view.
     active_mechanisms = [mechanisms[tag] for tag in mechanisms if tag in topics]
     unique_questions = []
@@ -119,7 +122,7 @@ def _build_knowledge_hypotheses_block(inputs: Any) -> str:
     if not active_mechanisms:
         return "本次没有检索到适用的知识库因果线索；依据公司事实和市场数据独立分析。"
     return (
-        "知识库启发的待核验机制（不是本公司的已证实事实，不得引用作者或原帖）：\\n"
+        "知识库启发的待核验假设与机制（不是本公司的已证实事实，不得引用作者或原帖）：\\n"\n        + "相关主题：" + "、".join(topic_labels[:10]) + "\\n"
         + "\\n".join("· " + x for x in active_mechanisms[:7])
         + "\\n可结合公司数据核验：\\n"
         + "\\n".join("· " + q for q in unique_questions[:12])
