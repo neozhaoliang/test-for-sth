@@ -155,6 +155,7 @@ jobs:
         run: |
           node tests/check_industry_valuation_ui.js /tmp/investment-webui.js
           node tests/check_report_toc_ui.js /tmp/investment-webui.js
+          node tests/check_verdict_figures_ui.js /tmp/investment-webui.js
           node tests/check_style_returns_ui.js /tmp/investment-webui.js
           node --check web/stock_autocomplete.js
           node tests/check_stock_autocomplete_ui.js
@@ -439,6 +440,7 @@ jobs:
           node tests/check_dashboard_ui.js /tmp/investment-dashboard.js
           node tests/check_industry_valuation_ui.js /tmp/investment-dashboard.js
           node tests/check_report_toc_ui.js /tmp/investment-dashboard.js
+          node tests/check_verdict_figures_ui.js /tmp/investment-dashboard.js
           node tests/check_style_returns_ui.js /tmp/investment-dashboard.js
           node --check web/stock_autocomplete.js
           node tests/check_stock_autocomplete_ui.js
