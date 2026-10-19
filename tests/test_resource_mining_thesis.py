@@ -165,7 +165,8 @@ async def test_resource_repair_accepts_long_explanatory_prose_above_old_500_char
     assert len(long_form) > 500
 
     async def fake_llm(prompt, **kwargs):
-        assert "自然段" in prompt
+        assert "不要强制首段质量" in prompt
+        assert "4—6个自然段" not in prompt
         assert kwargs["max_tokens"] >= 2500
         return {"thesis_summary": long_form}, "end_turn"
 
