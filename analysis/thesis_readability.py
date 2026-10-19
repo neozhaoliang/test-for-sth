@@ -124,8 +124,8 @@ def _quote_price(inputs: Any) -> Decimal | None:
 
 
 _LEAD_PRICE = re.compile(
-    r"^\\s*(?:现价|按|以|现在|当前)?\\s*"
-    r"(?P<price>\\d+(?:\\.\\d+)?)\\s*元"
+    r"^\s*(?:现价|按|以|现在|当前)?\s*"
+    r"(?P<price>\d+(?:\.\d+)?)\s*元"
     r"(?=买|对应|的股票|这个价格|的市盈率|的市净率|，)"
 )
 
