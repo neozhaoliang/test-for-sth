@@ -18,6 +18,7 @@ from analysis.knowledge_context import build_knowledge_hypotheses, format_knowle
 from analysis.research_profile import ResearchProfile, profile_prompt_block
 from analysis.report_contract import _PROMPT_TEMPLATE
 from analysis.succession_risk import succession_prompt_block
+from analysis.thesis_voice import HUMAN_SPEECH_GUIDANCE
 from model.m_analysis import CandidateOpinion, KnowledgeExcerpt
 
 
@@ -1399,6 +1400,7 @@ def _build_prompt(inputs: Any, candidates: List[CandidateOpinion]) -> str:
         profitability_block=_build_profitability_block(inputs.profitability_trend),
         commodity_block=_build_commodity_block(inputs.commodity_signal),
         freight_block=_build_freight_block(inputs.freight_signal),
+        human_speech_guidance_block=HUMAN_SPEECH_GUIDANCE,
     )
 
 
