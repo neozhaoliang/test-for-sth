@@ -2441,7 +2441,7 @@ function verdictFigure(title, period, body, foot) {
     body+(foot?'<p class="figure-foot">'+escapeHtml(foot)+'</p>':'')+'</section>';
 }
 function verdictBar(label, value, upper, unit, color) {
-  const width=Math.min(100,Math.max(0,upper>0?value/upper*100:0));
+  const width=Math.min(100,Math.max(0,upper>0?Math.abs(value)/upper*100:0));
   return '<div class="verdict-bar">'+
     '<div class="verdict-bar-head"><span>'+escapeHtml(label)+'</span><b>'+
       escapeHtml(verdictFixed(value)+unit)+'</b></div>'+
@@ -2477,18 +2477,19 @@ function collectVerdictFigures(report) {
 
   const profit=verdictNumber(facts.net_profit);
   const cash=verdictNumber(facts.operating_cash_flow);
-  if(profit!==null && cash!==null && profit>0 && cash>=0) {
+  if(profit!==null && cash!==null && profit>0) {
     const net=profit/1e8, operating=cash/1e8;
-    const max=Math.max(net,operating,.001);
+    const max=Math.max(net,Math.abs(operating),.001);
     const ratio=verdictNumber(facts.cash_to_profit_ratio);
     figures.push({id:'cash',match:/现金流|净利润|利润|回款|经营现金/,
       html:verdictFigure('利润与经营现金流',
         String(facts.cash_profit_period||facts.finance_period||'报告期未注明'),
         '<div class="verdict-bars">'+
           verdictBar('净利润',net,max,'亿元','#5266c9')+
-          verdictBar('经营现金流',operating,max,'亿元','#238f8a')+'</div>',
+          verdictBar('经营现金流',operating,max,'亿元',operating<0?'#c65f54':'#238f8a')+'</div>',
         (ratio===null?'':('经营现金流／净利润：'+verdictFixed(ratio,2)+'倍。'))+
-          '同一报告期金额对比，经营现金流不等于自由现金流。')});
+          '同一报告期金额对比，经营现金流不等于自由现金流。'+
+          (operating<0?'负值柱长按绝对金额画，负号仍保留。':''))});
   }
 
   const pe=verdictPercentileRow(hist.pe_percentiles);
