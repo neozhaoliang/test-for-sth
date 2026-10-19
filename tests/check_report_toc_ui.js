@@ -103,8 +103,15 @@ hrefs=verify(html);
 assert.ok(html.includes(longThesis), 'full long-form investment thesis must be visible');
 assert.ok(html.includes('\\n\\n')===false, 'paragraph breaks should not be rendered as literal slash-n');
 assert.ok(html.includes('\n\n'), 'plain-text paragraph breaks are preserved');
-for(const id of ['report-capital','report-dimensions','report-investor-reference','roe-discount-lab'])
+for(const id of ['report-dimensions','report-investor-reference','roe-discount-lab'])
   assert.ok(hrefs.includes(id),'missing main section '+id);
+assert.ok(html.includes('id="report-capital"'), 'capital disclosures stay available');
+assert.ok(!hrefs.includes('report-capital'), 'capital evidence is no longer a separate TOC chapter');
+const returnStart=html.indexOf('id="report-dimension-shareholder_returns"');
+const returnEnd=html.indexOf('id="report-dimension-growth_elasticity"');
+const capitalPos=html.indexOf('id="report-capital"');
+assert.ok(returnStart<capitalPos&&capitalPos<returnEnd,
+  'capital records must appear directly under shareholder return analysis');
 for(const key of fields)
   assert.ok(hrefs.includes('report-dimension-'+key),'missing detail link '+key);
 assert.ok(html.includes('展开 12 项分析子目录'));

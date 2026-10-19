@@ -263,6 +263,50 @@ body, input, select, textarea, button { font-family:inherit; }
 #result :is(.analysis-prose,.verdict-summary) { overflow-wrap:anywhere; }
 .analysis-entry { padding:19px 0; }
 .analysis-entry h4 { line-height:1.6; }
+
+/* Supporting charts and original issuer announcements belong immediately
+   below the narrative paragraph they support, not in a later chapter. */
+#result .analysis-inline-evidence {
+  min-width:0;
+  margin:14px 0 0;
+  padding:14px 15px;
+  border:1px solid #e2eaf5;
+  border-radius:11px;
+  background:#f9fbfe;
+}
+#result .analysis-inline-evidence h5 {
+  margin:0 0 9px;
+  font-size:14px;
+  line-height:1.55;
+  color:#263f62;
+}
+#result .analysis-evidence {
+  min-width:0;
+  margin:12px 0 0;
+  padding:12px;
+  background:#fff;
+  border:1px solid #e3ebf5;
+  border-radius:9px;
+  overflow-x:auto;
+}
+#result .shareholder-return-evidence .analysis-evidence:first-child { margin-top:0; }
+#result .analysis-inline-evidence svg {
+  display:block;
+  max-width:100%;
+  height:auto;
+}
+#result .analysis-inline-evidence .investor-band-table {
+  min-width:540px;
+}
+#result .analysis-inline-evidence .investor-band-table :is(th,td) {
+  padding:7px 9px;
+  font-size:12px;
+}
+@media(max-width:530px) {
+  #result .analysis-inline-evidence { padding:10px; }
+  #result .analysis-evidence { padding:9px; }
+}
+
 .analysis-index { flex-shrink:0; }
 .investor-reference,.style-insight {
   padding:19px 20px;
@@ -809,7 +853,7 @@ body, input, select, textarea, button { font-family:inherit; }
   min-width:0;
   margin:2px 0 0;
   border:1px solid #dfe7f3;
-  border-radius:12px;
+  border-radius:8px;
   background:#f8fafd;
   overflow:hidden;
 }
@@ -818,7 +862,7 @@ body, input, select, textarea, button { font-family:inherit; }
   flex-direction:column;
   justify-content:center;
   min-width:0;
-  padding:14px 15px;
+  padding:7px 10px;
   margin:0;
   background:transparent;
   border:0;
@@ -831,16 +875,16 @@ body, input, select, textarea, button { font-family:inherit; }
 #result .dashboard-charts .primary-kpis .metric label {
   display:block;
   margin:0;
-  font-size:11px;
+  font-size:10px;
   font-weight:650;
   color:#72809a;
   white-space:nowrap;
 }
 #result .dashboard-charts .primary-kpis .metric strong {
   display:block;
-  margin:6px 0 3px;
-  font-size:clamp(19px,2.4vw,24px);
-  font-weight:800;
+  margin:2px 0 1px;
+  font-size:clamp(15px,1.7vw,18px);
+  font-weight:750;
   line-height:1.25;
   letter-spacing:-.035em;
   white-space:nowrap;
@@ -849,8 +893,8 @@ body, input, select, textarea, button { font-family:inherit; }
 #result .dashboard-charts .primary-kpis .metric small {
   display:block;
   margin:0;
-  font-size:10px;
-  line-height:1.55;
+  font-size:9px;
+  line-height:1.35;
   color:#7d8ba2;
   overflow-wrap:anywhere;
 }
@@ -858,13 +902,13 @@ body, input, select, textarea, button { font-family:inherit; }
    Only the KPI strip scrolls horizontally, never the whole article. */
 @media(max-width:700px) {
   #result .dashboard-charts .metric-strip.primary-kpis {
-    grid-template-columns:repeat(4,minmax(149px,1fr));
+    grid-template-columns:repeat(4,minmax(117px,1fr));
     overflow-x:auto;
     overscroll-behavior-x:contain;
     -webkit-overflow-scrolling:touch;
   }
-  #result .dashboard-charts .primary-kpis .metric { padding:12px 13px; }
-  #result .dashboard-charts .primary-kpis .metric strong { font-size:20px; }
+  #result .dashboard-charts .primary-kpis .metric { padding:7px 9px; }
+  #result .dashboard-charts .primary-kpis .metric strong { font-size:16px; }
 }
 
 /* ROE calculator: sliders and the live price card share one two-column row.
@@ -959,3 +1003,35 @@ body, input, select, textarea, button { font-family:inherit; }
     grid-template-columns:minmax(0,1fr);
   }
 }
+
+/* Place stock price in its annual range, not merely compare a volatile
+   single 20-day return. The dates and unadjusted CLOSE basis remain visible. */
+#result .stock-ytd-position {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:baseline;
+  gap:3px 7px;
+  margin:13px 0 0;
+  padding-top:10px;
+  border-top:1px solid #e6ecf5;
+  font-size:12px;
+  line-height:1.5;
+  color:#344764;
+}
+#result .stock-ytd-position strong {
+  color:#2551a3;
+  font-size:16px;
+  font-weight:800;
+  font-variant-numeric:tabular-nums;
+}
+#result .stock-ytd-position-meta {
+  font-size:11px;
+  color:#687b98;
+}
+
+#result #roe-discount-lab .roe-scenarios {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0;}
+#result #roe-discount-lab .roe-scenario {border:1px solid #546784;border-radius:8px;padding:10px;min-width:0;}
+#result #roe-discount-lab .roe-scenario span {display:block;font-size:11px;color:#d0e0fb;}
+#result #roe-discount-lab .roe-scenario .lab-price {display:block;font-size:20px;margin:6px 0 0;white-space:nowrap;}
+#result #roe-discount-lab .roe-cycle-caveat {font-size:12px;color:#526783;line-height:1.65;}
+@media(max-width:390px){#result #roe-discount-lab .roe-scenarios {grid-template-columns:1fr;}}

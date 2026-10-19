@@ -123,3 +123,68 @@ async def test_stale_index_is_not_passed_off_as_contemporaneous(monkeypatch):
     out=await market_context.get_market_context("SH601899",as_of=date(2026,10,15))
     assert out["sector_rotation"]["benchmarks"]==[]
     assert out["sector_rotation"]["evidence_tier"]=="none"
+
+
+
+@pytest.mark.asyncio
+async def test_ytd_high_uses_only_unadjusted_closes_and_asof_cutoff(monkeypatch):
+    dates = pd.bdate_range("2025-12-30", "2026-10-20")
+    closes = [29.0 if x.year == 2025 else
+              39.55 if str(x.date()) == "2026-02-27" else
+              29.92 if str(x.date()) == "2026-10-16" else
+              50.0 if str(x.date()) == "2026-10-19" else 28.0
+              for x in dates]
+    async def no_indices():return {}
+    async def no_boards(*,as_of=None):return {}
+    async def prices(*args,**kwargs):
+        return pd.DataFrame({"date":dates,"close":closes})
+    monkeypatch.setattr(market_context,"_get_index_series",no_indices)
+    monkeypatch.setattr(market_context,"_get_sector_series",no_boards)
+    monkeypatch.setattr(market_context,"get_price_history",prices)
+    out=await market_context.get_market_context("SH601899",as_of=date(2026,10,16))
+    stock=out["stock"]
+    assert stock["latest_date"]=="2026-10-16"
+    assert stock["ytd_close_high"]==39.55
+    assert stock["ytd_close_high_date"]=="2026-02-27"
+    assert stock["ytd_close_latest"]==29.92
+    assert stock["ytd_close_as_of"]=="2026-10-16"
+    assert stock["ytd_close_basis"]=="unadjusted_daily_close"
+    assert stock["ytd_close_drawdown_pct"]==round((29.92/39.55-1)*100,2)
+    assert stock["ytd_close_drawdown_pct"]<0
+    assert stock["hist_high"]==39.55  # future 50.0 excluded
+    # No fictional intraday high is available from the actual price source.
+    assert "ytd_intraday_high" not in stock
+
+
+@pytest.mark.asyncio
+async def test_ytd_high_requires_january_data_not_truncated_partial_year(monkeypatch):
+    dates=pd.bdate_range("2026-06-01","2026-10-16")
+    async def no_indices():return {}
+    async def no_boards(*,as_of=None):return {}
+    async def partial_prices(*args,**kwargs):
+        return pd.DataFrame({"date":dates,"close":[20+i/10 for i in range(len(dates))]})
+    monkeypatch.setattr(market_context,"_get_index_series",no_indices)
+    monkeypatch.setattr(market_context,"_get_sector_series",no_boards)
+    monkeypatch.setattr(market_context,"get_price_history",partial_prices)
+    out=await market_context.get_market_context("SH601899",as_of=date(2026,10,16))
+    assert out["stock"]["latest_date"]=="2026-10-16"
+    assert "ytd_close_high" not in out["stock"]
+
+
+@pytest.mark.asyncio
+async def test_ytd_high_history_uses_correct_calendar_year(monkeypatch):
+    dates=pd.to_datetime(["2025-01-02","2025-06-30","2025-12-31",
+                          "2026-01-05","2026-02-27","2026-06-30"])
+    closes=[100,110,150,20,39.55,25.14]
+    async def no_indices():return {}
+    async def no_boards(*,as_of=None):return {}
+    async def prices(*args,**kwargs):
+        return pd.DataFrame({"date":dates,"close":closes})
+    monkeypatch.setattr(market_context,"_get_index_series",no_indices)
+    monkeypatch.setattr(market_context,"_get_sector_series",no_boards)
+    monkeypatch.setattr(market_context,"get_price_history",prices)
+    out=await market_context.get_market_context("SH601899",as_of=date(2026,6,30))
+    assert out["stock"]["ytd_close_high"]==39.55
+    assert out["stock"]["hist_high"]==150.0
+    assert out["stock"]["ytd_close_high_date"]=="2026-02-27"
+    assert out["stock"]["ytd_close_latest"]==25.14

@@ -2327,13 +2327,9 @@ function renderDashboardCharts(report) {
     renderProfitabilityTrendChart(report.profitability_trend));
   html+=chartTile('研究视角倾向（非综合评分）','各方面的文字分析倾向示意；不得求和、平均或据此推导买卖结论',
     scores.length>=6?renderDimensionBars(scores):'');
-  html+=chartTile('历年分红与回购','金额和回购分开理解，原图含历史金额及备注',
-    (report.dividend_chart || []).length?renderDividendChart(report.dividend_chart):'');
   html+='<div class="market-structure-lines" role="group" aria-label="市场情绪与行业广度">'+
     renderSentimentMixChart(report.sentiment)+
     renderIndustryBreadthChart(report.industry_comparison)+'</div>';
-  html+=chartTile('股价与股东户数：筹码集中还是分散？','结合股价与已披露股东户数的变化，判断筹码结构的变化方向',
-    renderChipPositionChart(report.chip_price_context, report));
   html+=chartTile('历史估值区间','PE(TTM)历史序列，失真区间将按原图分位裁剪',
     renderValuationHistoryChart((report.valuation_history || {}).history_monthly || []));
   html+='</div></section>';
@@ -2356,9 +2352,11 @@ function renderIssuerCapitalSection(report) {
   const reconciled=data.reconciled_ownership_not_additional_sales || [];
   if(!sales.length&&!issuances.length&&!buybacks.length)return '';
   const fmt=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('zh-CN'):'暂缺';
-  let html='<section class="research-panel capital-flow-section" id="report-capital">'+
-    '<h3>股东减持、融资与回购</h3>'+
-    '<p class="section-caption">把卖方变现、公司融资和回购分开看，均以公司正式公告为准。</p>'+
+  // This ledger is INLINE under the shareholder-return analysis, not a
+  // separate chapter far from the discussion that needs its evidence.
+  let html='<div class="analysis-evidence capital-flow-section" id="report-capital">'+
+    '<h5>回购、股东减持与股权融资公告记录</h5>'+
+    '<p class="section-caption">区分公司回购、股东实际减持和公司增发；只有核实执行的交易才写为完成，公告链接可追溯。</p>'+
     '<div style="overflow-x:auto"><table class="investor-band-table">'+
     '<thead><tr><th>公告日</th><th>交易主体与性质</th><th>实际规模</th><th>出处</th></tr></thead><tbody>';
   sales.slice(0,10).forEach(e=>{
@@ -2369,26 +2367,75 @@ function renderIssuerCapitalSection(report) {
       (e.source_url?safeExternalLink(e.source_url,'公司公告'):'暂缺')+'</td></tr>';
   });
   issuances.slice(0,5).forEach(e=>{
-    html+='<tr><td>'+escapeHtml(e.disclosed_at||'')+'</td><td>公司发行新股融资</td><td>'+
+    const kind=String(e.document_title||e.issuance_type||'');
+    const issueLabel=/定增|非公开发行|向特定对象发行/.test(kind)?
+      '公司定向增发':'公司发行新股融资';
+    html+='<tr><td>'+escapeHtml(e.disclosed_at||'')+'</td><td>'+issueLabel+'</td><td>'+
       fmt(e.shares)+'股'+(e.issue_price_hkd?'，发行价'+fmt(e.issue_price_hkd)+'港元':'')+
       '</td><td>'+(e.source_url?safeExternalLink(e.source_url,'公司公告'):'暂缺')+'</td></tr>';
   });
   buybacks.slice(0,5).forEach(e=>{
     const desc=e.status==='plan_only'?'回购方案，非已完成':'公司回购';
     const intended=e.planned_use==='equity_incentive_or_employee_share_plan'?'（用于股权激励/员工持股）':'';
+    const actual=numericOrNull(e.actual_amount_yuan);
+    const shares=numericOrNull(e.shares);
+    const amount=e.status==='plan_only'?'待实施，实际回购规模暂缺':
+      actual!==null&&actual>0?fmt(actual)+' 元':
+      shares!==null&&shares>0?fmt(shares)+' 股':
+      '实际回购规模暂缺';
     html+='<tr><td>'+escapeHtml(e.disclosed_at||'')+'</td><td>'+
-      escapeHtml(desc+intended)+'</td><td>不能与内部人个人增持等同</td><td>'+
+      escapeHtml(desc+intended)+'</td><td>'+escapeHtml(amount)+'</td><td>'+
       (e.source_url?safeExternalLink(e.source_url,'公司公告'):'暂缺')+'</td></tr>';
   });
   html+='</tbody></table></div>';
   if(reconciled.some(r=>r.fully_reconciled))html+=
     '<p class="section-caption">持股比例变动公告中部分减持数量已包括上面列出的交易，不再重复相加。发行新股、股权激励引起的持股比例稀释也不等于主动卖股。</p>';
   html+='<p class="section-caption">控股股东与高管出售股份获得的资金归卖方，不归上市公司；公司发行新股则可能稀释原股东。'
-    +'是否构成高位减持，需要比较交易当时的复权股价和估值位置，不能仅凭绝对成交价下结论。</p></section>';
+    +'是否构成高位减持，需要比较交易当时的复权股价和估值位置，不能仅凭绝对成交价下结论。</p></div>';
   return html;
 }
 
-function renderDimensionAnalysisSection(summary) {
+// Keep each piece of supporting evidence adjacent to the discussion it
+// supports. These blocks share the same pre-existing verified report data;
+// no extra price retrieval, synthetic numbers or independently inferred events.
+function renderShareholderReturnEvidence(report) {
+  const data=report||{};
+  const dividendRows=Array.isArray(data.dividend_chart)?data.dividend_chart:[];
+  const dividendHistory=Array.isArray(data.dividend_history)?data.dividend_history:[];
+  const rawBuybacks=Array.isArray(data.buyback_history)?data.buyback_history:[];
+  let html='<div class="analysis-inline-evidence shareholder-return-evidence">';
+  if(dividendRows.length){
+    html+='<div class="analysis-evidence"><h5>历年分红与回购</h5>'+
+      renderDividendChart(dividendRows)+'</div>';
+  }else if(dividendHistory.length){
+    html+='<div class="analysis-evidence"><h5>已披露分红记录</h5><ul>'+
+      dividendHistory.slice(0,20).map(row=>
+        '<li>'+escapeHtml(row.announce_date||'日期未知')+'：每10股现金分红 '+
+        escapeHtml(String(row.dividend_per_10_shares??'暂缺'))+' 元（'+
+        escapeHtml(row.progress||'进度待核实')+'）</li>').join('')+
+      '</ul><p class="section-caption">分红方案与已经实施的分红不同，不能把待实施预案作为已到账现金。</p></div>';
+  }else{
+    html+='<p class="section-caption">历史分红记录暂缺；未取得记录不代表公司从未分红。</p>';
+  }
+  const ledger=renderIssuerCapitalSection(data);
+  if(ledger){
+    html+=ledger;
+  }else{
+    if(rawBuybacks.length){
+      html+='<div class="analysis-evidence"><h5>回购公告记录</h5><ul>'+
+        rawBuybacks.slice(0,12).map(row=>
+          '<li>'+escapeHtml(row.announce_date||'日期未知')+
+          '：'+escapeHtml(row.progress||'执行情况待核实')+
+          '；已回购 '+escapeHtml(String(row.actual_amount??'未核实'))+
+          '</li>').join('')+
+        '</ul></div>';
+    }
+    html+='<p class="section-caption">减持与定增：本次没有返回可核实的已执行公告明细；不能据此认定没有发生。</p>';
+  }
+  return html+'</div>';
+}
+
+function renderDimensionAnalysisSection(summary, report) {
   const analyses = (summary || {}).dimension_analyses || {};
   const order = [
     ['management','管理层与接班传承'], ['fundamentals','经营基本面'],
@@ -2402,7 +2449,8 @@ function renderDimensionAnalysisSection(summary) {
     typeof analyses[key] === 'string' && analyses[key].trim());
   if (!valid.length) {
     // Older cached reports do not contain tool-generated per-dimension detail.
-    // Never repeat the top-line thesis under a second fake research heading.
+    // Do not fabricate twelve missing analyses or discard all existing charts:
+    // the separate evidence-only fallback is rendered below by renderResult.
     return '';
   }
   let html = '<section class="research-panel research-narrative" id="report-dimensions">' +
@@ -2415,9 +2463,45 @@ function renderDimensionAnalysisSection(summary) {
       '</span>' + escapeHtml(label) + '</h4>' +
       '<div class="analysis-prose">' +
       (detail ? escapeHtml(detail) : '<span class="section-caption">该项分析暂缺</span>') +
-      '</div></article>';
+      '</div>';
+    if(key==='chip_flow'){
+      html+='<div class="analysis-inline-evidence chip-analysis-evidence">'+
+        '<h5>股东人数与同期股价走势</h5>'+
+        renderChipPositionChart((report||{}).chip_price_context, report)+
+        '</div>';
+    }
+    if(key==='shareholder_returns')html+=renderShareholderReturnEvidence(report);
+    html+='</article>';
   });
   return html + '</section>';
+}
+
+// Older cached reports may lack narrative dimensions altogether. In that
+// special case retain previously visible shareholder disclosures together in
+// a clearly evidence-only section, without inventing a model-generated review.
+function renderLegacyShareholderEvidence(report) {
+  const src=report||{};
+  const ledger=src.shareholder_capital_summary||{};
+  const facts=(src.fundamentals||{}).facts||{};
+  const hasChip=!!src.chip_price_context ||
+    (Array.isArray(facts.holder_count_series) && facts.holder_count_series.length>=2);
+  const hasReturns=(src.dividend_chart||[]).length ||
+    (src.dividend_history||[]).length ||
+    (src.buyback_history||[]).length ||
+    (ledger.completed_holder_sales||[]).length ||
+    (ledger.equity_issuances||[]).length ||
+    (ledger.corporate_buybacks||[]).length;
+  if(!hasChip&&!hasReturns)return '';
+  let html='<section class="research-panel research-narrative" id="report-shareholder-evidence">'+
+    '<h3>筹码与股东回报资料</h3>'+
+    '<p class="section-caption">旧版报告没有对应的分项分析文字；以下只展示已有证据，不补造投资结论。</p>';
+  if(hasChip){
+    html+='<div class="analysis-inline-evidence chip-analysis-evidence">'+
+      '<h5>股东人数与同期股价走势</h5>'+
+      renderChipPositionChart(src.chip_price_context,src)+'</div>';
+  }
+  if(hasReturns)html+=renderShareholderReturnEvidence(src);
+  return html+'</section>';
 }
 
 // The industry engine, not the old perpetual-ROE dividend toy, owns the
@@ -2700,12 +2784,35 @@ function renderSectorRotationStyleStrip(style) {
     '个、下跌'+escapeHtml(String(rotation.down_count??'—'))+
     '个。以上为行业样本价格表现，不代表覆盖全市场或证实板块之间发生资金迁移。'+
     '判断原因仍需结合ETF份额、基金持仓、行业盈利与估值变化。</p>';
-  const stk=numericOrNull(style.stock_20d_pct);
-  if(stk!==null)html+='<p><b>本股近20个交易日：</b>'+fmt(stk)+
-    '（'+escapeHtml(style.stock_20d_as_of||'日期不明')+'）</p>';
+  html+=renderStockYtdHighPosition(style);
   html+='<p class="section-caption">板块强弱不直接等于公司盈利质量或股票内在价值。'+
     '行业涨跌采用东方财富行业板块历史收盘数据，不同板块缺失时不填充。</p></div>';
   return html;
+}
+
+// Stock *position*, not stock momentum: two actual unadjusted closing
+// prices from one Jan-to-as-of series. Do not substitute F10 point samples,
+// 52-week extrema, or an intraday quote into this daily-close calculation.
+function renderStockYtdHighPosition(style) {
+  const high=numericOrNull(style.stock_ytd_close_high);
+  const latest=numericOrNull(style.stock_ytd_latest_close);
+  const decline=numericOrNull(style.stock_ytd_close_drawdown_pct);
+  const highDate=String(style.stock_ytd_close_high_date||'');
+  const asOf=String(style.stock_ytd_close_as_of||'');
+  if(style.stock_ytd_close_basis!=='unadjusted_daily_close' ||
+      high===null || latest===null || decline===null ||
+      !(high>0 && latest>0 && latest<=high) ||
+      decline>0 || decline < -100 ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(highDate) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(asOf) ||
+      highDate.slice(0,4)!==asOf.slice(0,4) ||
+      highDate>asOf) return '';
+  return '<p class="stock-ytd-position"><b>距年内最高收盘价</b> '+
+    '<strong>'+Math.abs(decline).toFixed(2)+'%</strong> 回撤'+
+    '<span class="stock-ytd-position-meta">（峰值 '+
+    high.toFixed(2)+' 元，'+escapeHtml(highDate)+'；'+
+    '最近收盘 '+latest.toFixed(2)+' 元，'+escapeHtml(asOf)+'；'+
+    '未复权收盘价口径）</span></p>';
 }
 
 // With limited coverage we still show every dated, verifiable observation.
@@ -2747,10 +2854,7 @@ function renderLimitedMarketStyleStrip(style) {
     '个行业板块和'+indexes.length+'个指数的同期行情。'+
     '仅能比较显示的样本，不能据此断言整个A股市场的行业主线已切换，'+
     '也不能把相对涨跌直接认作实际资金流向。</p>';
-  if(style.stock_20d_pct!==null && style.stock_20d_pct!==undefined &&
-     Number.isFinite(Number(style.stock_20d_pct)))
-    html+='<p><b>本股近20个交易日：</b>'+fmt(Number(style.stock_20d_pct))+
-      '（'+escapeHtml(style.stock_20d_as_of||'')+'）</p>';
+  html+=renderStockYtdHighPosition(style);
   return html+'</div>';
 }
 
@@ -2858,13 +2962,7 @@ function renderInvestmentStyleStrip(model) {
       (e.source_url?' <span>'+safeExternalLink(e.source_url,'报道来源')+'</span>':'')+
       '。限购可能意味着关注度升温，但不能直接据此判断顶部。</p>';
   });
-  if(style.stock_20d_pct!==null && style.stock_20d_pct!==undefined &&
-     Number.isFinite(Number(style.stock_20d_pct))) {
-    const pct=Number(style.stock_20d_pct);
-    html+='<p><b>本股近20个交易日：</b>'+
-      (pct>0?'+':'')+pct.toFixed(2)+'%（'+
-      escapeHtml(style.stock_20d_as_of||'日期不明')+'），可与上述市场风格和指数数据比较。</p>';
-  }
+  html+=renderStockYtdHighPosition(style);
   html+='<p class="section-caption">市场资金偏好与公司的长期盈利价值是两回事；'
      +'判断个股需同时看价格位置、实际派息、经营利润和指数相对走势。</p></div>';
   return html;
@@ -3103,7 +3201,7 @@ function renderReportToc(reportHtml) {
   const chapters=[
     ['report-verdict','投资结论'],
     ['report-charts','数据概览与维度图谱'],
-    ['report-capital','股东减持、融资与回购'],
+    ['report-shareholder-evidence','筹码与股东回报资料'],
     ['report-dimensions','多维度分析'],
     ['industryValuationLab','行业估值与市场环境'],
     ['report-investor-reference','投资者长期回报情景'],
@@ -3210,8 +3308,12 @@ function renderResult(report) {
   html += '</section>';
 
   html += renderDashboardCharts(report);
-  html += renderIssuerCapitalSection(report);
-  html += renderDimensionAnalysisSection(summary);
+  const hasDetailedAnalysis=Object.values(summary.dimension_analyses||{}).some(
+    value=>typeof value==='string' && value.trim()
+  );
+  html += hasDetailedAnalysis?
+    renderDimensionAnalysisSection(summary, report):
+    renderLegacyShareholderEvidence(report);
   html += renderIndustryValuationLab(report);
 
   // Insert the TOC after report metadata but before the first research section.

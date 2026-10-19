@@ -120,7 +120,7 @@ def test_wechat_style_reading_column_applies_to_entire_page_without_wide_breakou
     assert "gap:0;" in css
     assert "#result .dashboard-charts .primary-kpis .metric + .metric" in css
     assert "border-left:1px solid #e0e8f3;" in css
-    assert "grid-template-columns:repeat(4,minmax(149px,1fr));" in css
+    assert "grid-template-columns:repeat(4,minmax(117px,1fr));" in css
     assert "overflow-x:auto;" in css
     assert "#result .chart-grid { grid-template-columns:minmax(0,1fr); }" in css
     assert "#result .lab-layout { grid-template-columns:minmax(0,1fr); }" in css
