@@ -4,9 +4,10 @@ The preceding agent performs 12 detailed analyses. Those numeric audits belong
 in dimension text and data tables. A final thesis should communicate a few
 decisive facts and their causal implications in natural Chinese conversation.
 
-A bounded optional LLM copy edit runs ONLY if the submitted thesis visibly
-resembles a data inventory. Candidate edits are screened for loss of the core
-decision, numeric invention, private source leaks and failure to reduce clutter.
+A bounded optional LLM copy edit runs when a submitted thesis is overloaded
+with figures OR reads like an obviously prewritten answer template. Candidate
+edits are screened for loss of the core decision, numeric invention, private
+source leaks, and failure to improve the triggering defect.
 The original verdict is retained whenever the LLM is unavailable or unsafe.
 """
 from __future__ import annotations
@@ -27,6 +28,25 @@ _DENSE_INDICATORS = re.compile(
     r"(?:PE|PB|ROE|EPS|TTM|LPR|同比|环比|分位|股东户数|"
     r"融资余额|资产负债率|增长率|收益率|派息率)", re.I
 )
+
+# Signals, not a blacklist of ordinary vocabulary. These catch repeated
+# self-conscious rhetorical scaffolds found in actual generated verdicts.
+# A single common conjunction like "但是" never triggers a rewrite.
+_SCRIPTED_PHRASES = (
+    (re.compile(r"我不怀疑[^。！？\n]{0,110}我怀疑的是"), 2),
+    (re.compile(r"(?:问题|关键|重点)不在于[^。！？\n]{0,90}而在于"), 2),
+    (re.compile(r"这不是[^。！？\n]{0,100}而是"), 1),
+    (re.compile(r"单看[^。！？\n]{0,100}合在一起"), 1),
+    (re.compile(r"(?:什么会让我改变看法|我最不满意的是|钱怎么流也让我警惕)"), 1),
+    (re.compile(r"(?:公司质量我认|我给(?:中性|看多|看空)|容错空间太薄)"), 1),
+    (re.compile(r"(?:先说公司质量|经营上确实有硬东西|最后再说买点)"), 1),
+)
+
+
+def _scripted_score(text: str) -> int:
+    return sum(weight * len(pattern.findall(text or ""))
+               for pattern, weight in _SCRIPTED_PHRASES)
+
 
 
 def _numbers(text: str) -> list[Decimal]:
@@ -53,15 +73,18 @@ def readability_signals(text: str) -> dict:
         (len(p) >= 270 and len(_DENSE_INDICATORS.findall(p)) >= 5)
         for p in paras
     )
-    # 4-6 natural paragraphs may be long without being cluttered; numbers and
-    # jargon are the issue, not length by itself.
+    # Neither length nor paragraph count is a measure of human speech.
     overloaded = (
         len(nums) >= 22
         or (len(nums) >= 13 and long_dense >= 2)
         or (len(raw) >= 800 and long_dense >= 3)
     )
+    tone_score = _scripted_score(raw)
     return {
-        "needs_edit": overloaded,
+        "needs_edit": overloaded or tone_score >= 2,
+        "numeric_overload": overloaded,
+        "scripted_tone": tone_score >= 2,
+        "scripted_score": tone_score,
         "numeric_mentions": len(nums),
         "dense_paragraphs": long_dense,
         "paragraph_count": len(paras),
@@ -86,7 +109,7 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
     if not isinstance(edited, str):
         return False
     revised = edited.strip()
-    if len(revised) < 180 or len(revised) > 2400:
+    if len(revised) < 110 or len(revised) > 2400:
         return False
     if _PRIVATE.search(revised):
         return False
@@ -95,13 +118,17 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
         return False
     if not old_nums and new_nums:
         return False
-    if len(old_nums) >= 13 and len(new_nums) > min(9, int(len(old_nums) * .5)):
+    original_signals = readability_signals(original)
+    edited_signals = readability_signals(revised)
+    if (original_signals["numeric_overload"] and len(old_nums) >= 13
+            and len(new_nums) > min(9, int(len(old_nums) * .5))):
         return False
-    if len(_paragraphs(revised)) < 3:
+    if edited_signals["needs_edit"]:
         return False
-    if readability_signals(revised)["needs_edit"]:
+    if (original_signals["scripted_tone"] and
+            edited_signals["scripted_score"] >= original_signals["scripted_score"]):
         return False
-    if original and len(revised) < min(220, len(original) * .30):
+    if original and len(revised) < min(130, len(original) * .20):
         return False
     for name in _verified_names(inputs):
         if name not in revised:
@@ -110,7 +137,7 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
     # quality distinction is not a complete investment judgment.
     if not re.search(r"价格|价位|现价|买入|估值|赔率", revised):
         return False
-    if not re.search(r"公司|企业|生意|经营|盈利", revised):
+    if not re.search(r"公司|企业|生意|经营|盈利|利润|现金流|订单|矿山|客户|金铜|分红", revised):
         return False
     return True
 
@@ -127,36 +154,35 @@ async def polish_thesis_prose(parsed: dict, inputs: Any = None) -> dict:
     try:
         from backtest.llm_client import call_json_ex
         prompt = (
-            "你是投资讨论区里讲道理、说人话的老朋友，也是一位善于解释问题的老师。"
-            "请把下面的投资结论改写成一段真正有人愿意看完的中文回答，而不是审计报告。"
-            "你的任务是删减和组织信息，不是补做股票研究。\n"
-            "写作要求：\n"
-            "1. 第一段直接、自然地回答这个价格值不值得买；坚持原立场，"
-            "公司质量与买入赔率可以不同。不要用“我给中性”“这不是……而是……”等套话。\n"
-            "2. 从长串事实中只选择对结论最关键的3—5个理由，"
-            "每个理由用日常语言说清楚为什么重要。用3—6个自然段，不要小标题、编号或条目。\n"
-            "3. 全文一般保留3—7处真正不可缺少的数字（如现价、利润、估值或持有人变化），"
-            "日期非必要不用写到日；剩余财报细节在报告其他章节，不必重新逐条抄写。"
-            "不要接连罗列营业收入、增长率、利润、现金流、负债率、分红、回购、产量。\n"
-            "4. 多用完整中文句子，少用PE/PB/ROE/EPS/TTM等缩写、括号、斜杠、百分比串，"
-            "若提指标只解释它在投资决策中的含义。让复杂的货币周期、矿业资本开支"
-            "或筹码变化读起来像人与人谈话，而不是机械核查清单。\n"
-            "5. 不要写“本次资料里没有价格锚”“本次检索”“没有证据不能”"
-            "等机械免责声明；真正影响结论的未知风险，用一句正常话说清楚即可。\n"
-            "6. 不得改变判断方向，不得新增或修改任何数字、人名、日期、"
-            "公司事项、管理层职务或假定价格；允许删掉不重要数字，"
-            "但保留原稿最关键的已证实事实、最强反方理由及真正能改变判断的条件。"
-            "绝对不能凭空提出新的估值情景。\n"
-            "7. 不要泄露或提及私人知识库作者、帖子、工具或内部审查流程。\n"
-            "返回JSON：{\"thesis_summary\":\"自然、分段的回答\"}。\n\n"
-            "不能更改的结构化判断：" + str(stances) +
-            "\n原结论：\n" + original
+            "把下面的股票判断中明显做作的表达改掉，保留原有的投资判断。"
+            "不需要扮演老师、老朋友、股评人，不要追求‘像真人说话’。"
+            "这项工作是删掉不必要的表演和结构，不是换一种新的口语模板。\n"
+            "优先处理：\n"
+            "- 不必段段先抛判断，再给理由，再收一个漂亮的结尾。"
+            "不要每只股票都套上公司质量、现金流、股东、技术、筹码、条件反转的统一顺序。\n"
+            "- 不刻意制造‘我不怀疑……我怀疑的是……’‘这不是……而是……’"
+            "‘单看……合在一起……’这种对称句式；不用设问转场"
+            "‘什么会让我改变看法’，不靠‘我最不满意的是’之类句子表演个人态度。\n"
+            "- 哪里真正有问题，就把事实和判断放在那里说。"
+            "一句话说得清就一句话，必要时讲几段；段落长短可以不齐。"
+            "不要写固定数量的理由，不必强迫结尾交代未来条件。\n"
+            "- 原文中的关键财务和公司事实不能变，"
+            "保留左右结论的关键依据以及审慎限定；数字太密时删掉非决定性数字，"
+            "细节已经在专项章节。不要新增数字、金额、比例、日期、名称、职务、"
+            "事件、价格目标或假设。\n"
+            "- 保留股票当前可买与否的原立场，"
+            "不要替原文添加第一人称立场、感叹号、俏皮话、道德训诫、万能免责声明。"
+            "只许删除和改写冗余措辞，不得动结构化字段。\n"
+            "- 不要引用、模仿或泄露知识库中任何特定作者的原话、账号或视频。\n"
+            "只返回JSON对象，字段为thesis_summary。\n\n"
+            "不可修改的立场字段：" + str(stances) +
+            "\n待修改的原文：\n" + original
         )
         result, _ = await call_json_ex(
             prompt, max_tokens=2400,
             repair_requirements=(
-                "只能输出包含thesis_summary的JSON对象；保持原判断，不可添加新数字、人物、"
-                "事实或私有作者，不得变成数据流水账。"
+                "只能输出包含thesis_summary的JSON对象；原立场、数字、人物、日期与事实不可更改。"
+                "不得使用刻意的对仗、反问、扮演式第一人称和同质化段落模板，也不可引用知识库作者。"
             ),
         )
         new_text = result.get("thesis_summary") if isinstance(result, Mapping) else None
