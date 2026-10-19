@@ -2561,6 +2561,30 @@ function collectVerdictFigures(report) {
   }
 
   const ref=((report.valuation_model||{}).investor_reference)||{};
+  const earningsPower=ref.earnings_power||{};
+  const scenarios=(
+    earningsPower.status==='historical_sensitivity_only' &&
+    Array.isArray(earningsPower.scenarios)
+  )?earningsPower.scenarios.filter(row=>row &&
+    verdictNumber(row.conditional_price_yuan)!==null &&
+    verdictNumber(row.conditional_price_yuan)>0):[];
+  if(scenarios.length>=2) {
+    const market=verdictNumber(earningsPower.market_price_yuan);
+    const upper=Math.max(...scenarios.map(row=>Number(row.conditional_price_yuan)),
+      market===null?0:market);
+    let body='<div class="verdict-bars">';
+    if(market!==null&&market>0)
+      body+=verdictBar('本次参考价',market,upper,'元','#6076bf');
+    scenarios.slice(0,3).forEach(row=>{
+      body+=verdictBar(String(row.name||'条件情景'),
+        Number(row.conditional_price_yuan),upper,'元','#c27d45');
+    });
+    body+='</div>';
+    figures.push({id:'earnings_power',match:/利润|盈利|估值|价位|参考价|股价/,
+      html:verdictFigure('历史盈利 × PE 条件价格',
+        String(earningsPower.pe_as_of||report.as_of||'价格日期未知'),body,
+        '以历史EPS和PE分位数计算的敏感性对照，非公司合理价值；不同分位的组合不代表真实发生概率。')});
+  }
   const price=verdictNumber((report.realtime_quote||{}).latest_price);
   const pbAnchor=verdictNumber((ref.historical_pb_anchor||{}).median_pb_reference_price);
   if(price!==null&&price>0&&pbAnchor!==null&&pbAnchor>0){
@@ -2581,7 +2605,7 @@ function renderVerdictFigures(report) {
   const text=String(((report.summary||{}).thesis_summary)||'');
   const ranked=figures.map((item,index)=>({
     ...item,rank:item.match.test(text)?1:0,index,
-  })).sort((a,b)=>b.rank-a.rank||a.index-b.index).slice(0,6);
+  })).sort((a,b)=>b.rank-a.rank||a.index-b.index).slice(0,7);
   return '<div class="verdict-figures" role="group" aria-label="投资结论相关数据图表">'+
     '<p class="verdict-figures-title">先看关键数字</p>'+
     '<p class="verdict-figures-note">图表使用本报告已返回的财务和估值数据；不从生成的文字中猜数。'
