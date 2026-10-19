@@ -184,8 +184,10 @@ def readability_signals(text: str) -> dict:
         or (len(nums) >= 11 and long_dense >= 2)
         or (len(raw) >= 760 and long_dense >= 2)
     )
-    verbose = len(raw) > 850
     tone_score = _scripted_score(raw)
+    # Length by itself is not a reason to shorten a well-explained report.
+    # This is only a trigger when the long text also reads like an evidence dump.
+    verbose = len(raw) > 850 and (long_dense >= 1 or tone_score >= 2)
     return {
         "needs_edit": overloaded or verbose or tone_score >= 2,
         "numeric_overload": overloaded,
@@ -216,7 +218,9 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
     if not isinstance(edited, str):
         return False
     revised = edited.strip()
-    if len(revised) < 110 or len(revised) > 850:
+    # Reject empty/incomplete rewrites, not longer explanations. Previously an
+    # 850-character ceiling silently discarded valid, readable paragraphs.
+    if len(revised) < 100:
         return False
     if _PRIVATE.search(revised):
         return False
@@ -233,17 +237,21 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
         return False
     original_signals = readability_signals(original)
     edited_signals = readability_signals(revised)
-    if (original_signals["numeric_overload"] and len(old_nums) >= 11
-            and len(new_nums) > min(8, int(len(old_nums) * .5))):
-        return False
-    if edited_signals["needs_edit"]:
+    # Improve the *way* the numbers are explained. Do not enforce an arbitrary
+    # eight-number budget or confuse >850 characters with unreadable writing.
+    if (original_signals["numeric_overload"] and len(old_nums) >= 16
+            and len(new_nums) >= len(old_nums)
+            and len(revised) <= len(original)):
         return False
     if (original_signals["scripted_tone"] and
             edited_signals["scripted_score"] >= original_signals["scripted_score"]):
         return False
-    # A 1000-character evidence dump may legitimately become a concise
-    # 120-character conclusion if its real reasons survive the edit.
-    if original and len(revised) < min(110, len(original) * .20):
+    if (edited_signals["scripted_score"] >= 3 and
+            edited_signals["scripted_score"] >= original_signals["scripted_score"] * .65):
+        return False
+    # Prevent erasing the investment argument; long, substantive explanations
+    # are welcome as long as they remain grounded in the source figures.
+    if original and len(revised) < min(100, len(original) * .16):
         return False
     # Verified succession details remain in management analysis. A brief
     # reader thesis may omit them when a different issue drives the price.
@@ -283,15 +291,20 @@ async def polish_thesis_prose(parsed: dict, inputs: Any = None) -> dict:
             "围绕这些事写清'发生了什么—为什么—影响买入决定'。"
             "完整财务数据、宏观背景、筹码和接班等资料已经在详细章节，"
             "这里不必逐个汇报，也不必将所有研究问题塞进结论。\n"
-            "通常写200—500字，内容复杂可以略长，但必须明显短于原稿；"
-            "不规定段落数或顺序，不要列清单。最多选约三到六个真正关键的数字，"
-            "数字后面要解释意思。删掉非关键项目名称、重复百分比和研究术语。"
-            "千万别写'正常化盈利收益率''分母造出来的便宜''能力连续性风险'"
+            "没有固定字数、段落数或数字个数的要求，写多长由内容决定。"
+            "写长可以，但每段都要真的解释问题，不能堆数字或反复说同一句话。"
+            "写短可以，但别为了省字数把关键原因、条件与后果都省略掉。"
+            "必要的数字保留并讲清含义，非关键数字和研究记录放在专项章节。"
+            "句子不要塞进太多互不相干的百分比、估值口径和时点。"
+            "要解释正常年份能赚多少，就直接谈正常年份可能赚多少钱；"
+            "要解释当前估值，就说这个价格隐含了什么盈利预期。"
+            "不要写'正常化盈利收益率''分母造出来的便宜''能力连续性风险'"
             "'原始未复权同步性观察''资料缺口尚待验证'这类生硬说法。"
             "对没有核实的风险，可以一句话提醒，别铺开整个核验过程。\n"
-            "语气像认真讨论股票，不演投资大师，不用'我最担心的是'、"
-            "'这不是而是'之类作秀句，也不用'公司表现亮眼但风险仍存'、"
-            "'整体来看'、'后续需要关注'等空话。"
+            "语气就像有人认真讨论股票，不演投资大师，不用'我最担心的是'、"
+            "'这不是而是'、'本质是在买'、'这一侧我认可'、'立场给中性'"
+            "之类作秀句，也不用'公司表现亮眼但风险仍存'、'整体来看'、"
+            "'几个方向同时逆风'、'后续需要关注'等套话。"
             "可以直说这只股票值不值得现在买及原因；不强行说正反两面。\n"
             "原稿的总体看多/看空/中性立场不可变。重要的现金回款、客户、"
             "基金抱团、地缘政策等关键问题如在原稿里明确成立，不能被删没。"
@@ -303,9 +316,9 @@ async def polish_thesis_prose(parsed: dict, inputs: Any = None) -> dict:
             "\n只输出包含thesis_summary字符串的JSON对象。"
         )
         result, _ = await call_json_ex(
-            prompt, max_tokens=2200,
+            prompt, max_tokens=4096,
             repair_requirements=(
-                "只能输出包含thesis_summary的JSON对象，字数宜精简。"
+                "只能输出包含thesis_summary的JSON对象。不限字数，充分解释关键问题，不能堆数和套话。"
                 "不得编造数字或未核实事实，可删无关细节并使用提供的已核实行情基准价。"
                 "不能更改总体投资立场，不得套话、模仿知识库作者。"
             ),
