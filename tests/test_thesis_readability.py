@@ -240,7 +240,7 @@ async def test_very_long_report_is_rewritten_not_force_padded(monkeypatch):
         "净利润却增68%，矿产金只增13.4%、矿产铜降了5.7%。"
         "跨周期ROE中位22.58%，正常化盈利收益率5.75%，"
         "在建工程尚未核实。"
-    ) * 4
+    ) * 8
     assert readability_signals(original)["too_long"]
     out = (
         "按29.72元看，紫金今年利润涨得快，金铜价格上涨是重要原因。"
@@ -270,3 +270,26 @@ async def test_very_long_report_is_rewritten_not_force_padded(monkeypatch):
     assert after["thesis_summary"] == out
     assert after["stance"] == "bearish"
     assert after["company_quality_stance"] == "bullish"
+
+
+def test_verifiable_opening_price_is_corrected_without_changing_other_figures():
+    from analysis.thesis_readability import align_verified_lead_price
+    before = {
+        "thesis_summary": "9.85元买的是3.94倍PB，历史价格25.14元。"
+                          "矿山利润不错，但金价如果跌下来，风险会显现。",
+        "stance": "bearish",
+    }
+    inputs = SimpleNamespace(quote={"latest_price": 29.72})
+    after = align_verified_lead_price(before, inputs)
+    assert after["thesis_summary"].startswith("29.72元买的是3.94倍PB")
+    assert "历史价格25.14元" in after["thesis_summary"]
+    assert after["stance"] == before["stance"]
+
+
+def test_quote_guard_does_not_erase_correct_price_or_unverified_history():
+    from analysis.thesis_readability import align_verified_lead_price
+    current = {"thesis_summary": "29.72元买还要考虑矿业周期。"}
+    historical = {"thesis_summary": "2024年股价曾到9.85元。"}
+    inp = SimpleNamespace(quote={"latest_price": 29.72})
+    assert align_verified_lead_price(current, inp) == current
+    assert align_verified_lead_price(historical, inp) == historical
