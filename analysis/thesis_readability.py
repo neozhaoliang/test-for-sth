@@ -79,13 +79,22 @@ _MATERIAL_THEMES = {
         re.compile(r"1260H|BIS|实体清单|制裁|出口管制|美国国防部", re.I),
         re.compile(r"1260H|BIS|清单|制裁|出口管制|美国国防部", re.I),
     ),
-    "overseas_customer": (
-        re.compile(r"海外(?:营收|收入|客户)|北美(?:营收|客户|市场)|美国(?:客户|采购|市场)"),
-        re.compile(r"海外|北美|美国|境外"),
+    "overseas_revenue": (
+        re.compile(r"海外(?:营收|收入)|境外(?:营收|收入)"),
+        re.compile(r"海外|境外"),
+    ),
+    "north_american_customers": (
+        re.compile(r"北美(?:营收|客户|市场)|美国(?:客户|采购|市场)"),
+        re.compile(r"北美|美国"),
     ),
     "fund_crowding": (
         re.compile(r"机构抱团|机构集中|公募.{0,10}(?:基金|重仓|持股)|基金.{0,12}(?:持股|重仓|抱团)|资金抱团"),
-        re.compile(r"机构|公募|基金|抱团"),
+        re.compile(
+            r"机构.{0,14}(?:抱团|集中|重仓|持仓|拥挤|买盘|退出)|"
+            r"公募.{0,16}(?:基金|持仓|重仓|买盘)|"
+            r"基金.{0,14}(?:持仓|抱团|重仓|集中|买盘)|"
+            r"资金.{0,8}抱团"
+        ),
     ),
     "insider_sale": (
         re.compile(r"(?:实控人|大股东|高管|董事长).{0,8}减持"),
