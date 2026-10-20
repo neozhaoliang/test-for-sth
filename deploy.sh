@@ -168,6 +168,15 @@ retry_git() {
 }
 
 say "安装/更新项目：$APP_DIR"
+# An older deploy.sh may have left behind .git before its HTTP/2 download
+# failed. Keep that entire directory as a timestamped backup, don't delete
+# local data, then retry cleanly with the HTTP/1.1 shallow clone.
+if [[ -d "$APP_DIR/.git" ]] &&
+   ! git_safe -C "$APP_DIR" rev-parse --verify HEAD >/dev/null 2>&1; then
+  backup="$APP_DIR.incomplete.$(date -u +%Y%m%dT%H%M%SZ)"
+  as_root mv -- "$APP_DIR" "$backup"
+  warn "检测到上次不完整的 Git 克隆，已备份至 $backup，继续重新下载。"
+fi
 if [[ ! -d "$APP_DIR/.git" ]]; then
   if [[ -d "$APP_DIR" && -n "$(ls -A "$APP_DIR")" ]]; then
     die "$APP_DIR 不是完整 Git 仓库且含有文件；为避免删除用户数据，请先备份或移走。"
