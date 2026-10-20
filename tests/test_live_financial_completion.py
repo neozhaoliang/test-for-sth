@@ -47,6 +47,8 @@ async def test_wanhua_2026_h1_missing_f10_cash_ratio_completed_from_original_fil
     )
     facts = updated["facts"]
     assert calls == [OFFICIAL_URL]
+    assert facts["cash_profit_operating_cash_flow"] == pytest.approx(11_784_141_040.70)
+    assert facts["cash_profit_net_profit"] == pytest.approx(10_062_963_544.81)
     assert facts["operating_cash_flow"] == pytest.approx(11_784_141_040.70)
     assert facts["net_profit"] == pytest.approx(10_062_963_544.81)
     assert facts["cash_to_profit_ratio"] == pytest.approx(1.171)
@@ -110,8 +112,11 @@ async def test_byd_h1_cash_conversion_recovers_when_f10_still_shows_q1(monkeypat
     assert facts["roe_pct"] == 4.86
     assert facts["cash_profit_period"] == "2026-06-30"
     assert facts["cash_to_profit_ratio"] == pytest.approx(3.029)
-    assert facts["operating_cash_flow"] == 37_334_744_000.0
-    assert facts["net_profit"] == 12_325_408_000.0
+    assert facts["cash_profit_operating_cash_flow"] == 37_334_744_000.0
+    assert facts["cash_profit_net_profit"] == 12_325_408_000.0
+    # Keep pre-existing Q1 F10 fields and their finance_period unchanged.
+    assert facts["net_profit"] == 2_000_000_000
+    assert facts["operating_cash_flow"] is None
     assert f10["facts"]["net_profit"] == 2_000_000_000
     assert out["source_map"]["cash_profit_official_filing"] == h1["url"]
 
