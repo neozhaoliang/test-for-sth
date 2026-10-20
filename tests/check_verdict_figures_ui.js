@@ -31,7 +31,7 @@ assert.equal(typeof ctx.assignVerdictFiguresToParagraphs,'function');
 assert.equal(typeof ctx.renderThesisWithInlineChipEvidence,'function');
 const inline=report=>ctx.renderThesisWithInlineChipEvidence(
   report.summary.thesis_summary,report).html;
-const chartCount=html=>(html.match(/class="verdict-figure"/g)||[]).length;
+const chartCount=html=>(html.match(/class="verdict-figure(?:\s[^"]+)?"/g)||[]).length;
 
 const sparse={
   stock_code:'SH601088',stock_name:'中国神华',as_of:'2026-10-19',
@@ -224,8 +224,9 @@ cashNegative.fundamentals.facts.operating_cash_flow=-12000000000;
 cashNegative.fundamentals.facts.cash_to_profit_ratio=-0.42;
 const negativeHtml=inline(cashNegative);
 assert.ok(negativeHtml.includes('-120.00亿元'));
-assert.ok(negativeHtml.includes('负值柱长按绝对金额画'));
-assert.ok(negativeHtml.includes('#c65f54'));
+assert.ok(negativeHtml.includes('经营现金流为负数，数值保留负号'));
+assert.ok(negativeHtml.includes('verdict-figure-compact'));
+assert.ok(!negativeHtml.includes('verdict-track'));
 
 // Escape all external metadata, including period labels.
 const hostile=JSON.parse(JSON.stringify(report));
