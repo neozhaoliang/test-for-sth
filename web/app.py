@@ -640,9 +640,39 @@ _INDEX_HTML = """<!DOCTYPE html>
   .inline-verdict-figures .verdict-figure { background:#fafdff; }
   .verdict-figures-title { font-weight:750; color:#2c3e58; font-size:15px; margin:0 0 4px; }
   .verdict-figures-note { font-size:12px; color:var(--muted); margin:0 0 12px; }
-  .verdict-figure-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
-  .verdict-figure { padding:16px 17px 13px; background:#fff; border:1px solid var(--line);
-    border-radius:13px; min-width:0; }
+  .verdict-figure-grid { display:flex; flex-wrap:wrap; justify-content:center; align-items:stretch; gap:10px; }
+  .verdict-figure { flex:1 1 320px; max-width:620px; padding:16px 17px 13px;
+    background:#fff; border:1px solid var(--line); border-radius:13px; min-width:0; }
+  /* One-to-three-value comparisons belong in a centered horizontal strip,
+     not in a tall, half-page column chart. Never stretch these to fill a row. */
+  .verdict-figure.verdict-figure-compact { flex:0 1 auto; width:max-content; max-width:100%;
+    padding:10px 14px; border-radius:11px; }
+  .verdict-compact-line { display:flex; flex-wrap:wrap; justify-content:center;
+    align-items:center; column-gap:15px; row-gap:8px; }
+  .verdict-compact-title { display:flex; align-items:baseline; flex-wrap:wrap;
+    gap:4px 7px; font-size:13px; color:var(--ink); }
+  .verdict-compact-title b { font-size:13px; white-space:nowrap; }
+  .verdict-compact-period { font-size:10px; color:var(--muted); white-space:nowrap; }
+  .verdict-compact-metrics { display:flex; flex-wrap:wrap; align-items:center;
+    justify-content:center; gap:5px 0; font-variant-numeric:tabular-nums; }
+  .verdict-compact-metric { display:inline-flex; align-items:baseline; gap:6px;
+    white-space:nowrap; padding:0 12px; border-left:1px solid #dce3ef; }
+  .verdict-compact-metric .metric-name { font-size:12px; color:#53627a; }
+  .verdict-compact-metric strong { font-size:15px; color:var(--ink); font-weight:750; }
+  .verdict-compact-metric small { color:#7a879a; font-size:11px; }
+  .verdict-compact-details { position:relative; font-size:11px; color:var(--muted); }
+  .verdict-compact-details summary { cursor:pointer; white-space:nowrap;
+    padding:4px 5px; list-style:none; border-radius:5px; user-select:none; }
+  .verdict-compact-details summary::-webkit-details-marker { display:none; }
+  .verdict-compact-details summary:hover { color:var(--brand-strong); background:#edf2ff; }
+  .verdict-compact-details[open] { flex-basis:100%; }
+  .verdict-compact-details p { margin:5px 0 0; font-size:11px; line-height:1.55;
+    color:#637188; max-width:640px; }
+  @media(max-width:730px){ .verdict-figure-grid { gap:8px; }
+    .verdict-figure { flex-basis:100%; padding:14px; }
+    .verdict-figure.verdict-figure-compact { max-width:100%; padding:10px 12px; }
+    .verdict-compact-line { column-gap:8px; }
+    .verdict-compact-metric { padding:0 8px; } }
   .verdict-figure h4 { margin:0 0 3px; font-size:14px; font-weight:750; }
   .verdict-figure .figure-period { margin:0 0 12px; font-size:11px; color:var(--muted); line-height:1.55; }
   .verdict-figure .figure-foot { margin:12px 0 0; font-size:11px; line-height:1.65; color:#637188; }
@@ -661,8 +691,7 @@ _INDEX_HTML = """<!DOCTYPE html>
     background:#5266c9; border-radius:4px 4px 0 0; }
   .verdict-yearcol .year { font-size:11px; margin-top:5px; white-space:nowrap; }
   .verdict-rail-marker { display:flex; justify-content:space-between; font-size:10px; color:#8090a9; margin-top:2px; }
-  @media(max-width:730px){.verdict-figure-grid{grid-template-columns:1fr;}
-    .verdict-figure{padding:14px;} }
+
 
 
   .dashboard-charts h3, .valuation-lab h3 { margin:0 0 5px; font-size:21px; }
@@ -2442,6 +2471,28 @@ function verdictFigure(title, period, body, foot) {
     '<p class="figure-period">'+escapeHtml(period)+'</p>'+
     body+(foot?'<p class="figure-foot">'+escapeHtml(foot)+'</p>':'')+'</section>';
 }
+// Short evidence belongs on ONE centered row. The complete caveat stays
+// available behind an explicit, keyboard-accessible disclosure.
+function verdictCompactFigure(title, period, items, note) {
+  if(!Array.isArray(items) || !items.length || items.length>3)return '';
+  const line=items.map(item=>{
+    const extra=item.detail?
+      '<small>'+escapeHtml(String(item.detail))+'</small>':'';
+    return '<span class="verdict-compact-metric">'+
+      '<span class="metric-name">'+escapeHtml(String(item.label||''))+'</span>'+
+      '<strong>'+escapeHtml(String(item.value))+'</strong>'+extra+'</span>';
+  }).join('');
+  return '<section class="verdict-figure verdict-figure-compact">'+
+    '<div class="verdict-compact-line">'+
+    '<div class="verdict-compact-title"><b>'+escapeHtml(title)+'</b>'+
+      (period?'<span class="verdict-compact-period">'+escapeHtml(period)+'</span>':'')+
+    '</div>'+
+    '<div class="verdict-compact-metrics">'+line+'</div>'+
+    (note?'<details class="verdict-compact-details"><summary aria-label="查看图表说明">口径</summary>'+
+      '<p>'+escapeHtml(note)+'</p></details>':'')+
+    '</div></section>';
+}
+
 function verdictBar(label, value, upper, unit, color) {
   const width=Math.min(100,Math.max(0,upper>0?Math.abs(value)/upper*100:0));
   return '<div class="verdict-bar">'+
@@ -2483,15 +2534,18 @@ function collectVerdictFigures(report) {
     const net=profit/1e8, operating=cash/1e8;
     const max=Math.max(net,Math.abs(operating),.001);
     const ratio=verdictNumber(facts.cash_to_profit_ratio);
+    const cashItems=[
+      {label:'净利润',value:verdictFixed(net)+'亿元'},
+      {label:'经营现金流',value:verdictFixed(operating)+'亿元'},
+    ];
+    if(ratio!==null)cashItems.push({label:'现金／利润',value:verdictFixed(ratio,2)+'倍'});
     figures.push({id:'cash',match:/现金流|净利润|利润|回款|经营现金/,
-      html:verdictFigure('利润与经营现金流',
+      html:verdictCompactFigure('利润与经营现金流',
         String(facts.cash_profit_period||facts.finance_period||'报告期未注明'),
-        '<div class="verdict-bars">'+
-          verdictBar('净利润',net,max,'亿元','#5266c9')+
-          verdictBar('经营现金流',operating,max,'亿元',operating<0?'#c65f54':'#238f8a')+'</div>',
+        cashItems,
         (ratio===null?'':('经营现金流／净利润：'+verdictFixed(ratio,2)+'倍。'))+
-          '同一报告期金额对比，经营现金流不等于自由现金流。'+
-          (operating<0?'负值柱长按绝对金额画，负号仍保留。':''))});
+        '同一报告期金额对比，经营现金流不等于自由现金流。'+
+        (operating<0?'经营现金流为负数，数值保留负号。':''))});
   }
 
   const pe=verdictPercentileRow(hist.pe_percentiles);
@@ -2499,14 +2553,21 @@ function collectVerdictFigures(report) {
   const peNow=verdictNumber(hist.current_pe_ttm);
   const pbNow=verdictNumber(hist.current_pb);
   if(pe || pb) {
-    let body='<div class="verdict-bars">';
-    if(pe)body+=verdictPercentile('市盈率 PE',Number(pe.percentile),peNow,pe.years);
-    if(pb)body+=verdictPercentile('市净率 PB',Number(pb.percentile),pbNow,pb.years);
-    body+='</div>';
+    const valuations=[];
+    if(pe)valuations.push({
+      label:'PE（近'+pe.years+'年）',
+      value:verdictFixed(pe.percentile,1)+'%',
+      detail:peNow===null?'':('现值 '+verdictFixed(peNow,2)+' 倍'),
+    });
+    if(pb)valuations.push({
+      label:'PB（近'+pb.years+'年）',
+      value:verdictFixed(pb.percentile,1)+'%',
+      detail:pbNow===null?'':('现值 '+verdictFixed(pbNow,2)+' 倍'),
+    });
     figures.push({id:'valuation',match:/估值|市盈率|市净率|PE|PB|分位|价格|便宜|贵/,
-      html:verdictFigure('估值处于历史什么位置',
-        String(hist.as_of||val.valuation_as_of||'估值日期未知'),body,
-        '分位数越高，表示当前比过去更多交易日的估值更高。PE和PB分开比较，不直接相除。')});
+      html:verdictCompactFigure('估值处于历史什么位置',
+        String(hist.as_of||val.valuation_as_of||'估值日期未知'),valuations,
+        '百分比为历史估值分位数：越高表示当前比过去更多交易日的估值高。PE和PB要分别看。')});
   }
 
   const payout=Array.isArray(report.dividend_chart)?
@@ -2524,9 +2585,13 @@ function collectVerdictFigures(report) {
         '<span class="year">'+escapeHtml(String(p.year))+'</span></div>';
     });
     bars+='</div>';
+    const dividendNotes='仅包含已返回的年度分红数据。回购不计入现金分红，也不将待实施方案当作已到账款。';
     figures.push({id:'dividends',match:/分红|股息|派息|股东回报|股息率/,
-      html:verdictFigure('每10股现金分红（元）','按公告年度归集',bars,
-        '仅包含已返回的年度分红数据。回购不计入现金分红，也不将待实施方案当作已到账款。')});
+      html:points.length<=3 ?
+        verdictCompactFigure('每10股现金分红（元）','按公告年度归集',
+          points.map(p=>({label:String(p.year),value:verdictFixed(p.dividend_per_10)+'元'})),
+          dividendNotes):
+        verdictFigure('每10股现金分红（元）','按公告年度归集',bars,dividendNotes)});
   }
 
   const debtRows=((report.profitability_trend||{}).periods||[])
@@ -2538,11 +2603,11 @@ function collectVerdictFigures(report) {
     const first=debtRows[0],last=debtRows[debtRows.length-1];
     const v0=Number(first.debt_ratio_pct),v1=Number(last.debt_ratio_pct);
     figures.push({id:'debt',match:/负债|资产|并购|收购|增发|杠杆/,
-      html:verdictFigure('资产负债率前后比较',
-        String(first.period)+' → '+String(last.period),
-        '<div class="verdict-bars">'+
-          verdictBar(String(first.period),v0,100,'%','#7a88a6')+
-          verdictBar(String(last.period),v1,100,'%','#c27d45')+'</div>',
+      html:verdictCompactFigure('资产负债率前后比较','',
+        [
+          {label:String(first.period),value:verdictFixed(v0)+'%'},
+          {label:String(last.period),value:verdictFixed(v1)+'%'},
+        ],
         '资产负债率是资产负债表的时点指标，不能单凭升降判断收购回报。')});
   }
 
@@ -2550,16 +2615,15 @@ function collectVerdictFigures(report) {
   const overseas=verdictNumber(facts.overseas_revenue_pct);
   if((client!==null&&client>=0&&client<=100)||
      (overseas!==null&&overseas>=0&&overseas<=100)){
-    let body='<div class="verdict-bars">';
+    const concentrations=[];
     if(client!==null && client>=0 && client<=100)
-      body+=verdictBar('前五大客户营收占比',client,100,'%','#6076bf');
+      concentrations.push({label:'前五大客户营收占比',value:verdictFixed(client)+'%'});
     if(overseas!==null && overseas>=0 && overseas<=100)
-      body+=verdictBar('海外收入占比',overseas,100,'%','#238f8a');
-    body+='</div>';
+      concentrations.push({label:'海外收入占比',value:verdictFixed(overseas)+'%'});
     figures.push({id:'customers',match:/客户|煤电|航运|海外|收入结构|出口|集中度/,
-      html:verdictFigure('客户和收入分布',
+      html:verdictCompactFigure('客户和收入分布',
         String((report.fundamentals||{}).concentration_period||
-          facts.finance_period||'披露期间未注明'),body,
+          facts.finance_period||'披露期间未注明'),concentrations,
         '两条比例的分母与分类不同，不可相加。海外收入不等于某一国家的收入。')});
   }
 
@@ -2583,21 +2647,33 @@ function collectVerdictFigures(report) {
         Number(row.conditional_price_yuan),upper,'元','#c27d45');
     });
     body+='</div>';
+    const stressNotes='以历史EPS和PE分位数计算的敏感性对照，非公司合理价值；不同分位的组合不代表真实发生概率。';
+    const scenarioItems=[];
+    if(market!==null && market>0)
+      scenarioItems.push({label:'本次参考价',value:verdictFixed(market)+'元'});
+    scenarios.slice(0,3).forEach(row=>{
+      scenarioItems.push({label:String(row.name||'条件情景'),
+        value:verdictFixed(row.conditional_price_yuan)+'元'});
+    });
     figures.push({id:'earnings_power',match:/利润|盈利|估值|价位|参考价|股价/,
-      html:verdictFigure('历史盈利 × PE 条件价格',
-        String(earningsPower.pe_as_of||report.as_of||'价格日期未知'),body,
-        '以历史EPS和PE分位数计算的敏感性对照，非公司合理价值；不同分位的组合不代表真实发生概率。')});
+      html:scenarioItems.length<=3 ?
+        verdictCompactFigure('历史盈利 × PE 条件价格',
+          String(earningsPower.pe_as_of||report.as_of||'价格日期未知'),
+          scenarioItems,stressNotes):
+        verdictFigure('历史盈利 × PE 条件价格',
+          String(earningsPower.pe_as_of||report.as_of||'价格日期未知'),body,stressNotes)});
   }
   const price=verdictNumber((report.realtime_quote||{}).latest_price);
   const pbAnchor=verdictNumber((ref.historical_pb_anchor||{}).median_pb_reference_price);
   if(price!==null&&price>0&&pbAnchor!==null&&pbAnchor>0){
     const upper=Math.max(price,pbAnchor);
     figures.push({id:'price_refs',match:/参考价|估值|买入|合理|安全边际|价格/,
-      html:verdictFigure('现价与历史PB参考价',
+      html:verdictCompactFigure('现价与历史PB参考价',
         String(ref.as_of||report.as_of||'参考日期未知'),
-        '<div class="verdict-bars">'+
-          verdictBar('当前行情价',price,upper,'元','#6076bf')+
-          verdictBar('历史PB中位对应价',pbAnchor,upper,'元','#c27d45')+'</div>',
+        [
+          {label:'当前行情价',value:verdictFixed(price)+'元'},
+          {label:'历史PB中位对应价',value:verdictFixed(pbAnchor)+'元'},
+        ],
         '历史PB对应价只是假设估值回到历史中位数时的结果，不是内在价值或推荐买入价。')});
   }
   return figures;
