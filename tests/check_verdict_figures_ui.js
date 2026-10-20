@@ -95,6 +95,46 @@ const slots=ctx.assignVerdictFiguresToParagraphs(paragraphs,report);
 assert.equal(JSON.stringify(slots.map(slot=>slot.map(fig=>fig.id))),
   JSON.stringify([['cash','customers'],['valuation'],['dividends'],['debt'],['price_refs'],[]]),
   'a real fact chart should be assigned only to the paragraph discussing that fact');
+// Small comparisons stay on one centered row, with the detailed caveat
+// available on demand. Large time series still use a full-size chart.
+const compactFigures=ctx.collectVerdictFigures(report);
+for(const item of compactFigures){
+  assert.ok(item.html.includes('verdict-figure-compact'),
+    item.id+' should use a short comparison strip');
+  assert.ok(item.html.includes('verdict-compact-line'),
+    item.id+' must expose its data on one row');
+  assert.ok(item.html.includes('verdict-compact-details'),
+    item.id+' must preserve its explanatory note');
+  assert.ok(!item.html.includes('verdict-track'),
+    item.id+' must not show tall bars for one to three values');
+  const valueCount=(item.html.match(/class="verdict-compact-metric"/g)||[]).length;
+  assert.ok(valueCount>=1&&valueCount<=3,
+    item.id+' has more than three data cells');
+}
+const debtCompact=compactFigures.find(item=>item.id==='debt').html;
+assert.ok(debtCompact.includes('2019-12-31'));
+assert.ok(debtCompact.includes('2026-06-30'));
+assert.ok(debtCompact.includes('23.31%'));
+assert.ok(debtCompact.includes('40.27%'));
+const valuationCompact=compactFigures.find(item=>item.id==='valuation').html;
+assert.ok(valuationCompact.includes('PE（近5年）'));
+assert.ok(valuationCompact.includes('PB（近5年）'));
+assert.ok(valuationCompact.includes('99.9%'));
+assert.ok(valuationCompact.includes('99.4%'));
+assert.ok(valuationCompact.includes('现值 20.69 倍'));
+assert.ok(valuationCompact.includes('现值 2.48 倍'));
+const dividendCompact=compactFigures.find(item=>item.id==='dividends').html;
+assert.equal((dividendCompact.match(/class="verdict-compact-metric"/g)||[]).length,3);
+assert.ok(dividendCompact.includes('25.50元'));
+assert.ok(dividendCompact.includes('20.10元'));
+const moreDividendHistory=JSON.parse(JSON.stringify(report));
+moreDividendHistory.dividend_chart.unshift({year:'2022',dividend_per_10:18.8});
+const fullDividend=ctx.collectVerdictFigures(moreDividendHistory)
+  .find(item=>item.id==='dividends').html;
+assert.ok(fullDividend.includes('verdict-yearbars'),
+  'four or more yearly datapoints should use the full trend chart');
+assert.ok(!fullDividend.includes('verdict-figure-compact'));
+
 const html=inline(report);
 assert.ok(html.startsWith('<p class="verdict-summary">'),'narrative must come first');
 assert.ok(!html.includes('先看关键数字'),'no upfront chart gallery');
