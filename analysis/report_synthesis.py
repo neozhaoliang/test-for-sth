@@ -220,6 +220,10 @@ async def _enrich_style_context(inputs: Any, as_of: str) -> str:
         if historical and as_of and as_of < "2026-10-13":
             style["causal_knowledge_status"] = "historical_method_not_available"
             style["causal_drivers"] = []
+            prompt_blocks.append(
+                "\n\n历史研究不能补入基准日之后才提炼的市场风格知识；"
+                "保留当时有日期的行情，不事后编造调仓原因。"
+            )
         else:
             # Always try the vetted, anonymized, actual knowledge mechanisms,
             # INCLUDING when rich industry rotation evidence exists.
