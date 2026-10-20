@@ -127,26 +127,88 @@ if ! command -v git >/dev/null || ! command -v curl >/dev/null || \
   as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y \
     git curl ca-certificates nodejs xvfb xauth
 fi
-if command -v node >/dev/null; then
-  NODE_MAJOR="$(node -p 'parseInt(process.versions.node.split(".")[0],10)' 2>/dev/null || echo 0)"
-  if (( NODE_MAJOR < 16 )); then
-    warn "Node.js 版本较旧（$(node -v)）；部分爬虫 JavaScript 可能需要升级到 Node.js 18+。"
+node_major() {
+  if ! command -v node >/dev/null 2>&1; then echo 0; return; fi
+  node -p 'parseInt(process.versions.node.split(".")[0],10)' 2>/dev/null || echo 0
+}
+
+NODE_MAJOR="$(node_major)"
+if (( NODE_MAJOR < 18 )); then
+  say "Node.js $(node -v 2>/dev/null || echo 未安装) 过旧，自动升级到 Node.js 22 LTS"
+  NODE_SETUP="$(mktemp)"
+  if ! curl --http1.1 -fLsS --retry 3 --retry-delay 3 --connect-timeout 20 https://deb.nodesource.com/setup_22.x -o "$NODE_SETUP"; then
+    rm -f "$NODE_SETUP"
+    die "无法下载 NodeSource 安装程序，请先检查网络或手动安装 Node.js 22。"
   fi
+  if ! as_root bash "$NODE_SETUP"; then
+    rm -f "$NODE_SETUP"
+    die "NodeSource 仓库配置失败，请检查 APT 源。"
+  fi
+  rm -f "$NODE_SETUP"
+  as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+  NODE_MAJOR="$(node_major)"
+  (( NODE_MAJOR >= 18 )) || die "Node.js 升级失败，请检查 node -v。"
 fi
+
+# GitHub sometimes disconnects HTTP/2 streams through certain proxies.
+# HTTP/1.1 applies to these calls only, never global Git settings.
+git_safe() {
+  as_user git -c http.version=HTTP/1.1 -c http.lowSpeedLimit=1024 -c http.lowSpeedTime=90 "$@"
+}
+retry_git() {
+  local attempt
+  for attempt in 1 2 3 4; do
+    if git_safe "$@"; then return 0; fi
+    if (( attempt < 4 )); then
+      warn "Git 网络错误，第 $attempt 次；$((attempt * 3)) 秒后用 HTTP/1.1 重试。"
+      sleep $((attempt * 3))
+    fi
+  done
+  return 1
+}
 
 say "安装/更新项目：$APP_DIR"
 if [[ ! -d "$APP_DIR/.git" ]]; then
   if [[ -d "$APP_DIR" && -n "$(ls -A "$APP_DIR")" ]]; then
-    die "$APP_DIR 已存在且不是空 Git 仓库；为保护数据，拒绝覆盖。"
+    die "$APP_DIR 不是完整 Git 仓库且含有文件；为避免删除用户数据，请先备份或移走。"
   fi
-  as_root install -d -m 0750 -o "$RUN_USER" -g "$RUN_GROUP" "$APP_DIR"
-  as_user git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$APP_DIR"
+  # Clone into a scratch directory and move it into place only after success.
+  # Failed downloads never become misleading half-installed applications.
+  parent="$(dirname "$APP_DIR")"
+  [[ -d "$parent" ]] || as_root install -d -m 0755 -o "$RUN_USER" -g "$RUN_GROUP" "$parent"
+  stage="$(as_root mktemp -d "$parent/.$SERVICE_NAME-clone.XXXXXXXX")"
+  as_root chown "$RUN_USER:$RUN_GROUP" "$stage"
+  cleanup_stage() {
+    if [[ -n "$stage" && -d "$stage" ]]; then as_root rm -rf -- "$stage"; fi
+  }
+  trap cleanup_stage EXIT
+  success=0
+  for attempt in 1 2 3 4; do
+    # Only remove the scratch clone belonging to this deployment.
+    as_root rm -rf -- "$stage/repository"
+    say "GitHub 浅克隆，第 $attempt/4 次（HTTP/1.1）"
+    if git_safe clone --depth 1 --single-branch --no-tags --branch "$BRANCH" "$REPO_URL" "$stage/repository"; then
+      success=1
+      break
+    fi
+    if (( attempt < 4 )); then
+      warn "GitHub 网络断开，$((attempt * 3)) 秒后重试。"
+      sleep $((attempt * 3))
+    fi
+  done
+  (( success )) || die "GitHub 克隆失败。请先检查：git -c http.version=HTTP/1.1 ls-remote $REPO_URL HEAD"
+  [[ -f "$stage/repository/pyproject.toml" && -f "$stage/repository/web/app.py" ]] || die "代码下载不完整。"
+  if [[ -d "$APP_DIR" ]]; then
+    rmdir "$APP_DIR" || die "安装目录非空，请先检查：$APP_DIR"
+  fi
+  as_root mv -- "$stage/repository" "$APP_DIR"
+  cleanup_stage
+  trap - EXIT
 else
-  [[ "$(as_user git -C "$APP_DIR" branch --show-current)" == "$BRANCH" ]] || \
-    die "当前项目不在 $BRANCH 分支；为保护本地修改，不会强行切换或重置。"
-  as_user git -C "$APP_DIR" fetch origin "$BRANCH"
-  as_user git -C "$APP_DIR" merge --ff-only FETCH_HEAD || \
-    die "Git 更新失败。请先处理本地修改或分支分叉；不会执行 reset/clean。"
+  [[ "$(git_safe -C "$APP_DIR" branch --show-current)" == "$BRANCH" ]] || die "项目分支不是 $BRANCH，拒绝强制重置。"
+  say "Git 拉取更新（HTTP/1.1，失败自动重试）"
+  retry_git -C "$APP_DIR" fetch --depth=200 --no-tags origin "$BRANCH" || die "GitHub 更新失败，请检查网络。"
+  git_safe -C "$APP_DIR" merge --ff-only FETCH_HEAD || die "更新无法快进，请检查本地修改；不会执行 reset/clean。"
 fi
 [[ -f "$APP_DIR/pyproject.toml" && -f "$APP_DIR/web/app.py" ]] || die "仓库不包含预期的投资助手入口。"
 
