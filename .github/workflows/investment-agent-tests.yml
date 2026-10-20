@@ -88,6 +88,7 @@ jobs:
             analysis/resource_mining_thesis.py \
             analysis/thesis_readability.py \
             analysis/dimension_readability.py \
+            analysis/prose_integrity.py \
             analysis/chart_interpretation.py \
             analysis/resource_macro_transmission.py \
             analysis/macro_rates.py \
@@ -215,6 +216,7 @@ jobs:
             tests/test_resource_mining_thesis.py \
             tests/test_thesis_readability.py \
             tests/test_dimension_readability.py \
+            tests/test_prose_integrity.py \
             tests/test_chart_interpretation.py \
             tests/test_resource_macro_transmission.py \
             tests/test_market_context_asof.py \
