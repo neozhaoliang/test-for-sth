@@ -152,6 +152,50 @@ body, input, select, textarea, button { font-family:inherit; }
   background:linear-gradient(120deg,#345bb6,#284993);
   box-shadow:0 7px 15px rgba(35,75,156,.18);
 }
+/* Feedback stays in the Analyze button; no separate "状态: running" row. */
+.search-bar #submitBtn {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:9px;
+  white-space:nowrap;
+}
+.search-bar #submitBtn .submit-btn-spinner {
+  display:none;
+  width:17px;
+  height:17px;
+  flex:0 0 17px;
+  border:2px solid rgba(255,255,255,.32);
+  border-top-color:#fff;
+  border-radius:50%;
+  animation:analyze-button-spin .7s linear infinite;
+}
+.search-bar #submitBtn.is-loading .submit-btn-spinner { display:inline-block; }
+.search-bar #submitBtn.is-loading,
+.search-bar #submitBtn.is-loading:hover {
+  opacity:.95;
+  cursor:progress;
+  filter:none;
+  transform:none;
+  box-shadow:0 5px 12px rgba(35,75,156,.13);
+}
+.search-bar #submitBtn.is-loading .submit-btn-text { font-weight:750; }
+@keyframes analyze-button-spin { to { transform:rotate(360deg); } }
+.analysis-error[hidden] { display:none; }
+.analysis-error {
+  padding:9px 12px;
+  margin:0 0 12px;
+  border:1px solid #f4cdcb;
+  border-radius:9px;
+  color:#aa393c;
+  background:#fff5f4;
+  font-size:13px;
+  line-height:1.5;
+}
+@media(prefers-reduced-motion:reduce){
+  .search-bar #submitBtn .submit-btn-spinner { animation:none; }
+}
+
 .app-shell .research-options {
   display:flex;
   align-items:center;
