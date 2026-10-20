@@ -3675,7 +3675,7 @@ function renderResult(report) {
   const embeddedTicker=displayName.match(/\s*[（(]\s*([A-Za-z]{0,3}\d{6})\s*[)）]\s*$/);
   if(embeddedTicker && displayCode &&
      embeddedTicker[1].replace(/\D/g,'')===displayCode.replace(/\D/g,'')){
-    displayName=displayName.slice(0,embeddedTicker.index).trim();
+    displayName=displayName.slice(0,embeddedTicker.index).trim()||displayCode;
   }
   let html='<section class="report-header-inline report-company-card" role="group" '+
     'aria-label="公司与行情摘要">'+
