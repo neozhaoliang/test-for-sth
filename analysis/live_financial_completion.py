@@ -29,29 +29,41 @@ async def complete_live_cash_profit(
 ) -> Optional[Dict]:
     """Return an amended copy only when a latest, dated filing supplies both amounts.
 
-    F10's financial-period tag, if present, MUST equal the filing's period;
-    otherwise prefer an explicit missing ratio over silently mixing quarters.
-    Do not change a valid F10 ratio or any unrelated financial field.
+    If F10 is stale, calculate from BOTH figures in the newer issuer filing,
+    tagged with their common report period. Never mix the older F10 numerator
+    or denominator with the newer report. Preserve unrelated F10 facts and
+    finance_period. Do not replace an equal-period valid F10 ratio.
     """
     if not fundamentals or not isinstance(fundamentals.get("facts"), dict):
         return fundamentals
 
     facts = fundamentals["facts"]
-    if facts.get("cash_to_profit_ratio") is not None:
-        return fundamentals
-
     cutoff = as_of or datetime.now(ZoneInfo("Asia/Shanghai")).date()
     available = latest_available_filing_by_period(filing_calendar or [], cutoff)
     if not available:
         return fundamentals
     period = max(available)
     f10_period = str(facts.get("finance_period") or "")
-    if f10_period and f10_period != period:
+    existing_ratio = facts.get("cash_to_profit_ratio")
+
+    # The third-party F10 "large changed items" table often lags the issuer's
+    # actual periodic filing. Its 2026Q1 tag MUST NOT block fetching 2026H1.
+    # Parse BOTH profit and OCF from the *same* latest official filing; never
+    # divide H1 cash flow by Q1 profit. Preserve the older F10 finance_period
+    # for unrelated F10 rows, and give this pair its own cash_profit_period.
+    if existing_ratio is not None and (not f10_period or f10_period >= period):
+        return fundamentals
+    if f10_period and f10_period > period:
         logger.info(
-            "[live_financial_completion] F10 period=%s vs latest filing=%s; "
-            "refusing to combine periods", f10_period, period,
+            "[live_financial_completion] F10=%s newer than calendar=%s; "
+            "not replacing its values with an older filing", f10_period, period,
         )
         return fundamentals
+    if f10_period and f10_period < period:
+        logger.info(
+            "[live_financial_completion] newer issuer filing=%s than F10=%s; "
+            "fetching latest same-period OCF and attributable profit", period, f10_period,
+        )
 
     try:
         period_date = date.fromisoformat(period)
