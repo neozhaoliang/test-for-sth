@@ -155,7 +155,7 @@ assert.ok(html.includes('class="metric-name">现金／利润</span>'));
 assert.ok(html.includes('1.90倍'));
 assert.ok(html.includes('99.9%'));
 assert.ok(html.includes('99.4%'));
-assert.ok(html.includes('20.69 倍'));
+assert.ok(!html.includes('现值 20.69 倍'));
 assert.ok(html.includes('按公告年度归集'));
 assert.ok(html.includes('25.50'));
 assert.ok(html.includes('20.10'));
