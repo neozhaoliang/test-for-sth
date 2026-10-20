@@ -66,9 +66,12 @@ assert.ok(html.includes('<section class="report-header-inline report-company-car
 assert.ok(html.includes('<h2 id="report-top">模拟公司</h2>'));
 assert.ok(html.includes('<span class="report-stock-code">SH600000</span>'));
 assert.ok(!html.includes('模拟公司 (SH600000)'));
-assert.ok(html.includes('Live 研究'));
-assert.ok(html.includes('基准日 2026-10-13'));
-assert.ok(html.includes('最新价</span> <strong>12.3元</strong>'));
+assert.ok(html.includes('aria-label="公司行情与关键指标"'));
+assert.ok(html.includes('12.30 元'));
+assert.ok(!html.includes('Live 研究'));
+assert.ok(!html.includes('基准日 2026-10-13'));
+assert.ok(!html.includes('report-header-detail'));
+assert.ok(!html.includes('report-quote-inline'));
 assert.ok(!html.includes('<p class="quote">'));
 assert.ok(!html.includes('<div class="live-banner">'));
 assert.ok(html.includes('href="#report-verdict"'));
@@ -170,22 +173,24 @@ assert.ok(pastHtml.includes('<section class="report-header-inline report-company
 assert.ok(pastHtml.includes('<h2 id="report-top">模拟公司</h2>'));
 assert.ok(pastHtml.includes('<span class="report-stock-code">SH600000</span>'));
 assert.ok(!pastHtml.includes('模拟公司 (SH600000)'));
-assert.ok(pastHtml.includes('历史研究'));
-assert.ok(pastHtml.includes('截止日 2025-06-30'));
-assert.ok(pastHtml.includes('截止日收盘价</span> <strong>17.5元</strong>'));
-assert.ok(pastHtml.includes('涨跌幅</span> <strong>-1.8%</strong>'));
-assert.ok(pastHtml.includes('成交量</span> <strong>167000</strong>'));
+assert.ok(!pastHtml.includes('历史研究'));
+assert.ok(!pastHtml.includes('截止日 2025-06-30'));
+assert.ok(pastHtml.includes('截止日收盘价'));
+assert.ok(pastHtml.includes('17.50 元'));
+assert.ok(!pastHtml.includes('涨跌幅</span>'));
+assert.ok(!pastHtml.includes('成交量</span>'));
 assert.ok(pastHtml.includes('report-historical-note'));
 assert.ok(!pastHtml.includes('<div class="historical-banner">'));
 
-assert.ok(pastHtml.includes('report-change-down'));
+assert.ok(!pastHtml.includes('report-change-down'));
 assert.ok(!pastHtml.includes('report-change-up'));
+assert.ok(!pastHtml.includes('class="report-header-detail"'));
 assert.ok(pastHtml.indexOf('<div class="report-company-identity">') <
-  pastHtml.indexOf('class="report-header-detail"'));
+  pastHtml.indexOf('class="verdict-market-strip"'));
 assert.equal((pastHtml.match(/class="report-company-identity"/g)||[]).length,1);
 
-// Screenshot regression: large 比亚迪 on the left; SZ002594 is quiet,
-// unparenthesized ticker text; mode/date/quote on the right in one card.
+// Company card regression: large stock name, small unparenthesized ticker,
+// and six facts directly BELOW the name. No old mode or quote-right panel.
 const byd={
   ...base,
   stock_code:'SZ002594',
@@ -205,16 +210,18 @@ assert.ok(!bydHtml.includes('(SZ002594)'));
 assert.equal((bydHtml.match(/class="report-company-card"/g)||[]).length,0,
   'card contains two classes, not a separate wrapper');
 assert.equal((bydHtml.match(/class="report-header-inline report-company-card"/g)||[]).length,1);
-assert.ok(bydHtml.includes('Live 研究'));
-assert.ok(bydHtml.includes('基准日 2026-10-20'));
-assert.ok(bydHtml.includes('最新价</span> <strong>82.19元</strong>'));
-assert.ok(bydHtml.includes('class="report-quote-item report-quote-change report-change-down"'));
-assert.ok(bydHtml.includes('涨跌幅</span> <strong>-1.569%</strong>'));
-assert.ok(bydHtml.includes('成交量</span> <strong>14988029</strong>'));
+assert.ok(!bydHtml.includes('Live 研究'));
+assert.ok(!bydHtml.includes('基准日 2026-10-20'));
+assert.ok(!bydHtml.includes('report-quote-inline'));
+assert.ok(!bydHtml.includes('最近可核验收盘价</span>'));
+assert.ok(!bydHtml.includes('成交量</span>'));
+assert.ok(bydHtml.includes('82.19 元'));
 assert.ok(bydHtml.indexOf('<div class="report-company-identity">') <
-  bydHtml.indexOf('<div class="report-header-detail">'));
-assert.ok(bydHtml.indexOf('<div class="report-header-detail">') <
+  bydHtml.indexOf('class="verdict-market-strip"'));
+assert.ok(bydHtml.indexOf('class="verdict-market-strip"') <
   bydHtml.indexOf('id="report-toc"'));
+assert.ok(bydHtml.indexOf('id="report-toc"') <
+  bydHtml.indexOf('id="report-verdict"'));
 
 // Old stock providers and cached reports may already append ticker in
 // parentheses. The new identity card must strip it once, not display both.
@@ -237,16 +244,19 @@ ctx.renderResult(noName);
 const noNameHtml=nodes.result.innerHTML;
 assert.ok(noNameHtml.includes('<h2 id="report-top">SZ002594</h2>'));
 assert.ok(!noNameHtml.includes('class="report-stock-code"'));
-assert.ok(noNameHtml.includes('有效股价暂缺，不能判断当前股票赔率'));
+assert.ok(noNameHtml.includes('verdict-market-missing'));
+assert.ok(noNameHtml.includes('暂缺'));
 const gain={...byd,realtime_quote:{latest_price:90.1,change_pct:2.36}};
 ctx.renderResult(gain);
-assert.ok(nodes.result.innerHTML.includes('class="report-quote-item report-quote-change report-change-up"'));
+assert.ok(nodes.result.innerHTML.includes('90.10 元'));
+assert.ok(!nodes.result.innerHTML.includes('report-quote-item'));
 
 // The style file keeps the header as one card and reflows rather than scrolling
 // the entire header horizontally on smaller displays.
 const headerCss=fs.readFileSync('web/research_desk.css','utf8');
 assert.ok(headerCss.includes('report-header-inline.report-company-card'));
 assert.ok(headerCss.includes('.report-stock-code'));
-assert.ok(headerCss.includes('.report-change-down strong'));
+assert.ok(headerCss.includes('.report-company-card .verdict-market-strip'));
+assert.ok(!headerCss.includes('.report-change-down strong'));
 assert.ok(headerCss.includes('@media(max-width:600px)'));
 
