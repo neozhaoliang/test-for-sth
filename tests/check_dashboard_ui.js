@@ -533,7 +533,8 @@ assert.ok(!verdict.includes('十二个维度等权决定立场'));
 report.realtime_quote={latest_price:0};
 ctx.renderResult(report);
 assert.ok(!nodes.result.innerHTML.includes('最新价 0'));
-assert.ok(nodes.result.innerHTML.includes('有效股价暂缺'));
+assert.ok(nodes.result.innerHTML.includes('verdict-market-missing'));
+assert.ok(nodes.result.innerHTML.includes('暂缺'));
 
 console.log('Dashboard UI checks passed: 4 public sections, 12 unique dimensions, hidden internal reviews and industry no-price gate.');
 
