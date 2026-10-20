@@ -43,6 +43,7 @@ function mockElement() {
   };
 }
 const button=mockElement();
+button.setAttribute('aria-busy','false');
 nodes.submitBtn=button;
 nodes.btnLabel=mockElement();
 nodes.btnLabel.textContent='分析';
