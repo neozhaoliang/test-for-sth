@@ -209,10 +209,12 @@ async def _enrich_style_context(inputs: Any, as_of: str) -> str:
                 ),
                 as_of=as_of,
             )
-            prompt_blocks.append(\n            "\n\n## 多行业风格的实际表现（价格证据，不是资金流向）\n"
+            prompt_blocks.append(
+                "\n\n## 多行业风格的实际表现（价格证据，不是资金流向）\n"
                 + str(style["rotation_reading"].get("summary") or "") + "\n"
                 + "；".join(style["rotation_reading"].get("hypotheses") or [])
-                + "\n需同等重视涨跌的反例；板块价格分化不等于基金已经调仓。"\n        )
+                + "\n需同等重视涨跌的反例；板块价格分化不等于基金已经调仓。"
+            )
 
         historical = getattr(inputs, "research_mode", "") == "historical"
         if historical and as_of and as_of < "2026-10-13":
