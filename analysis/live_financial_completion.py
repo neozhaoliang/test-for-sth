@@ -2,7 +2,8 @@
 
 The F10 'changed financial items' table is intentionally sparse: absence of
 operating cash flow there says nothing about whether the issuer published it.
-Use one exact CNINFO report only when the live F10 cannot calculate OCF/profit.
+Use a newer exact CNINFO report when F10 is missing a ratio or still
+shows an older report period. Keep the amounts and their reporting date paired.
 
 No mixed periods, no quoted per-share OCF substituted for net operating cash
 flow, and no newer disclosure used for historical reports (caller: live only).
@@ -29,29 +30,41 @@ async def complete_live_cash_profit(
 ) -> Optional[Dict]:
     """Return an amended copy only when a latest, dated filing supplies both amounts.
 
-    F10's financial-period tag, if present, MUST equal the filing's period;
-    otherwise prefer an explicit missing ratio over silently mixing quarters.
-    Do not change a valid F10 ratio or any unrelated financial field.
+    If F10 is stale, calculate from BOTH figures in the newer issuer filing,
+    tagged with their common report period. Never mix the older F10 numerator
+    or denominator with the newer report. Preserve unrelated F10 facts and
+    finance_period. Do not replace an equal-period valid F10 ratio.
     """
     if not fundamentals or not isinstance(fundamentals.get("facts"), dict):
         return fundamentals
 
     facts = fundamentals["facts"]
-    if facts.get("cash_to_profit_ratio") is not None:
-        return fundamentals
-
     cutoff = as_of or datetime.now(ZoneInfo("Asia/Shanghai")).date()
     available = latest_available_filing_by_period(filing_calendar or [], cutoff)
     if not available:
         return fundamentals
     period = max(available)
     f10_period = str(facts.get("finance_period") or "")
-    if f10_period and f10_period != period:
+    existing_ratio = facts.get("cash_to_profit_ratio")
+
+    # The third-party F10 "large changed items" table often lags the issuer's
+    # actual periodic filing. Its 2026Q1 tag MUST NOT block fetching 2026H1.
+    # Parse BOTH profit and OCF from the *same* latest official filing; never
+    # divide H1 cash flow by Q1 profit. Preserve the older F10 finance_period
+    # for unrelated F10 rows, and give this pair its own cash_profit_period.
+    if existing_ratio is not None and (not f10_period or f10_period >= period):
+        return fundamentals
+    if f10_period and f10_period > period:
         logger.info(
-            "[live_financial_completion] F10 period=%s vs latest filing=%s; "
-            "refusing to combine periods", f10_period, period,
+            "[live_financial_completion] F10=%s newer than calendar=%s; "
+            "not replacing its values with an older filing", f10_period, period,
         )
         return fundamentals
+    if f10_period and f10_period < period:
+        logger.info(
+            "[live_financial_completion] newer issuer filing=%s than F10=%s; "
+            "fetching latest same-period OCF and attributable profit", period, f10_period,
+        )
 
     try:
         period_date = date.fromisoformat(period)
@@ -87,17 +100,24 @@ async def complete_live_cash_profit(
 
     new_facts = dict(facts)
     new_facts.update(
-        net_profit=net_profit,
-        net_profit_basis="归属于上市公司股东的净利润",
-        operating_cash_flow=ocf,
+        # This pair comes from the SAME issuer filing; keep a dedicated date
+        # and dedicated amounts so outdated F10 revenue/net_profit rows cannot
+        # accidentally be relabeled as belonging to the newer period.
+        cash_profit_net_profit=net_profit,
+        cash_profit_operating_cash_flow=ocf,
+        cash_profit_net_profit_basis="归属于上市公司股东的净利润",
         cash_to_profit_ratio=round(ocf / net_profit, 3),
         cash_profit_period=period,
         cash_profit_source="巨潮资讯原始定期报告",
     )
-    if not f10_period:
-        # Do not overwrite the F10 tag of other fields if it is unavailable.
-        # The cash/profit KPI uses its own exact period instead.
-        new_facts["cash_profit_period"] = period
+    if not f10_period or f10_period == period:
+        # Safe only when the rest of the F10 financial rows use this period
+        # (or none is declared); otherwise leave them untouched.
+        new_facts.update(
+            net_profit=net_profit,
+            net_profit_basis="归属于上市公司股东的净利润",
+            operating_cash_flow=ocf,
+        )
     new_data = dict(fundamentals)
     new_data["facts"] = new_facts
     source_url = str(filing.get("url") or "")

@@ -216,6 +216,20 @@ assert.ok(bydHtml.indexOf('<div class="report-company-identity">') <
 assert.ok(bydHtml.indexOf('<div class="report-header-detail">') <
   bydHtml.indexOf('id="report-toc"'));
 
+// Old stock providers and cached reports may already append ticker in
+// parentheses. The new identity card must strip it once, not display both.
+for(const named of ['比亚迪 (SZ002594)','比亚迪（SZ002594）','比亚迪（002594）']){
+  ctx.renderResult({...byd,stock_name:named});
+  const card=nodes.result.innerHTML;
+  assert.ok(card.includes('<h2 id="report-top">比亚迪</h2>'));
+  assert.equal((card.match(/class="report-stock-code"/g)||[]).length,1);
+  assert.ok(!card.includes('<h2 id="report-top">比亚迪 ('));
+  assert.ok(!card.includes('<h2 id="report-top">比亚迪（'));
+}
+ctx.renderResult({...byd,stock_name:'比亚迪（A股）'});
+assert.ok(nodes.result.innerHTML.includes('<h2 id="report-top">比亚迪（A股）</h2>'),
+  'meaningful parenthetical text unrelated to ticker must not be removed');
+
 // Ticker alone, missing price, and positive share price movement must also
 // retain an accessible, never-parenthesized header.
 const noName={...byd,stock_name:'',realtime_quote:{latest_price:0}};

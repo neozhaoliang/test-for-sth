@@ -472,8 +472,10 @@ async def crawled_users() -> List[Dict]:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index() -> str:
-    return _INDEX_HTML
+async def index() -> HTMLResponse:
+    # App code is embedded into Python's _INDEX_HTML at import time. Do not
+    # let a browser/proxy retain an outdated page across server redeploys.
+    return HTMLResponse(_INDEX_HTML, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/assets/roe_discount.js")
@@ -2521,8 +2523,14 @@ function collectVerdictFigures(report) {
   const hist=report.valuation_history||{};
   const figures=[];
 
-  const profit=verdictNumber(facts.net_profit);
-  const cash=verdictNumber(facts.operating_cash_flow);
+  // The live issuer-filing fallback can be newer than F10. Use its
+  // separately dated profit/cash pair together, never H1 cash with Q1 profit.
+  const pairProfit=verdictNumber(facts.cash_profit_net_profit);
+  const pairCash=verdictNumber(facts.cash_profit_operating_cash_flow);
+  const hasOfficialPair=Boolean(facts.cash_profit_period &&
+    pairProfit!==null && pairCash!==null);
+  const profit=hasOfficialPair?pairProfit:verdictNumber(facts.net_profit);
+  const cash=hasOfficialPair?pairCash:verdictNumber(facts.operating_cash_flow);
   if(profit!==null && cash!==null && profit>0) {
     const net=profit/1e8, operating=cash/1e8;
     const ratio=verdictNumber(facts.cash_to_profit_ratio);
@@ -3665,8 +3673,16 @@ function renderResult(report) {
   // A single broker-style stock identity card: prominent company name at
   // left, small UNPARENTHESIZED ticker beside it, compact quote data at right.
   // Keep the as-of/previous-close qualifications; do not imply stale data is live.
-  const displayName=String(report.stock_name||report.stock_code||'股票名称暂缺');
   const displayCode=String(report.stock_code||'').trim();
+  let displayName=String(report.stock_name||report.stock_code||'股票名称暂缺').trim();
+  // Defensive normalization for older cached provider names such as
+  // "比亚迪 (SZ002594)" or "比亚迪（SZ002594）". Never remove
+  // unrelated parentheses (e.g. a meaningful legal company suffix).
+  const embeddedTicker=displayName.match(/\s*[（(]\s*([A-Za-z]{0,3}\d{6})\s*[)）]\s*$/);
+  if(embeddedTicker && displayCode &&
+     embeddedTicker[1].replace(/\D/g,'')===displayCode.replace(/\D/g,'')){
+    displayName=displayName.slice(0,embeddedTicker.index).trim()||displayCode;
+  }
   let html='<section class="report-header-inline report-company-card" role="group" '+
     'aria-label="公司与行情摘要">'+
     '<div class="report-company-identity"><h2 id="report-top">'+
