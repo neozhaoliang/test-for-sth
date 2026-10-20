@@ -216,8 +216,8 @@ assert.ok(!smaller.includes('利润与经营现金流'));
 assert.ok(!smaller.includes('每10股现金分红'));
 assert.ok(!smaller.includes('资产负债率前后比较'));
 assert.ok(!smaller.includes('现价与历史PB参考价'));
-assert.ok(smaller.includes('市净率 PB'));
-assert.ok(!smaller.includes('市盈率 PE'));
+assert.ok(smaller.includes('PB（近5年）'));
+assert.ok(!smaller.includes('PE（近5年）'));
 
 const cashNegative=JSON.parse(JSON.stringify(report));
 cashNegative.fundamentals.facts.operating_cash_flow=-12000000000;
