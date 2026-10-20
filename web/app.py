@@ -2523,8 +2523,14 @@ function collectVerdictFigures(report) {
   const hist=report.valuation_history||{};
   const figures=[];
 
-  const profit=verdictNumber(facts.net_profit);
-  const cash=verdictNumber(facts.operating_cash_flow);
+  // The live issuer-filing fallback can be newer than F10. Use its
+  // separately dated profit/cash pair together, never H1 cash with Q1 profit.
+  const pairProfit=verdictNumber(facts.cash_profit_net_profit);
+  const pairCash=verdictNumber(facts.cash_profit_operating_cash_flow);
+  const hasOfficialPair=Boolean(facts.cash_profit_period &&
+    pairProfit!==null && pairCash!==null);
+  const profit=hasOfficialPair?pairProfit:verdictNumber(facts.net_profit);
+  const cash=hasOfficialPair?pairCash:verdictNumber(facts.operating_cash_flow);
   if(profit!==null && cash!==null && profit>0) {
     const net=profit/1e8, operating=cash/1e8;
     const ratio=verdictNumber(facts.cash_to_profit_ratio);
