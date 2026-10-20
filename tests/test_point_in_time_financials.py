@@ -128,6 +128,45 @@ def test_monetary_unit_defaults_to_original_value_when_not_declared():
     assert out["monetary_multiplier"] == 1.0
 
 
+def test_byd_h1_explicit_per_row_yuan_labels_enable_official_cash_conversion():
+    """The 2026H1 issuer table uses （元）, not a table-level 单位：元."""
+    pages = [
+        """
+        比亚迪股份有限公司 2026 年半年度报告全文
+        四、主要会计数据和财务指标
+        本报告期 上年同期 本报告期比上年同期增减
+        营业收入（元） 344,815,421,000.00 371,280,948,000.00 -7.13%
+        归属于上市公司股东的净利润（元）
+        12,325,408,000.00 15,510,533,000.00 -20.54%
+        归属于上市公司股东的扣除非经常性损益的净利润（元）
+        12,373,343,000.00 13,599,741,000.00 -9.02%
+        经营活动产生的现金流量净额（元）
+        37,334,744,000.00 31,833,471,000.00 17.28%
+        加权平均净资产收益率 4.86% 7.43% -2.57%
+        """
+    ]
+    data = parse_financial_report_pages(pages)
+    assert data["monetary_unit"] == "元(原表:归母净利及经营现金流逐行标注)"
+    assert data["net_profit"] == 12_325_408_000.0
+    assert data["operating_cash_flow"] == 37_334_744_000.0
+    assert abs(data["cash_to_profit_ratio"] - 3.029) < 0.001
+
+
+def test_per_share_yuan_unit_must_not_certify_all_monetary_metrics():
+    """'每股收益（元/股）' alone cannot certify cash-flow yuan units."""
+    rows = [
+        """
+        主要会计数据和财务指标
+        营业收入 10000
+        归属于上市公司股东的净利润 1000
+        经营活动产生的现金流量净额 3000
+        基本每股收益（元/股） 1.00
+        """
+    ]
+    data = parse_financial_report_pages(rows)
+    assert "单位未明确" in data["monetary_unit"]
+
+
 def test_q3_parser_prefers_year_to_date_columns_and_local_unit():
     pages = [
         """
