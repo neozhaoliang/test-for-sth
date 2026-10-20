@@ -2,7 +2,8 @@
 
 The F10 'changed financial items' table is intentionally sparse: absence of
 operating cash flow there says nothing about whether the issuer published it.
-Use one exact CNINFO report only when the live F10 cannot calculate OCF/profit.
+Use a newer exact CNINFO report when F10 is missing a ratio or still
+shows an older report period. Keep the amounts and their reporting date paired.
 
 No mixed periods, no quoted per-share OCF substituted for net operating cash
 flow, and no newer disclosure used for historical reports (caller: live only).
@@ -99,17 +100,24 @@ async def complete_live_cash_profit(
 
     new_facts = dict(facts)
     new_facts.update(
-        net_profit=net_profit,
-        net_profit_basis="归属于上市公司股东的净利润",
-        operating_cash_flow=ocf,
+        # This pair comes from the SAME issuer filing; keep a dedicated date
+        # and dedicated amounts so outdated F10 revenue/net_profit rows cannot
+        # accidentally be relabeled as belonging to the newer period.
+        cash_profit_net_profit=net_profit,
+        cash_profit_operating_cash_flow=ocf,
+        cash_profit_net_profit_basis="归属于上市公司股东的净利润",
         cash_to_profit_ratio=round(ocf / net_profit, 3),
         cash_profit_period=period,
         cash_profit_source="巨潮资讯原始定期报告",
     )
-    if not f10_period:
-        # Do not overwrite the F10 tag of other fields if it is unavailable.
-        # The cash/profit KPI uses its own exact period instead.
-        new_facts["cash_profit_period"] = period
+    if not f10_period or f10_period == period:
+        # Safe only when the rest of the F10 financial rows use this period
+        # (or none is declared); otherwise leave them untouched.
+        new_facts.update(
+            net_profit=net_profit,
+            net_profit_basis="归属于上市公司股东的净利润",
+            operating_cash_flow=ocf,
+        )
     new_data = dict(fundamentals)
     new_data["facts"] = new_facts
     source_url = str(filing.get("url") or "")
