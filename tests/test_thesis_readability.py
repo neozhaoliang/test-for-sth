@@ -50,7 +50,22 @@ def test_detects_numeric_inventory_not_length_alone():
     assert overloaded["needs_edit"] is True
     assert overloaded["numeric_mentions"] >= 40
     assert readability_signals(human_rewrite())["needs_edit"] is False
-    assert readability_signals("矿业发展很快，但现价不便宜。\n\n"*30)["needs_edit"] is False
+    # Long prose is allowed, but a paragraph pasted thirty times is now
+    # rightly treated as duplication instead of innocuous length.
+    assert readability_signals("矿业发展很快，但现价不便宜。\n\n"*30)["needs_edit"] is True
+    varied = "\n\n".join(
+        f"研究公司未来的{topic}，需要看看经营事实和相应的投入回报。"
+        for topic in (
+            "矿石品位", "运输费用", "能源成本", "管理效率", "采矿许可",
+            "项目建设", "现金分红", "客户信用", "设备折旧", "矿权收购",
+            "经营现金流", "资本开支", "铜矿产能", "黄金销售", "税费负担",
+            "流动资金", "存货变化", "财务杠杆", "资金成本", "工程进度",
+            "汇率变动", "安全生产", "供应链质量", "合同执行", "成本控制",
+            "技术改造", "环保投入", "汇兑收益", "利润分配", "风险管理",
+        )
+    )
+    assert len(varied) > 850
+    assert readability_signals(varied)["needs_edit"] is False
 
 
 def test_screen_rejects_new_financial_facts_but_allows_numerical_selection():
