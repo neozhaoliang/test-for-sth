@@ -93,7 +93,7 @@ const paragraphs=[
 report.summary.thesis_summary=paragraphs.join('\n\n');
 const slots=ctx.assignVerdictFiguresToParagraphs(paragraphs,report);
 assert.equal(JSON.stringify(slots.map(slot=>slot.map(fig=>fig.id))),
-  JSON.stringify([['cash','customers'],['valuation'],['dividends'],['debt'],['price_refs'],[]]),
+  JSON.stringify([['cash','customers'],[],['dividends'],['debt'],['price_refs'],[]]),
   'a real fact chart should be assigned only to the paragraph discussing that fact');
 // Small comparisons stay on one centered row, with the detailed caveat
 // available on demand. Large time series still use a full-size chart.
@@ -146,15 +146,20 @@ assert.ok(!fullDividend.includes('verdict-figure-compact'));
 
 const html=inline(report);
 assert.ok(html.startsWith('<p class="verdict-summary">'),'narrative must come first');
+assert.ok(!html.includes('class="metric-name">PE</span>'));
+assert.ok(!html.includes('class="metric-name">PB</span>'));
+const headerMetrics=ctx.renderVerdictMarketStrip(report);
+assert.ok(headerMetrics.includes('99.9%'));
+assert.ok(headerMetrics.includes('99.4%'));
 assert.ok(!html.includes('先看关键数字'),'no upfront chart gallery');
-assert.equal(chartCount(html),6);
+assert.equal(chartCount(html),5);
 assert.ok(html.includes('546.64亿元'));
 assert.ok(html.includes('287.70亿元'));
 assert.ok(html.includes('2026-06-30'));
 assert.ok(html.includes('class="metric-name">现金／利润</span>'));
 assert.ok(html.includes('1.90倍'));
-assert.ok(html.includes('99.9%'));
-assert.ok(html.includes('99.4%'));
+assert.ok(!html.includes('99.9%'));
+assert.ok(!html.includes('99.4%'));
 assert.ok(!html.includes('现值 20.69 倍'));
 assert.ok(html.includes('按公告年度归集'));
 assert.ok(html.includes('25.50'));
@@ -168,7 +173,6 @@ assert.ok(html.includes('51.50元'));
 assert.ok(html.includes('不是内在价值或推荐买入价'));
 for(const [i,expectedFigureText] of [
   [0,'287.70亿元'],
-  [1,'99.9%'],
   [2,'每10股现金分红（元）'],
   [3,'资产负债率前后比较'],
   [4,'现价与历史PB参考价'],
@@ -179,7 +183,7 @@ for(const [i,expectedFigureText] of [
   assert.ok(paragraph>=0&&paragraph<chart&&chart<next,
     expectedFigureText+' must follow its paragraph and precede the next paragraph');
 }
-assert.equal((html.match(/上段文字对应的财务与估值图表/g)||[]).length,5);
+assert.equal((html.match(/上段文字对应的财务与估值图表/g)||[]).length,4);
 
 // Render the actual report page: no separate gallery before all the text.
 ctx.renderResult(report);
@@ -188,7 +192,7 @@ assert.ok(page.indexOf(paragraphs[0])<page.indexOf('287.70亿元'));
 assert.ok(page.indexOf('287.70亿元')<page.indexOf(paragraphs[1]));
 assert.ok(page.indexOf(paragraphs[4])<page.indexOf('现价与历史PB参考价'));
 assert.ok(page.indexOf('id="report-charts"')>page.indexOf(paragraphs[5]));
-assert.equal(chartCount(page.split('id="report-charts"')[0]),6);
+assert.equal(chartCount(page.split('id="report-charts"')[0]),5);
 
 // Data-rich report with one unrelated paragraph must not dump unused charts.
 const unrelated=JSON.parse(JSON.stringify(report));
@@ -196,7 +200,7 @@ unrelated.summary.thesis_summary='公司与管理层谈判进展顺利，目前�
 assert.equal(chartCount(inline(unrelated)),0);
 const single=JSON.parse(JSON.stringify(report));
 single.summary.thesis_summary='经营现金流与净利润需要一起看，公司估值分位也偏高。';
-assert.equal(chartCount(inline(single)),2,'at most two related figures under a paragraph');
+assert.equal(chartCount(inline(single)),1,'PE/PB summary indicators must not be duplicated as inline charts');
 
 const repeated=JSON.parse(JSON.stringify(report));
 repeated.summary.thesis_summary=[
@@ -224,7 +228,7 @@ assert.ok(scenarioHtml.includes('历史盈利 × PE 条件价格'));
 assert.ok(scenarioHtml.includes('32.80元'));
 assert.ok(scenarioHtml.includes('42.60元'));
 assert.ok(scenarioHtml.includes('50.14元'));
-assert.equal(chartCount(scenarioHtml),7);
+assert.equal(chartCount(scenarioHtml),6);
 // Regression based on the user's Shenhua screenshot: narrative paragraph,
 // related chart, next paragraph, related chart. Do not create one gallery.
 const shenhuaParagraphs=[
@@ -238,10 +242,10 @@ const shenhua=JSON.parse(JSON.stringify(scenarioReport));
 shenhua.summary.thesis_summary=shenhuaParagraphs.join('\n\n');
 const grouped=ctx.assignVerdictFiguresToParagraphs(shenhuaParagraphs,shenhua);
 assert.equal(JSON.stringify(grouped.map(row=>row.map(item=>item.id))),
-  JSON.stringify([['cash','customers'],['valuation'],['dividends','debt'],
+  JSON.stringify([['cash','customers'],[],['dividends','debt'],
     ['earnings_power','price_refs'],[]]));
 const reading=inline(shenhua);
-assert.equal(chartCount(reading),7);
+assert.equal(chartCount(reading),6);
 for(let i=0;i<shenhuaParagraphs.length-1;i++){
   const here=reading.indexOf(shenhuaParagraphs[i]);
   const next=reading.indexOf(shenhuaParagraphs[i+1]);
@@ -266,8 +270,12 @@ assert.ok(!smaller.includes('287.70亿元'));
 assert.ok(!smaller.includes('每10股现金分红'));
 assert.ok(!smaller.includes('资产负债率前后比较'));
 assert.ok(!smaller.includes('现价与历史PB参考价'));
-assert.ok(smaller.includes('class="metric-name">PB</span>'));
+assert.ok(!smaller.includes('class="metric-name">PB</span>'));
 assert.ok(!smaller.includes('class="metric-name">PE</span>'));
+const headerPartial=ctx.renderVerdictMarketStrip(partial);
+assert.ok(headerPartial.includes('PB</span>'));
+assert.ok(headerPartial.includes('99.4%'));
+assert.ok(!headerPartial.includes('99.9%'));
 
 const cashNegative=JSON.parse(JSON.stringify(report));
 cashNegative.fundamentals.facts.operating_cash_flow=-12000000000;

@@ -223,6 +223,101 @@ body, input, select, textarea, button { font-family:inherit; }
 }
 #result .result-summary h3 { margin:0 0 10px;font-size:18px; }
 .verdict-line { align-items:center;gap:9px 14px; }
+
+/* Broker-style metrics: source dates stay next to every value. The cards
+   sit under 投资结论, never in the later data-overview dashboard. */
+#result #report-verdict .verdict-market-strip {
+  display:grid;
+  grid-template-columns:minmax(150px,1.25fr) repeat(5,minmax(0,1fr));
+  gap:0;
+  margin:12px 0 17px;
+  padding:7px 0;
+  border:1px solid #dce5f3;
+  border-radius:13px;
+  background:linear-gradient(100deg,#f6f9ff,#fbfdff);
+  min-width:0;
+}
+#result #report-verdict .verdict-market-metric {
+  --kpi-ink:#2d598e;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  justify-content:center;
+  gap:2px;
+  padding:8px 14px 9px;
+  min-width:0;
+  border-left:1px solid #e0e8f3;
+}
+#result #report-verdict .verdict-market-metric:first-child { border-left:0; }
+#result #report-verdict .verdict-market-label {
+  font-size:11px;
+  font-weight:650;
+  line-height:1.45;
+  color:#65748c;
+  white-space:nowrap;
+}
+#result #report-verdict .verdict-market-value {
+  font-size:clamp(17px,1.5vw,21px);
+  font-weight:800;
+  letter-spacing:-.035em;
+  font-variant-numeric:tabular-nums;
+  line-height:1.3;
+  white-space:nowrap;
+  color:var(--kpi-ink);
+}
+#result #report-verdict .verdict-market-date,
+#result #report-verdict .verdict-market-context {
+  font-size:10px;
+  line-height:1.45;
+  color:#7c8a9f;
+}
+#result #report-verdict .verdict-market-price { --kpi-ink:#22529e; }
+#result #report-verdict .verdict-market-price .verdict-market-value {
+  font-size:clamp(22px,2vw,27px);
+}
+#result #report-verdict .verdict-market-valuation { --kpi-ink:#6955a1; }
+#result #report-verdict .verdict-market-profit { --kpi-ink:#158578; }
+#result #report-verdict .verdict-market-cash { --kpi-ink:#16847d; }
+#result #report-verdict .verdict-market-low { --kpi-ink:#168578; }
+#result #report-verdict .verdict-market-mid { --kpi-ink:#3c6baf; }
+#result #report-verdict .verdict-market-high { --kpi-ink:#bd7740; }
+#result #report-verdict .verdict-market-missing { --kpi-ink:#939eae; }
+#result #report-verdict .verdict-market-strip + .verdict-line { margin-top:11px; }
+@media(max-width:1080px){
+  #result #report-verdict .verdict-market-strip {
+    grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+  #result #report-verdict .verdict-market-metric:nth-child(3n+1) { border-left:0; }
+  #result #report-verdict .verdict-market-metric:nth-child(n+4) {
+    border-top:1px solid #e0e8f3;
+  }
+}
+@media(max-width:600px){
+  #result #report-verdict .verdict-market-strip {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  #result #report-verdict .verdict-market-metric {
+    padding:8px 11px;
+  }
+  #result #report-verdict .verdict-market-metric:nth-child(n) {
+    border-left:0;
+    border-top:1px solid #e0e8f3;
+  }
+  #result #report-verdict .verdict-market-metric:nth-child(even) {
+    border-left:1px solid #e0e8f3;
+  }
+  #result #report-verdict .verdict-market-metric:first-child {
+    grid-column:1 / -1;
+    border-top:0;
+    border-left:0;
+  }
+  #result #report-verdict .verdict-market-metric:nth-child(2) {
+    border-left:0;
+  }
+  #result #report-verdict .verdict-market-value { font-size:18px; }
+  #result #report-verdict .verdict-market-price .verdict-market-value { font-size:25px; }
+}
+
 .verdict-item { border-left:1px solid #e3eaf4;padding-left:12px; }
 .verdict-item b { font-size:14px; }
 .verdict-summary { max-width:1100px;line-height:1.95; }
@@ -841,75 +936,6 @@ body, input, select, textarea, button { font-family:inherit; }
   #result .chip-reading-numbers strong { font-size:14px; }
 }
 
-
-/* Stock report's four headline facts belong to ONE aligned reading strip,
-   not four large independent cards. Scoped: the investor-return metric pair
-   elsewhere continues to use its normal layout. */
-#result .dashboard-charts .metric-strip.primary-kpis {
-  display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
-  gap:0;
-  width:100%;
-  min-width:0;
-  margin:2px 0 0;
-  border:1px solid #dfe7f3;
-  border-radius:8px;
-  background:#f8fafd;
-  overflow:hidden;
-}
-#result .dashboard-charts .primary-kpis .metric {
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  min-width:0;
-  padding:7px 10px;
-  margin:0;
-  background:transparent;
-  border:0;
-  border-radius:0;
-  box-shadow:none;
-}
-#result .dashboard-charts .primary-kpis .metric + .metric {
-  border-left:1px solid #e0e8f3;
-}
-#result .dashboard-charts .primary-kpis .metric label {
-  display:block;
-  margin:0;
-  font-size:10px;
-  font-weight:650;
-  color:#72809a;
-  white-space:nowrap;
-}
-#result .dashboard-charts .primary-kpis .metric strong {
-  display:block;
-  margin:2px 0 1px;
-  font-size:clamp(15px,1.7vw,18px);
-  font-weight:750;
-  line-height:1.25;
-  letter-spacing:-.035em;
-  white-space:nowrap;
-  font-variant-numeric:tabular-nums;
-}
-#result .dashboard-charts .primary-kpis .metric small {
-  display:block;
-  margin:0;
-  font-size:9px;
-  line-height:1.35;
-  color:#7d8ba2;
-  overflow-wrap:anywhere;
-}
-/* On phones preserve the requested single row rather than stacking cards.
-   Only the KPI strip scrolls horizontally, never the whole article. */
-@media(max-width:700px) {
-  #result .dashboard-charts .metric-strip.primary-kpis {
-    grid-template-columns:repeat(4,minmax(117px,1fr));
-    overflow-x:auto;
-    overscroll-behavior-x:contain;
-    -webkit-overflow-scrolling:touch;
-  }
-  #result .dashboard-charts .primary-kpis .metric { padding:7px 9px; }
-  #result .dashboard-charts .primary-kpis .metric strong { font-size:16px; }
-}
 
 /* ROE calculator: sliders and the live price card share one two-column row.
    Other valuation dashboards deliberately keep their separate layout rules. */

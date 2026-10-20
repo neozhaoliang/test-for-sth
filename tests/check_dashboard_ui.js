@@ -46,41 +46,73 @@ const report={
 };
 assert.ok(ctx.renderProfitabilityTrendChart(report.profitability_trend).includes('<svg'));
 assert.ok(ctx.renderDashboardCharts(report).includes('数据概览与维度图谱'));
-const metricsHtml=ctx.renderDashboardCharts({
+// The four original dashboard KPIs are now in the investment conclusion,
+// together with historical PE/PB percentiles, like a broker quote row.
+const headlineReport={
   ...report,
-  as_of:'2026-10-13',
-  realtime_quote:{latest_price:30.4,quote_time:'2026-10-13'},
-  valuation:{pb:3.98,roe_pct:19.6,valuation_as_of:'2026-10-09'},
-  fundamentals:{facts:{cash_to_profit_ratio:1.42,finance_period:'2026-06-30'}},
-});
-// Official-filing cash coverage must retain a distinct source/date label.
-const filingMetrics=ctx.renderDashboardCharts({
-  ...report,
-  fundamentals:{facts:{
-    cash_to_profit_ratio:1.171,cash_profit_period:'2026-06-30',
-    cash_profit_source:'巨潮资讯原始定期报告',
-  }},
-});
-assert.ok(filingMetrics.includes('现金流/归母净利'));
-assert.ok(filingMetrics.includes('1.17 倍'));
-assert.ok(filingMetrics.includes('2026-06-30 · 官方财报'));
-const headlineStrip=metricsHtml.split('class="metric-strip primary-kpis"')[1]
-  ?.split('<div class="chart-grid"')[0] || '';
-assert.ok(headlineStrip.includes('role="group" aria-label="股票主要财务指标"'));
-assert.equal((headlineStrip.match(/class="metric"/g)||[]).length,4);
-const css=fs.readFileSync('web/research_desk.css','utf8');
-const cell=css.match(/#result \.dashboard-charts \.primary-kpis \.metric\s*\{([^}]+)\}/);
-const amount=css.match(/#result \.dashboard-charts \.primary-kpis \.metric strong\s*\{([^}]+)\}/);
-assert.ok(cell && amount, 'scoped compact metrics CSS is required');
-assert.ok(/padding\s*:\s*7px\s+10px/.test(cell[1]));
-assert.ok(/clamp\(15px,1\.7vw,18px\)/.test(amount[1]));
-assert.ok(css.includes('grid-template-columns:repeat(4,minmax(117px,1fr))'));
-assert.ok(css.includes('.stock-ytd-position-meta'));
-for(const fact of ['参考股价','30.40 元','2026-10-13','市净率 PB','3.98 倍',
-                   '2026-10-09','F10 披露ROE','19.60%',
-                   '现金流/归母净利','1.42 倍','2026-06-30']) {
-  assert.ok(headlineStrip.includes(fact),'Missing aligned KPI: '+fact);
+  as_of:'2026-10-20',
+  realtime_quote:{latest_price:82.94,quote_time:'2026-10-20'},
+  valuation:{pb:3.17,roe_pct:4.86,valuation_as_of:'2026-10-16'},
+  valuation_history:{
+    as_of:'2026-10-20',
+    pe_percentiles:[{years:5,percentile:39.6}],
+    pb_percentiles:[{years:5,percentile:1.1}],
+  },
+  fundamentals:{facts:{cash_to_profit_ratio:null,finance_period:'2026-03-31'}},
+  summary:{stance:'neutral',thesis_summary:'公司的估值与股东回报需要放在一起评估。',
+    dimension_scores:[]},
+};
+const marketHtml=ctx.renderVerdictMarketStrip(headlineReport);
+assert.ok(marketHtml.includes('aria-label="投资结论行情与关键指标"'));
+assert.equal((marketHtml.match(/class="verdict-market-metric /g)||[]).length,6);
+for(const expected of [
+  '82.94 元','2026-10-20','市净率 PB','3.17 倍',
+  'F10 披露ROE','4.86%','2026-10-16',
+  '现金流/归母净利','暂缺','2026-03-31',
+  'PE','39.6%','PB','1.1%','历史5年分位',
+]){
+  assert.ok(marketHtml.includes(expected),'Missing investment KPI: '+expected);
 }
+assert.ok(marketHtml.includes('verdict-market-price'));
+assert.ok(marketHtml.includes('verdict-market-valuation'));
+assert.ok(marketHtml.includes('verdict-market-profit'));
+assert.ok(marketHtml.includes('verdict-market-missing'));
+assert.ok(marketHtml.includes('verdict-market-mid'));
+assert.ok(marketHtml.includes('verdict-market-low'));
+
+ctx.renderResult(headlineReport);
+const rendered=nodes.result.innerHTML;
+const conclusion=rendered.indexOf('<h3>投资结论</h3>');
+const kpis=rendered.indexOf('class="verdict-market-strip"');
+const stance=rendered.indexOf('class="verdict-line"');
+const thesis=rendered.indexOf('公司的估值与股东回报');
+const dashboard=rendered.indexOf('id="report-charts"');
+assert.ok(conclusion>=0 && conclusion<kpis && kpis<stance && stance<thesis);
+assert.ok(thesis<dashboard);
+assert.equal((rendered.match(/class="verdict-market-strip"/g)||[]).length,1);
+assert.ok(!ctx.renderDashboardCharts(headlineReport).includes('primary-kpis'),
+  'no duplicate quote or financial KPI row in the later dashboard');
+assert.ok(!ctx.renderDashboardCharts(headlineReport).includes('82.94 元'));
+
+const css=fs.readFileSync('web/research_desk.css','utf8');
+assert.ok(css.includes('#result #report-verdict .verdict-market-strip'));
+assert.ok(css.includes('grid-template-columns:repeat(3,minmax(0,1fr))'));
+assert.ok(css.includes('grid-template-columns:repeat(2,minmax(0,1fr))'));
+assert.ok(css.includes('.verdict-market-price'));
+assert.ok(css.includes('.verdict-market-low'));
+assert.ok(css.includes('.stock-ytd-position-meta'));
+
+// Display all dates independently rather than attaching the latest quote
+// date to an older F10 ROE or an even older quarterly cash-flow figure.
+const dates=['2026-10-20','2026-10-16','2026-03-31'];
+for(const date of dates)assert.ok(marketHtml.includes(date));
+const missingHistory=JSON.parse(JSON.stringify(headlineReport));
+delete missingHistory.valuation_history;
+const sparseKpis=ctx.renderVerdictMarketStrip(missingHistory);
+assert.ok(sparseKpis.includes('历史分位暂缺'));
+assert.ok(!sparseKpis.includes('39.6%'));
+assert.ok(!sparseKpis.includes('1.1%'));
+
 assert.ok(ctx.renderChipPositionChart({
     status:'contextualized',position_52w_pct:12.5,
     holder_change_pct:20,holder_period:'2026-09-30',
