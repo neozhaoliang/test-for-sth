@@ -93,9 +93,11 @@ def _build_knowledge_hypotheses_block(inputs: Any) -> str:
         # defence. The public projection independently rejects copied
         # private phrases, names, accounts, URLs and other issuers.
         def sanitized(value: str, limit: int) -> str:
-            return _deidentify_seed(value[:limit], source_excerpts).replace(
-                str(getattr(inputs, "stock_name", "") or ""), "本公司"
-            ).strip()
+            redacted = _deidentify_seed(value[:limit], source_excerpts)
+            own_name = str(getattr(inputs, "stock_name", "") or "").strip()
+            if own_name:
+                redacted = redacted.replace(own_name, "本公司")
+            return redacted.strip()
         mechanism = sanitized(mechanism, 270)
         claim = sanitized(claim, 180)
         when = sanitized(str(item.get("applicability") or ""), 140)
@@ -125,12 +127,12 @@ def _build_knowledge_hypotheses_block(inputs: Any) -> str:
         return "本次没有检索到适用的知识库因果线索；依据公司事实和市场数据独立分析。"
     return (
         "知识库启发的待核验假设与机制（不是事实断言，"
-        "也不是本公司的已证实事实，不得引用作者或原帖）：\\n"
-        + "相关主题：" + "、".join(topic_labels[:10]) + "\\n"
-        + "\\n".join("· " + line for line in candidates)
-        + "\\n以下问题必须回到本公司数据判断：\\n"
-        + "\\n".join("· " + question for question in unique_questions[:12])
-        + "\\n不能把这些机制写成已经发生的事件，也不能逐句拷进公开报告。"
+        "也不是本公司的已证实事实，不得引用作者或原帖）：\n"
+        + "相关主题：" + "、".join(topic_labels[:10]) + "\n"
+        + "\n".join("· " + line for line in candidates)
+        + "\n以下问题必须回到本公司数据判断：\n"
+        + "\n".join("· " + question for question in unique_questions[:12])
+        + "\n不能把这些机制写成已经发生的事件，也不能逐句拷进公开报告。"
           "请挑出有日期事实能支撑的因果链，解释对未来利润、现金、估值和股价的影响；"
           "要评估反例。"
     )
