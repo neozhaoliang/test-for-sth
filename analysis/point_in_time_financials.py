@@ -88,6 +88,18 @@ def _detect_monetary_unit(text: str) -> tuple[float, str]:
     for pattern, multiplier, label in patterns:
         if re.search(pattern, compact):
             return multiplier, label
+
+    # Many Shenzhen issuer reports (including BYD's 2026 semiannual) mark
+    # every main row "(元)" instead of using a table-wide "单位：元".
+    # Require BOTH the attributable-profit row AND operating-cash-flow row
+    # to explicitly say "(元)" before certifying the unit.  A single
+    # "基本每股收益（元/股）" label must never be enough.
+    row_units = [
+        r"归属于(?:上市公司|母公司).*?股东的净利润[（(]元[)）]",
+        r"经营活动产生的现金流量净额[（(]元[)）]",
+    ]
+    if all(re.search(pat, compact) for pat in row_units):
+        return 1.0, "元(原表:归母净利及经营现金流逐行标注)"
     return 1.0, "元(单位未明确，按原值)"
 
 
