@@ -529,7 +529,6 @@ _INDEX_HTML = """<!DOCTYPE html>
   input { padding: 8px; font-size: 14px; width: 200px; border: 1px solid #ccc; border-radius: 4px; }
   button { padding: 8px 20px; font-size: 14px; cursor: pointer; background: #1a73e8; color: #fff; border: none; border-radius: 4px; }
   button:hover { background: #1558b0; }
-  #status { margin: 16px 0; color: #666; font-size: 13px; }
   .candidate { border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin: 8px 0; }
   .quote { font-weight: bold; }
   pre { white-space: pre-wrap; background: #f7f7f7; padding: 12px; border-radius: 6px; }
@@ -602,7 +601,6 @@ _INDEX_HTML = """<!DOCTYPE html>
   .stock-chip { border:1px solid #dce4f5; color:#385078; background:#f8faff; margin-bottom:8px;
     transition:background .2s,border-color .2s; }
   .stock-chip:hover { color:var(--brand-strong); background:#ecf0ff; border-color:#8495ef; }
-  #status { padding:4px 2px; margin:9px 0; color:var(--muted); }
   #result { display:flex; flex-direction:column; gap:16px; min-width:0; }
   #result > h2 { margin:10px 4px 0; font-size:29px; letter-spacing:-.04em; }
   #result > h3 { margin:8px 4px 0; font-size:21px; }
@@ -819,8 +817,12 @@ _INDEX_HTML = """<!DOCTYPE html>
     <div id="stockSuggestions" class="stock-suggestions"
       role="listbox" aria-label="股票匹配结果" hidden></div>
   </div>
-  <button id="submitBtn">分析</button>
+  <button id="submitBtn" type="button" aria-busy="false">
+    <span class="submit-btn-text">分析</span>
+    <span class="submit-btn-spinner" aria-hidden="true"></span>
+  </button>
 </div>
+<p id="analysisError" class="analysis-error" role="alert" hidden></p>
 <div class="research-options">
   <div class="research-mode-controls">
     <label>研究模式
@@ -844,7 +846,6 @@ _INDEX_HTML = """<!DOCTYPE html>
   <div id="stockChips"></div>
 </div>
 </section>
-<div id="status" role="status" aria-live="polite"></div>
 <div id="result"></div>
 <div id="radarTip" style="display:none;position:fixed;z-index:10;max-width:260px;padding:6px 10px;background:#333;color:#fff;font-size:12px;border-radius:4px;pointer-events:none;"></div>
 
@@ -888,6 +889,41 @@ _INDEX_HTML = """<!DOCTYPE html>
 <script>
 let pollTimer = null;
 let submitting = false;
+let activeAnalysisTaskId = null;
+let pollFailures = 0;
+
+function setAnalysisBusy(busy) {
+  submitting = Boolean(busy);
+  const button = document.getElementById('submitBtn');
+  button.disabled = submitting;
+  button.classList.toggle('is-loading', submitting);
+  button.setAttribute('aria-busy', String(submitting));
+  button.querySelector('.submit-btn-text').textContent = submitting ? '分析中' : '分析';
+}
+
+function showAnalysisError(message = '') {
+  const error = document.getElementById('analysisError');
+  error.textContent = message;
+  error.hidden = !message;
+}
+
+function finishAnalysis() {
+  if (pollTimer !== null) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  activeAnalysisTaskId = null;
+  pollFailures = 0;
+  setAnalysisBusy(false);
+}
+
+function scheduleAnalysisPoll(taskId) {
+  if (!submitting || taskId !== activeAnalysisTaskId) return;
+  pollTimer = setTimeout(() => {
+    pollTimer = null;
+    pollTask(taskId);
+  }, 2000);
+}
 
 // 固定自选股。代码已对全市场代码表核实；"长鑫存储"的上市主体名为"长鑫科技"(688825)，
 // 用上市名是因为输入框打"长鑫存储"后端解析不出来 (按名称解析只做单向包含匹配)。
@@ -951,65 +987,97 @@ async function loadTemporalCapabilities() {
 }
 
 async function submitAnalysis() {
+  // Prevent a second click (including watchlist clicks and Enter) from
+  // launching another expensive backend job while the first one is running.
+  if (submitting) return;
   const stockCode = document.getElementById('stockCode').value.trim();
-  if (!stockCode) return;
-  // 重入保护: 后端每个 POST 都会 create_task 跑完整报告 (含 3 分钟 CDP 等待 + 一次
-  // LLM 调用)。连点两下会同时跑两份，而前端只轮询后一个 task_id，前一个就成了没人
-  // 认领却仍在消耗资源的孤儿任务——表现是日志里同一只股票出现两组会话启动。
-  if (submitting) {
-    document.getElementById('status').textContent = '已有分析任务在跑，等它结束再提交 (一次分析要几分钟)';
+  if (!stockCode) {
+    showAnalysisError('请输入股票名称或代码');
     return;
   }
   const mode = document.getElementById('researchMode').value;
   const asOf = document.getElementById('asOfDate').value;
   if (mode === 'historical' && !asOf) {
-    document.getElementById('status').textContent = '历史模式必须选择截止日期';
+    showAnalysisError('历史模式必须选择截止日期');
     return;
   }
-  submitting = true;
+  showAnalysisError();
   document.getElementById('result').innerHTML = '';
-  document.getElementById('status').textContent = '提交中...';
-  if (pollTimer) clearInterval(pollTimer);
-
-  const res = await fetch('/api/analyze', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      stock_code: stockCode,
-      mode: document.getElementById('researchMode').value,
-      as_of: document.getElementById('researchMode').value === 'historical'
-        ? (document.getElementById('asOfDate').value || null)
-        : null,
-      save_snapshot: document.getElementById('saveSnapshot').checked,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    document.getElementById('status').textContent = '提交失败: ' + (err.detail || res.status);
-    submitting = false;
-    return;
+  setAnalysisBusy(true);
+  if (pollTimer !== null) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
   }
-  const { task_id } = await res.json();
-  document.getElementById('status').textContent = '任务已提交, 状态: pending';
-  pollTimer = setInterval(() => pollTask(task_id), 2000);
+
+  try {
+    const res = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stock_code: stockCode,
+        mode,
+        as_of: mode === 'historical' ? asOf : null,
+        save_snapshot: document.getElementById('saveSnapshot').checked,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error('提交失败：' + (err.detail || 'HTTP ' + res.status));
+    }
+    const data = await res.json();
+    if (!data || !data.task_id) throw new Error('后端没有返回分析任务编号');
+    activeAnalysisTaskId = data.task_id;
+    pollFailures = 0;
+    scheduleAnalysisPoll(activeAnalysisTaskId);
+  } catch (err) {
+    finishAnalysis();
+    showAnalysisError(err.message || '提交失败，请稍后重试');
+  }
 }
 
 async function pollTask(taskId) {
-  const res = await fetch('/api/tasks/' + taskId);
-  if (!res.ok) return;
-  const data = await res.json();
-  document.getElementById('status').textContent = '状态: ' + data.status;
+  if (!submitting || taskId !== activeAnalysisTaskId) return;
+  try {
+    const res = await fetch('/api/tasks/' + encodeURIComponent(taskId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    pollFailures = 0;
 
-  // 任务跑到终态才解锁，而不是 POST 返回就解锁——一次分析要几分钟，
-  // POST 返回时后端还在跑，此时放开会让用户再点出一个并行任务。
-  if (data.status === 'done') {
-    clearInterval(pollTimer);
-    submitting = false;
-    renderResult(data.result);
-  } else if (data.status === 'failed') {
-    clearInterval(pollTimer);
-    submitting = false;
-    document.getElementById('status').textContent = '任务失败: ' + (data.error || '未知错误');
+    if (data.status === 'done') {
+      finishAnalysis();
+      if (!data.result) {
+        showAnalysisError('分析已结束，但没有返回报告');
+        return;
+      }
+      try {
+        renderResult(data.result);
+      } catch (err) {
+        showAnalysisError('报告显示失败：' + (err.message || '未知错误'));
+      }
+      return;
+    }
+    if (data.status === 'failed') {
+      finishAnalysis();
+      showAnalysisError('分析失败：' + (data.error || '未知错误'));
+      return;
+    }
+    if (data.status !== 'pending' && data.status !== 'running') {
+      throw new Error('未知任务状态：' + String(data.status));
+    }
+    // Status is no longer shown as a separate line: the spinning Analyze
+    // button alone signals an in-progress job.
+    scheduleAnalysisPoll(taskId);
+  } catch (err) {
+    if (!submitting || taskId !== activeAnalysisTaskId) return;
+    pollFailures += 1;
+    // Transient polling failures should not immediately orphan a live task.
+    // But a permanently unreachable backend must not spin forever.
+    if (pollFailures >= 10) {
+      finishAnalysis();
+      showAnalysisError('无法获取分析进度，请检查后端连接后刷新页面查看结果');
+    } else {
+      scheduleAnalysisPoll(taskId);
+    }
   }
 }
 
