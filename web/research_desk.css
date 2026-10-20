@@ -511,57 +511,193 @@ body, input, select, textarea, button { font-family:inherit; }
 }
 
 
-/* Report identity, research mode/date and quote share a single compact row.
-   Narrow screens scroll this row horizontally rather than stacking it. */
-#result .report-header-inline {
+/* Broker-style identity card: a strong company name, quiet ticker, and
+   compact trading facts. Responsive wrapping replaces the old scrolling row. */
+#result .report-header-inline.report-company-card {
   display:flex;
-  flex-direction:row;
   align-items:center;
-  flex-wrap:nowrap;
-  gap:10px 16px;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  gap:12px 24px;
   width:100%;
   min-width:0;
-  overflow-x:auto;
-  scrollbar-width:thin;
-  padding:8px 2px;
+  margin:0;
+  padding:17px 23px;
+  overflow:visible;
+  border:1px solid #d5e2f2;
+  border-radius:17px;
+  background:linear-gradient(110deg,#fff 0%,#f7faff 66%,#f1f6ff 100%);
+  box-shadow:0 6px 22px rgba(33,67,114,.075);
+}
+#result .report-company-identity {
+  display:flex;
+  align-items:baseline;
+  flex:0 1 auto;
+  gap:10px;
+  min-width:0;
 }
 #result .report-header-inline h2 {
   margin:0;
-  flex:0 0 auto;
-  white-space:nowrap;
-  font-size:clamp(20px,2vw,28px);
-  line-height:1.35;
+  flex:0 1 auto;
+  font-size:clamp(28px,2.9vw,36px);
+  line-height:1.25;
+  font-weight:850;
   letter-spacing:-.035em;
-  color:#17324f;
+  color:#183653;
+  white-space:nowrap;
+}
+#result .report-header-inline .report-stock-code {
+  font-size:12px;
+  line-height:1.4;
+  font-weight:600;
+  letter-spacing:.035em;
+  font-variant-numeric:tabular-nums;
+  color:#8191aa;
+  white-space:nowrap;
+}
+#result .report-header-detail {
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  flex:1 1 auto;
+  gap:8px 17px;
+  flex-wrap:wrap;
+  min-width:0;
+  margin-left:auto;
 }
 #result .report-header-inline .report-mode-inline {
   display:inline-flex;
   align-items:center;
+  gap:10px;
   flex:0 0 auto;
-  white-space:nowrap;
-  padding:5px 10px;
+  min-width:0;
   margin:0;
-  font-size:12px;
+  padding:5px 10px;
+  border:1px solid #dce6f5;
+  border-radius:9px;
+  background:#f2f6fd;
+  font-size:11px;
+  font-weight:550;
   line-height:1.5;
-  border-radius:8px;
+  color:#506685;
+  white-space:nowrap;
+  box-shadow:none;
 }
-#result .report-header-inline .report-meta-divider {margin:0 5px;color:#8ca0be;}
+#result .report-mode-inline .report-research-tag {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-weight:750;
+  color:#27558f;
+}
+#result .report-mode-inline .report-research-tag::before {
+  content:"";
+  display:inline-block;
+  width:6px;
+  height:6px;
+  border-radius:50%;
+  background:#3478d5;
+}
+#result .report-mode-inline.historical-banner .report-research-tag {
+  color:#92723e;
+}
+#result .report-mode-inline.historical-banner .report-research-tag::before {
+  background:#b48a47;
+}
+#result .report-mode-inline .report-research-date {
+  border-left:1px solid #cfdef0;
+  padding-left:10px;
+  color:#617590;
+  font-variant-numeric:tabular-nums;
+}
 #result .report-header-inline .report-quote-inline {
   display:inline-flex;
   align-items:center;
-  flex:0 0 auto;
-  gap:10px;
-  white-space:nowrap;
+  justify-content:flex-end;
+  flex-wrap:wrap;
+  gap:6px 12px;
+  flex:0 1 auto;
+  min-width:0;
   margin:0;
-  font-size:13px;
-  line-height:1.55;
-  font-weight:700;
-  color:#233c5c;
+  font-size:12px;
+  font-weight:550;
+  line-height:1.5;
+  color:#354d6b;
   font-variant-numeric:tabular-nums;
 }
-#result .report-quote-item {padding-left:10px;border-left:1px solid #ccd9e9;}
-#result .report-quote-note {font-size:11px;color:#647792;font-weight:500;}
-#result .report-historical-note {font-size:12px;color:#76624a;margin:0 2px;}
+#result .report-quote-inline .report-quote-price,
+#result .report-quote-inline .report-quote-item {
+  display:inline-flex;
+  align-items:baseline;
+  gap:5px;
+  white-space:nowrap;
+}
+#result .report-quote-inline .report-quote-price strong {
+  font-size:18px;
+  font-weight:800;
+  color:#234e89;
+  letter-spacing:-.02em;
+}
+#result .report-quote-inline .report-quote-item {
+  border-left:1px solid #d7e2f0;
+  padding-left:12px;
+}
+#result .report-quote-inline .report-quote-item strong {
+  font-size:13px;
+  font-weight:750;
+}
+#result .report-quote-inline .report-quote-label {
+  font-size:11px;
+  color:#72849d;
+  font-weight:550;
+}
+#result .report-quote-inline .report-change-up strong { color:#c94c50; }
+#result .report-quote-inline .report-change-down strong { color:#188474; }
+#result .report-quote-inline .report-change-neutral strong { color:#506887; }
+#result .report-quote-note {
+  flex-basis:100%;
+  font-size:10px;
+  color:#6c7d96;
+  font-weight:450;
+  text-align:right;
+}
+#result .report-quote-unavailable {
+  color:#8793a5;
+  font-size:12px;
+}
+#result .report-historical-note {
+  font-size:12px;
+  color:#76624a;
+  margin:0 2px;
+}
+@media(max-width:1130px) {
+  #result .report-header-detail {
+    flex-basis:100%;
+    justify-content:flex-start;
+    margin-left:0;
+  }
+  #result .report-header-inline .report-quote-inline {
+    justify-content:flex-start;
+  }
+  #result .report-quote-note { text-align:left; }
+}
+@media(max-width:600px) {
+  #result .report-header-inline.report-company-card {
+    padding:15px 16px;
+    gap:11px;
+    border-radius:14px;
+  }
+  #result .report-header-inline h2 { font-size:29px; }
+  #result .report-header-inline .report-stock-code { font-size:11px; }
+  #result .report-header-detail { gap:10px; }
+  #result .report-header-inline .report-quote-inline {
+    width:100%;
+    justify-content:flex-start;
+    gap:7px 10px;
+  }
+  #result .report-quote-inline .report-quote-price strong { font-size:17px; }
+  #result .report-quote-inline .report-quote-item { padding-left:9px; }
+}
 
 /* Single visible TOC heading: 研究目录, without an English eyebrow or count. */
 /* Linked article-style contents panel; limited to the 840px research column. */
