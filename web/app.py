@@ -657,6 +657,7 @@ _INDEX_HTML = """<!DOCTYPE html>
     justify-content:center; gap:5px 0; font-variant-numeric:tabular-nums; }
   .verdict-compact-metric { display:inline-flex; align-items:baseline; gap:6px;
     white-space:nowrap; padding:0 12px; border-left:1px solid #dce3ef; }
+  .verdict-compact-metric:first-child { border-left:0; padding-left:0; }
   .verdict-compact-metric .metric-name { font-size:12px; color:#53627a; }
   .verdict-compact-metric strong { font-size:15px; color:var(--ink); font-weight:750; }
   .verdict-compact-metric small { color:#7a879a; font-size:11px; }
@@ -2531,14 +2532,12 @@ function verdictPercentileRow(rows) {
 function collectVerdictFigures(report) {
   const facts=((report.fundamentals||{}).facts)||{};
   const hist=report.valuation_history||{};
-  const val=report.valuation||{};
   const figures=[];
 
   const profit=verdictNumber(facts.net_profit);
   const cash=verdictNumber(facts.operating_cash_flow);
   if(profit!==null && cash!==null && profit>0) {
     const net=profit/1e8, operating=cash/1e8;
-    const max=Math.max(net,Math.abs(operating),.001);
     const ratio=verdictNumber(facts.cash_to_profit_ratio);
     const cashItems=[
       {label:'净利润',value:verdictFixed(net)+'亿元'},
@@ -2553,8 +2552,6 @@ function collectVerdictFigures(report) {
 
   const pe=verdictPercentileRow(hist.pe_percentiles);
   const pb=verdictPercentileRow(hist.pb_percentiles);
-  const peNow=verdictNumber(hist.current_pe_ttm);
-  const pbNow=verdictNumber(hist.current_pb);
   if(pe || pb) {
     const valuations=[];
     if(pe)valuations.push({
@@ -2666,7 +2663,6 @@ function collectVerdictFigures(report) {
   const price=verdictNumber((report.realtime_quote||{}).latest_price);
   const pbAnchor=verdictNumber((ref.historical_pb_anchor||{}).median_pb_reference_price);
   if(price!==null&&price>0&&pbAnchor!==null&&pbAnchor>0){
-    const upper=Math.max(price,pbAnchor);
     figures.push({id:'price_refs',match:/参考价|估值|买入|合理|安全边际|价格/,
       html:verdictCompactFigure('现价与历史PB参考价',
         String(ref.as_of||report.as_of||'参考日期未知'),
