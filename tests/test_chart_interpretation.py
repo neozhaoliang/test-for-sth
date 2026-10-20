@@ -15,7 +15,7 @@ from analysis.chart_interpretation import (
 
 def _inputs():
     months = [
-        {"date": f"2026-0{i}-30", "price": 30+i, "pe_ttm": 12-i/2, "pb": 3.5}
+        {"date": f"2026-{i:02d}-28", "price": 30+i, "pe_ttm": 12-i/2, "pb": 3.5}
         for i in range(1, 7)
     ]
     return SimpleNamespace(
