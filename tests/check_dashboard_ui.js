@@ -518,8 +518,14 @@ report.position_risk={
 };
 ctx.renderResult(report);
 const verdict=nodes.result.innerHTML;
-assert.ok(verdict.includes('最近可核验收盘价</span> <strong>775.29元</strong>'));
-assert.ok(verdict.includes('不是盘中实时价'));
+assert.ok(verdict.includes('最近核验收盘价'));
+assert.ok(verdict.includes('775.29 元'));
+assert.ok(verdict.includes('2026-10-09'));
+assert.ok(!verdict.includes('不是盘中实时价'));
+assert.ok(!verdict.includes('Live 研究'));
+assert.ok(!verdict.includes('report-header-detail'));
+assert.ok(verdict.indexOf('class="verdict-market-strip"') <
+  verdict.indexOf('id="report-toc"'));
 assert.ok(!verdict.includes('成交量 null'));
 assert.ok(!verdict.includes('涨跌幅 null%'));
 assert.ok(!verdict.includes('当前风险共振'));
