@@ -286,3 +286,39 @@ async def test_market_style_keeps_genuine_growth_selloff_explanation(monkeypatch
     assert out["status"] == "distilled_hypotheses"
     assert len(out["drivers"]) == 1
     assert "估值收缩" in out["drivers"][0]["mechanism"]
+
+
+@pytest.mark.asyncio
+async def test_style_reasoning_sees_the_same_dated_sectors_as_the_chart(monkeypatch):
+    prompts = []
+    async def fake_llm(prompt, **kwargs):
+        prompts.append(prompt)
+        return [], "end_turn"
+
+    monkeypatch.setattr("backtest.llm_client.call_json_ex", fake_llm)
+    observed = {
+        "sector_rotation": {
+            "status": "observed",
+            "as_of": "2026-10-20",
+            "coverage": 6,
+            "sectors": [
+                {"name": "电力行业", "d20_pct": 3.1, "latest_date": "2026-10-20"},
+                {"name": "银行", "d20_pct": 2.6, "latest_date": "2026-10-20"},
+                {"name": "煤炭行业", "d20_pct": 1.7, "latest_date": "2026-10-20"},
+                {"name": "贵金属", "d20_pct": -1.8, "latest_date": "2026-10-20"},
+                {"name": "半导体", "d20_pct": -4.2, "latest_date": "2026-10-20"},
+                {"name": "有色金属", "d20_pct": -5.4, "latest_date": "2026-10-20"},
+            ],
+        }
+    }
+    result = await build_market_style_reasons(
+        data(), as_of="2026-10-20", market_context=observed,
+        industry="有色金属",
+    )
+    assert len(prompts) == 1
+    assert "有色金属 -5.4%" in prompts[0]
+    assert "电力行业 3.1%" in prompts[0]
+    assert "覆盖 6 个样本" in prompts[0]
+    assert "只是价格变动" in prompts[0]
+    assert "买股票的老木匠" not in prompts[0]
+    assert result["drivers"], "Safe, text-matched mechanisms remain available"

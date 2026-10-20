@@ -529,7 +529,6 @@ _INDEX_HTML = """<!DOCTYPE html>
   input { padding: 8px; font-size: 14px; width: 200px; border: 1px solid #ccc; border-radius: 4px; }
   button { padding: 8px 20px; font-size: 14px; cursor: pointer; background: #1a73e8; color: #fff; border: none; border-radius: 4px; }
   button:hover { background: #1558b0; }
-  #status { margin: 16px 0; color: #666; font-size: 13px; }
   .candidate { border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin: 8px 0; }
   .quote { font-weight: bold; }
   pre { white-space: pre-wrap; background: #f7f7f7; padding: 12px; border-radius: 6px; }
@@ -602,7 +601,6 @@ _INDEX_HTML = """<!DOCTYPE html>
   .stock-chip { border:1px solid #dce4f5; color:#385078; background:#f8faff; margin-bottom:8px;
     transition:background .2s,border-color .2s; }
   .stock-chip:hover { color:var(--brand-strong); background:#ecf0ff; border-color:#8495ef; }
-  #status { padding:4px 2px; margin:9px 0; color:var(--muted); }
   #result { display:flex; flex-direction:column; gap:16px; min-width:0; }
   #result > h2 { margin:10px 4px 0; font-size:29px; letter-spacing:-.04em; }
   #result > h3 { margin:8px 4px 0; font-size:21px; }
@@ -819,8 +817,12 @@ _INDEX_HTML = """<!DOCTYPE html>
     <div id="stockSuggestions" class="stock-suggestions"
       role="listbox" aria-label="股票匹配结果" hidden></div>
   </div>
-  <button id="submitBtn">分析</button>
+  <button id="submitBtn" type="button" aria-busy="false">
+    <span class="submit-btn-text">分析</span>
+    <span class="submit-btn-spinner" aria-hidden="true"></span>
+  </button>
 </div>
+<p id="analysisError" class="analysis-error" role="alert" hidden></p>
 <div class="research-options">
   <div class="research-mode-controls">
     <label>研究模式
@@ -844,7 +846,6 @@ _INDEX_HTML = """<!DOCTYPE html>
   <div id="stockChips"></div>
 </div>
 </section>
-<div id="status" role="status" aria-live="polite"></div>
 <div id="result"></div>
 <div id="radarTip" style="display:none;position:fixed;z-index:10;max-width:260px;padding:6px 10px;background:#333;color:#fff;font-size:12px;border-radius:4px;pointer-events:none;"></div>
 
@@ -888,6 +889,41 @@ _INDEX_HTML = """<!DOCTYPE html>
 <script>
 let pollTimer = null;
 let submitting = false;
+let activeAnalysisTaskId = null;
+let pollFailures = 0;
+
+function setAnalysisBusy(busy) {
+  submitting = Boolean(busy);
+  const button = document.getElementById('submitBtn');
+  button.disabled = submitting;
+  button.classList.toggle('is-loading', submitting);
+  button.setAttribute('aria-busy', String(submitting));
+  button.querySelector('.submit-btn-text').textContent = submitting ? '分析中' : '分析';
+}
+
+function showAnalysisError(message = '') {
+  const error = document.getElementById('analysisError');
+  error.textContent = message;
+  error.hidden = !message;
+}
+
+function finishAnalysis() {
+  if (pollTimer !== null) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  activeAnalysisTaskId = null;
+  pollFailures = 0;
+  setAnalysisBusy(false);
+}
+
+function scheduleAnalysisPoll(taskId) {
+  if (!submitting || taskId !== activeAnalysisTaskId) return;
+  pollTimer = setTimeout(() => {
+    pollTimer = null;
+    pollTask(taskId);
+  }, 2000);
+}
 
 // 固定自选股。代码已对全市场代码表核实；"长鑫存储"的上市主体名为"长鑫科技"(688825)，
 // 用上市名是因为输入框打"长鑫存储"后端解析不出来 (按名称解析只做单向包含匹配)。
@@ -951,65 +987,97 @@ async function loadTemporalCapabilities() {
 }
 
 async function submitAnalysis() {
+  // Prevent a second click (including watchlist clicks and Enter) from
+  // launching another expensive backend job while the first one is running.
+  if (submitting) return;
   const stockCode = document.getElementById('stockCode').value.trim();
-  if (!stockCode) return;
-  // 重入保护: 后端每个 POST 都会 create_task 跑完整报告 (含 3 分钟 CDP 等待 + 一次
-  // LLM 调用)。连点两下会同时跑两份，而前端只轮询后一个 task_id，前一个就成了没人
-  // 认领却仍在消耗资源的孤儿任务——表现是日志里同一只股票出现两组会话启动。
-  if (submitting) {
-    document.getElementById('status').textContent = '已有分析任务在跑，等它结束再提交 (一次分析要几分钟)';
+  if (!stockCode) {
+    showAnalysisError('请输入股票名称或代码');
     return;
   }
   const mode = document.getElementById('researchMode').value;
   const asOf = document.getElementById('asOfDate').value;
   if (mode === 'historical' && !asOf) {
-    document.getElementById('status').textContent = '历史模式必须选择截止日期';
+    showAnalysisError('历史模式必须选择截止日期');
     return;
   }
-  submitting = true;
+  showAnalysisError();
   document.getElementById('result').innerHTML = '';
-  document.getElementById('status').textContent = '提交中...';
-  if (pollTimer) clearInterval(pollTimer);
-
-  const res = await fetch('/api/analyze', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      stock_code: stockCode,
-      mode: document.getElementById('researchMode').value,
-      as_of: document.getElementById('researchMode').value === 'historical'
-        ? (document.getElementById('asOfDate').value || null)
-        : null,
-      save_snapshot: document.getElementById('saveSnapshot').checked,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    document.getElementById('status').textContent = '提交失败: ' + (err.detail || res.status);
-    submitting = false;
-    return;
+  setAnalysisBusy(true);
+  if (pollTimer !== null) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
   }
-  const { task_id } = await res.json();
-  document.getElementById('status').textContent = '任务已提交, 状态: pending';
-  pollTimer = setInterval(() => pollTask(task_id), 2000);
+
+  try {
+    const res = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stock_code: stockCode,
+        mode,
+        as_of: mode === 'historical' ? asOf : null,
+        save_snapshot: document.getElementById('saveSnapshot').checked,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error('提交失败：' + (err.detail || 'HTTP ' + res.status));
+    }
+    const data = await res.json();
+    if (!data || !data.task_id) throw new Error('后端没有返回分析任务编号');
+    activeAnalysisTaskId = data.task_id;
+    pollFailures = 0;
+    scheduleAnalysisPoll(activeAnalysisTaskId);
+  } catch (err) {
+    finishAnalysis();
+    showAnalysisError(err.message || '提交失败，请稍后重试');
+  }
 }
 
 async function pollTask(taskId) {
-  const res = await fetch('/api/tasks/' + taskId);
-  if (!res.ok) return;
-  const data = await res.json();
-  document.getElementById('status').textContent = '状态: ' + data.status;
+  if (!submitting || taskId !== activeAnalysisTaskId) return;
+  try {
+    const res = await fetch('/api/tasks/' + encodeURIComponent(taskId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    pollFailures = 0;
 
-  // 任务跑到终态才解锁，而不是 POST 返回就解锁——一次分析要几分钟，
-  // POST 返回时后端还在跑，此时放开会让用户再点出一个并行任务。
-  if (data.status === 'done') {
-    clearInterval(pollTimer);
-    submitting = false;
-    renderResult(data.result);
-  } else if (data.status === 'failed') {
-    clearInterval(pollTimer);
-    submitting = false;
-    document.getElementById('status').textContent = '任务失败: ' + (data.error || '未知错误');
+    if (data.status === 'done') {
+      finishAnalysis();
+      if (!data.result) {
+        showAnalysisError('分析已结束，但没有返回报告');
+        return;
+      }
+      try {
+        renderResult(data.result);
+      } catch (err) {
+        showAnalysisError('报告显示失败：' + (err.message || '未知错误'));
+      }
+      return;
+    }
+    if (data.status === 'failed') {
+      finishAnalysis();
+      showAnalysisError('分析失败：' + (data.error || '未知错误'));
+      return;
+    }
+    if (data.status !== 'pending' && data.status !== 'running') {
+      throw new Error('未知任务状态：' + String(data.status));
+    }
+    // Status is no longer shown as a separate line: the spinning Analyze
+    // button alone signals an in-progress job.
+    scheduleAnalysisPoll(taskId);
+  } catch (err) {
+    if (!submitting || taskId !== activeAnalysisTaskId) return;
+    pollFailures += 1;
+    // Transient polling failures should not immediately orphan a live task.
+    // But a permanently unreachable backend must not spin forever.
+    if (pollFailures >= 10) {
+      finishAnalysis();
+      showAnalysisError('无法获取分析进度，请检查后端连接后刷新页面查看结果');
+    } else {
+      scheduleAnalysisPoll(taskId);
+    }
   }
 }
 
@@ -2116,9 +2184,13 @@ function metricCard(label, value, source) {
   return '<div class="metric"><label>' + escapeHtml(label) + '</label><strong>' +
     escapeHtml(String(value)) + '</strong><small>' + escapeHtml(source) + '</small></div>';
 }
-function chartTile(title, subtitle, image) {
+function chartTile(title, subtitle, image, interpretation = '') {
+  const reading = image && typeof interpretation==='string' && interpretation.trim() ?
+    '<p class="chart-reading" aria-label="这张图对公司的投资含义">'+
+      escapeHtml(interpretation.trim())+'</p>' : '';
   return '<div class="chart-tile"><h4>' + escapeHtml(title) + '</h4><p class="section-caption">' +
-    escapeHtml(subtitle) + '</p>' + (image || '<div class="chart-empty">当前没有足够的可比数据，暂不绘图</div>') + '</div>';
+    escapeHtml(subtitle) + '</p>' + (image || '<div class="chart-empty">当前没有足够的可比数据，暂不绘图</div>') +
+    reading+'</div>';
 }
 
 // Three reported-ratio trend lines. Values are shown as reported: do not
@@ -2366,22 +2438,30 @@ function renderChipPositionChart(context, report) {
 }
 
 function renderDashboardCharts(report) {
-  const scores=(report.summary || {}).dimension_scores || [];
+  const summary=report.summary||{};
+  const scores=summary.dimension_scores||[];
+  const readings=summary.chart_interpretations||{};
   let html='<section class="dashboard-charts" id="report-charts"><h3>数据概览与维度图谱</h3>'+
-    '<p class="section-caption">图表仅展示当前报告真实返回的数据，不对缺失年份插值，也不自动将半年ROE年化。</p>';
+    '<p class="section-caption">图表仅展示本次有日期的真实数据；下方解读区别已知事实与可能的经济机制。</p>';
   html+=renderInvestmentStyleStrip(report.valuation_model);
-  // Stock quote, PB, F10 ROE, cash conversion and PE/PB percentiles now
-  // live together under 投资结论, not scattered across two report sections.
   html+='<div class="chart-grid" style="margin-top:16px;">';
   html+=chartTile('盈利质量的变化','ROE、毛利率与净利率；季报ROE为报告期间累计数，不跨期年化',
-    renderProfitabilityTrendChart(report.profitability_trend));
+    renderProfitabilityTrendChart(report.profitability_trend),
+    readings.profitability);
   html+=chartTile('研究视角倾向（非综合评分）','各方面的文字分析倾向示意；不得求和、平均或据此推导买卖结论',
-    scores.length>=6?renderDimensionBars(scores):'');
+    scores.length>=6?renderDimensionBars(scores):'',
+    readings.dimension_scores);
+  const sentimentHtml=renderSentimentMixChart(report.sentiment);
+  const industryHtml=renderIndustryBreadthChart(report.industry_comparison);
   html+='<div class="market-structure-lines" role="group" aria-label="市场情绪与行业广度">'+
-    renderSentimentMixChart(report.sentiment)+
-    renderIndustryBreadthChart(report.industry_comparison)+'</div>';
+    sentimentHtml+industryHtml+
+    ((sentimentHtml||industryHtml) && typeof readings.market_breadth==='string' &&
+     readings.market_breadth.trim()?
+     '<p class="chart-reading" aria-label="市场情绪和行业广度解读">'+
+       escapeHtml(readings.market_breadth.trim())+'</p>':'')+'</div>';
   html+=chartTile('历史估值区间','PE(TTM)历史序列，失真区间将按原图分位裁剪',
-    renderValuationHistoryChart((report.valuation_history || {}).history_monthly || []));
+    renderValuationHistoryChart((report.valuation_history||{}).history_monthly||[]),
+    readings.valuation_history);
   html+='</div></section>';
   return html;
 }
@@ -3615,9 +3695,9 @@ function renderReportToc(reportHtml) {
   return html+'</nav>';
 }
 
-// The stock-broker-style quote/valuation strip belongs immediately below the
-// Investment Conclusion heading. All six indicators come from source-backed
-// report fields; historical research must use its as-of snapshot, not today's.
+// The six source-backed quote/valuation facts sit directly under the
+// company name in the top identity card, before the report contents.
+// Historical snapshots use the values supplied for the as-of date.
 function verdictMetric(label, value, date, tone, detail) {
   const safeTone=['price','valuation','profit','cash','low','mid','high','missing'].includes(tone)?
     tone:'mid';
@@ -3663,69 +3743,30 @@ function renderVerdictMarketStrip(report) {
       row?'历史'+row.years+'年分位':'历史分位暂缺');
   };
   items.push(makePercentile('PE',peRow),makePercentile('PB',pbRow));
-  return '<div class="verdict-market-strip" role="group" aria-label="投资结论行情与关键指标">'+
+  return '<div class="verdict-market-strip" role="group" aria-label="公司行情与关键指标">'+
     items.join('')+'</div>';
 }
 
 function renderResult(report) {
   const el = document.getElementById('result');
   const isHistorical = report.research_mode === 'historical';
-  // A single broker-style stock identity card: prominent company name at
-  // left, small UNPARENTHESIZED ticker beside it, compact quote data at right.
-  // Keep the as-of/previous-close qualifications; do not imply stale data is live.
+  // The top card holds the company name, small ticker, and the six key
+  // sourced facts. No separate Live/date banner or redundant quote row.
   const displayCode=String(report.stock_code||'').trim();
   let displayName=String(report.stock_name||report.stock_code||'股票名称暂缺').trim();
-  // Defensive normalization for older cached provider names such as
-  // "比亚迪 (SZ002594)" or "比亚迪（SZ002594）". Never remove
-  // unrelated parentheses (e.g. a meaningful legal company suffix).
   const embeddedTicker=displayName.match(/\s*[（(]\s*([A-Za-z]{0,3}\d{6})\s*[)）]\s*$/);
   if(embeddedTicker && displayCode &&
      embeddedTicker[1].replace(/\D/g,'')===displayCode.replace(/\D/g,'')){
     displayName=displayName.slice(0,embeddedTicker.index).trim()||displayCode;
   }
   let html='<section class="report-header-inline report-company-card" role="group" '+
-    'aria-label="公司与行情摘要">'+
+    'aria-label="公司与关键行情数据">'+
     '<div class="report-company-identity"><h2 id="report-top">'+
       escapeHtml(displayName)+'</h2>'+
       (displayCode && displayCode!==displayName?
         '<span class="report-stock-code">'+escapeHtml(displayCode)+'</span>':'')+
     '</div>'+
-    '<div class="report-header-detail">'+
-      '<div class="report-mode-inline '+(isHistorical?'historical-banner':'live-banner')+'">'+
-        '<span class="report-research-tag">'+(isHistorical?'历史研究':'Live 研究')+'</span>'+
-        '<span class="report-research-date">'+
-          (isHistorical?'截止日 ':'基准日 ')+
-          escapeHtml(report.as_of||(isHistorical?'未知':'今天'))+
-        '</span></div>';
-
-  if (report.realtime_quote) {
-    const q=report.realtime_quote;
-    const price=numericOrNull(q.latest_price);
-    if(price!==null && price>0) {
-      const previous=q.quote_mode==='verified_previous_close';
-      const priceLabel=previous?'最近可核验收盘价':isHistorical?'截止日收盘价':'最新价';
-      const change=numericOrNull(q.change_pct);
-      const changeStyle=change===null?'neutral':change>0?'up':change<0?'down':'neutral';
-      html+='<div class="report-quote-inline quote" role="group" aria-label="股价和交易数据">'+
-        '<span class="report-quote-price"><span class="report-quote-label">'+
-          priceLabel+'</span> <strong>'+escapeHtml(String(price))+'元</strong></span>';
-      if(change!==null)
-        html+='<span class="report-quote-item report-quote-change report-change-'+changeStyle+
-          '"><span class="report-quote-label">涨跌幅</span> <strong>'+
-          escapeHtml(String(change))+'%</strong></span>';
-      if(numericOrNull(q.volume)!==null)
-        html+='<span class="report-quote-item report-quote-volume">'+
-          '<span class="report-quote-label">成交量</span> <strong>'+
-          escapeHtml(String(q.volume))+'</strong></span>';
-      if(previous)
-        html+='<span class="report-quote-note">（'+
-          escapeHtml(q.date||q.timestamp||'未知日期')+'，不是盘中实时价）</span>';
-      html+='</div>';
-    }else {
-      html+='<span class="report-quote-unavailable">有效股价暂缺，不能判断当前股票赔率。</span>';
-    }
-  }
-  html+='</div></section>';
+    renderVerdictMarketStrip(report)+'</section>';
   if (isHistorical) {
     html += '<p class="report-historical-note">结论只允许使用该日及之前已公开的信息；当前知识不会用于补全历史缺口。</p>';
   }
@@ -3733,7 +3774,6 @@ function renderResult(report) {
   const summary = report.summary || {};
   const stanceClass = 'stance-' + (summary.stance || 'neutral');
   html += '<section class="result-summary" id="report-verdict"><h3>投资结论</h3>';
-  html += renderVerdictMarketStrip(report);
   html += '<div class="verdict-line"><span class="stance-badge ' + stanceClass + '">' +
     stanceLabel(summary.stance) + '</span>';
   if (summary.company_quality_stance) {

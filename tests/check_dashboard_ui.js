@@ -46,8 +46,8 @@ const report={
 };
 assert.ok(ctx.renderProfitabilityTrendChart(report.profitability_trend).includes('<svg'));
 assert.ok(ctx.renderDashboardCharts(report).includes('数据概览与维度图谱'));
-// The four original dashboard KPIs are now in the investment conclusion,
-// together with historical PE/PB percentiles, like a broker quote row.
+// The six source-backed KPIs belong directly BELOW the company name in the
+// top identity card, not the dashboard and not the Investment Conclusion.
 const headlineReport={
   ...report,
   as_of:'2026-10-20',
@@ -63,7 +63,7 @@ const headlineReport={
     dimension_scores:[]},
 };
 const marketHtml=ctx.renderVerdictMarketStrip(headlineReport);
-assert.ok(marketHtml.includes('aria-label="投资结论行情与关键指标"'));
+assert.ok(marketHtml.includes('aria-label="公司行情与关键指标"'));
 assert.equal((marketHtml.match(/class="verdict-market-metric /g)||[]).length,6);
 for(const expected of [
   '82.94 元','2026-10-20','市净率 PB','3.17 倍',
@@ -82,25 +82,91 @@ assert.ok(marketHtml.includes('verdict-market-low'));
 
 ctx.renderResult(headlineReport);
 const rendered=nodes.result.innerHTML;
-const conclusion=rendered.indexOf('<h3>投资结论</h3>');
+const company=rendered.indexOf('<div class="report-company-identity">');
+const title=rendered.indexOf('<h2 id="report-top">');
 const kpis=rendered.indexOf('class="verdict-market-strip"');
+const toc=rendered.indexOf('id="report-toc"');
+const conclusion=rendered.indexOf('<h3>投资结论</h3>');
 const stance=rendered.indexOf('class="verdict-line"');
 const thesis=rendered.indexOf('公司的估值与股东回报');
 const dashboard=rendered.indexOf('id="report-charts"');
-assert.ok(conclusion>=0 && conclusion<kpis && kpis<stance && stance<thesis);
-assert.ok(thesis<dashboard);
+assert.ok(company>=0 && company<title && title<kpis && kpis<toc &&
+  toc<conclusion && conclusion<stance && stance<thesis && thesis<dashboard,
+  'source-backed KPI strip must sit inside top company card, before contents and verdict');
 assert.equal((rendered.match(/class="verdict-market-strip"/g)||[]).length,1);
+const companyCard=rendered.slice(rendered.indexOf('<section class="report-header-inline'),toc);
+assert.ok(companyCard.includes('class="verdict-market-strip"'));
+assert.ok(!rendered.slice(conclusion,dashboard).includes('class="verdict-market-strip"'));
+assert.ok(!companyCard.includes('Live 研究'));
+assert.ok(!companyCard.includes('基准日 2026-10-20'));
+assert.ok(!companyCard.includes('report-quote-inline'));
+assert.ok(!companyCard.includes('非盘中实时价'));
 assert.ok(!ctx.renderDashboardCharts(headlineReport).includes('primary-kpis'),
   'no duplicate quote or financial KPI row in the later dashboard');
 assert.ok(!ctx.renderDashboardCharts(headlineReport).includes('82.94 元'));
 
 const css=fs.readFileSync('web/research_desk.css','utf8');
-assert.ok(css.includes('#result #report-verdict .verdict-market-strip'));
+assert.ok(css.includes('#result .report-company-card .verdict-market-strip'));
+assert.ok(!css.includes('#result #report-verdict .verdict-market-strip'));
 assert.ok(css.includes('grid-template-columns:repeat(3,minmax(0,1fr))'));
 assert.ok(css.includes('grid-template-columns:repeat(2,minmax(0,1fr))'));
 assert.ok(css.includes('.verdict-market-price'));
 assert.ok(css.includes('.verdict-market-low'));
 assert.ok(css.includes('.stock-ytd-position-meta'));
+
+// 紫金矿业 screenshot regression: all six facts live directly below the
+// large company name, and the redundant Live/as-of/right quote disappear.
+const zijinReport={
+  ...headlineReport,
+  stock_name:'紫金矿业',
+  stock_code:'SH601899',
+  as_of:'2026-10-20',
+  realtime_quote:{
+    latest_price:29.73,
+    quote_mode:'verified_previous_close',
+    date:'2026-10-19',
+    volume:null,change_pct:null,
+  },
+  valuation:{pb:3.92,roe_pct:19.60,valuation_as_of:'2026-10-16'},
+  fundamentals:{facts:{
+    cash_to_profit_ratio:1.42,cash_profit_period:'2026-06-30'
+  }},
+  valuation_history:{
+    as_of:'2026-10-20',
+    pe_percentiles:[{years:5,percentile:5.2}],
+    pb_percentiles:[{years:5,percentile:63.6}],
+  },
+};
+ctx.renderResult(zijinReport);
+const zijinPage=nodes.result.innerHTML;
+const ziCompanyStart=zijinPage.indexOf('<section class="report-header-inline report-company-card"');
+const ziTitle=zijinPage.indexOf('<h2 id="report-top">紫金矿业</h2>');
+const ziFacts=zijinPage.indexOf('class="verdict-market-strip"');
+const ziCompanyEnd=zijinPage.indexOf('</section>',ziFacts);
+const ziToc=zijinPage.indexOf('id="report-toc"');
+const ziConclusion=zijinPage.indexOf('<h3>投资结论</h3>');
+assert.ok(ziCompanyStart>=0 && ziCompanyStart<ziTitle &&
+  ziTitle<ziFacts && ziFacts<ziCompanyEnd &&
+  ziCompanyEnd<ziToc && ziToc<ziConclusion,
+  'six data points must sit within the company header, below 紫金矿业');
+const ziHeader=zijinPage.slice(ziCompanyStart,ziCompanyEnd);
+for(const fact of [
+  '最近核验收盘价','29.73 元','2026-10-19',
+  '市净率 PB','3.92 倍','F10 披露ROE','19.60%',
+  '2026-10-16','现金流/归母净利','1.42 倍',
+  '2026-06-30','5.2%','63.6%','历史5年分位',
+]){
+  assert.ok(ziHeader.includes(fact),'missing Zijin header field: '+fact);
+}
+assert.equal((ziHeader.match(/class="verdict-market-metric /g)||[]).length,6);
+assert.equal((zijinPage.match(/class="verdict-market-strip"/g)||[]).length,1);
+assert.ok(!ziHeader.includes('Live 研究'));
+assert.ok(!ziHeader.includes('基准日 2026-10-20'));
+assert.ok(!ziHeader.includes('最近可核验收盘价'));
+assert.ok(!ziHeader.includes('不是盘中实时价'));
+assert.ok(!ziHeader.includes('report-header-detail'));
+assert.ok(!ziHeader.includes('report-quote-inline'));
+assert.ok(!zijinPage.slice(ziConclusion).includes('class="verdict-market-strip"'));
 
 // Display all dates independently rather than attaching the latest quote
 // date to an older F10 ROE or an even older quarterly cash-flow figure.
@@ -112,6 +178,63 @@ const sparseKpis=ctx.renderVerdictMarketStrip(missingHistory);
 assert.ok(sparseKpis.includes('历史分位暂缺'));
 assert.ok(!sparseKpis.includes('39.6%'));
 assert.ok(!sparseKpis.includes('1.1%'));
+
+// A graph must now have an investor-readable causal explanation attached
+// directly under that graph, not merely a title and a pile of ratios.
+// These are model-produced, fact-screened comments, NOT canned UI text.
+const interpretedReport={
+  ...headlineReport,
+  profitability_trend:{periods:[
+    {period:'2025-12-31',roe_pct:18,gross_margin_pct:27,net_margin_pct:13},
+    {period:'2026-06-30',roe_pct:21,gross_margin_pct:34,net_margin_pct:18},
+  ]},
+  valuation_history:{
+    as_of:'2026-10-20',
+    current_pe_ttm:11.7,current_pb:3.9,
+    pe_percentiles:[{years:5,percentile:5.2}],
+    pb_percentiles:[{years:5,percentile:63.6}],
+    history_monthly:[
+      {date:'2026-01-30',price:28,pe_ttm:16,pb:2.8},
+      {date:'2026-02-28',price:30,pe_ttm:14,pb:3.0},
+      {date:'2026-03-30',price:32,pe_ttm:13,pb:3.2},
+      {date:'2026-04-30',price:33,pe_ttm:12,pb:3.4},
+      {date:'2026-05-30',price:35,pe_ttm:11,pb:3.6},
+      {date:'2026-06-30',price:36,pe_ttm:10,pb:3.9},
+    ],
+  },
+  summary:{
+    ...headlineReport.summary,
+    chart_interpretations:{
+      profitability:'毛利率的上升可能受商品报价影响，产量和成本变化需要拆开看。股价是否便宜取决于利润能持续多久。',
+      valuation_history:'低市盈率可能由周期上行阶段的高利润造成，并不自动代表便宜。要看金铜回落后的利润和后续资本开支。',
+    }
+  },
+};
+const explained=ctx.renderDashboardCharts(interpretedReport);
+for(const note of [
+  '毛利率的上升可能受商品报价影响',
+  '低市盈率可能由周期上行阶段的高利润造成',
+]){
+  assert.ok(explained.includes(note),'missing chart explanation '+note);
+}
+assert.equal((explained.match(/class="chart-reading"/g)||[]).length,2);
+assert.ok(explained.indexOf('盈利质量的变化') <
+  explained.indexOf('毛利率的上升可能受商品报价影响'));
+assert.ok(explained.indexOf('毛利率的上升可能受商品报价影响') <
+  explained.indexOf('历史估值区间'));
+assert.ok(explained.indexOf('历史估值区间') <
+  explained.indexOf('低市盈率可能由周期上行阶段的高利润造成'));
+assert.ok(!explained.includes('<script>'));
+assert.ok(!ctx.chartTile('图例','说明','',
+  '没有真实数据时不要假装有解释').includes('class="chart-reading"'));
+assert.ok(ctx.chartTile('图例','说明','<svg></svg>',
+  '<img src=x onerror=alert(1)>').includes('&lt;img'));
+
+// Old cached results do not have commentary; never invent a graph reading
+// from the chart percentile alone or from generic business heuristics.
+const oldInterpreted=JSON.parse(JSON.stringify(interpretedReport));
+delete oldInterpreted.summary.chart_interpretations;
+assert.ok(!ctx.renderDashboardCharts(oldInterpreted).includes('class="chart-reading"'));
 
 assert.ok(ctx.renderChipPositionChart({
     status:'contextualized',position_52w_pct:12.5,
@@ -506,8 +629,14 @@ report.position_risk={
 };
 ctx.renderResult(report);
 const verdict=nodes.result.innerHTML;
-assert.ok(verdict.includes('最近可核验收盘价</span> <strong>775.29元</strong>'));
-assert.ok(verdict.includes('不是盘中实时价'));
+assert.ok(verdict.includes('最近核验收盘价'));
+assert.ok(verdict.includes('775.29 元'));
+assert.ok(verdict.includes('2026-10-09'));
+assert.ok(!verdict.includes('不是盘中实时价'));
+assert.ok(!verdict.includes('Live 研究'));
+assert.ok(!verdict.includes('report-header-detail'));
+assert.ok(verdict.indexOf('class="verdict-market-strip"') <
+  verdict.indexOf('id="report-toc"'));
 assert.ok(!verdict.includes('成交量 null'));
 assert.ok(!verdict.includes('涨跌幅 null%'));
 assert.ok(!verdict.includes('当前风险共振'));
@@ -515,7 +644,8 @@ assert.ok(!verdict.includes('十二个维度等权决定立场'));
 report.realtime_quote={latest_price:0};
 ctx.renderResult(report);
 assert.ok(!nodes.result.innerHTML.includes('最新价 0'));
-assert.ok(nodes.result.innerHTML.includes('有效股价暂缺'));
+assert.ok(nodes.result.innerHTML.includes('verdict-market-missing'));
+assert.ok(nodes.result.innerHTML.includes('暂缺'));
 
 console.log('Dashboard UI checks passed: 4 public sections, 12 unique dimensions, hidden internal reviews and industry no-price gate.');
 

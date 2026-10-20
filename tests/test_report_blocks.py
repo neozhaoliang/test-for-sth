@@ -401,14 +401,50 @@ def test_kb_company_report_keeps_causal_crowding_and_geopolitics_without_source_
         ],
     )
     rendered = _build_knowledge_hypotheses_block(inputs)
-    assert "基金抱团可能形成价格与业绩的正反馈" in rendered
-    assert "基金持股数量" in rendered
-    assert "海外营收不等于北美营收" in rendered
-    assert "已列入某项名单不等于被全面禁售" in rendered
+    # The learned mechanism must come from the actual retrieved entries,
+    # not from a list of pre-written tech-sector slogans.
+    assert "被动ETF与主动基金调仓会放大估值波动" in rendered
+    assert "客户主动更换供应商可能影响订单和毛利率" in rendered
+    assert "基金抱团可能形成价格与业绩的正反馈" not in rendered
+    assert "海外营收不等于北美营收" not in rendered
+    assert "前五大/第一大客户占比" in rendered
     assert "不是本公司的已证实事实" in rendered
     assert "private_kol" not in rendered
     assert "原帖标题" not in rendered
 
+
+
+def test_cyclical_low_pe_mechanism_is_retrieved_from_actual_kb_not_template():
+    inputs = SimpleNamespace(
+        stock_code="601899", stock_name="紫金矿业",
+        research_profile=ResearchProfile(
+            archetype="cyclical", label="周期资源", industry="有色金属",
+            readiness=1.0,
+        ),
+        fundamentals={"facts":{"sw_industry":"有色金属"}},
+        knowledge_excerpts=[
+            KnowledgeExcerpt(
+                source="private_research", title="黄金资源的利率和盈利周期",
+                author="研究资料作者",
+                distilled=(
+                    "【原则】矿业利润高的时候要核对盈利分母是否可持续。"
+                    "【机制】金价处于强势阶段会推高每股收益，"
+                    "使滚动PE看着很低，但当黄金回落而产能成本上升时"
+                    "企业的利润分母可能急剧收缩。"
+                    "【适用条件】黄金价格处于高位且矿产产量增长较慢的时期。"
+                    "【失效条件】矿山成本下降或新增产能持续抵消价格回落。"
+                ),
+                published_at="2026-09-12",
+            ),
+        ],
+    )
+    rendered = _build_knowledge_hypotheses_block(inputs)
+    assert "利润分母可能急剧收缩" in rendered
+    assert "新增产能持续抵消价格回落" in rendered
+    assert "资源" in rendered or "矿业" in rendered
+    assert "研究资料作者" not in rendered
+    assert "private_research" not in rendered
+    assert "已列入某项名单不等于被全面禁售" not in rendered
 
 def test_kb_no_entries_does_not_invent_crowding_or_sanction_facts():
     inputs = SimpleNamespace(

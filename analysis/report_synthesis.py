@@ -61,6 +61,7 @@ from analysis.thesis_readability import (
     suppress_invalid_share_sale_totals,
 )
 from analysis.dimension_readability import polish_dimension_prose
+from analysis.chart_interpretation import build_chart_interpretations
 
 
 _PROCESS_TERM_RE = re.compile(r"六查|第[一二三四五六七八九十\d]+步|检查项\d*")
@@ -181,6 +182,73 @@ async def _score_dimensions(
     return scores
 
 
+async def _enrich_style_context(inputs: Any, as_of: str) -> str:
+    """Keep observed market moves AND abstracted private style explanations.
+
+    Both sets are needed: price changes document WHAT happened; the private
+    research corpus suggests WHICH causal mechanisms deserve evidence checks.
+    """
+    prompt_blocks: list[str] = []
+    # Market-price evidence and private causal hypotheses answer DIFFERENT
+    # questions. The previous 'rotation observed' branch cleared all learned
+    # causes, so richer sector data perversely erased the KB explanation.
+    style = (getattr(inputs, 'valuation_model_result', None) or {}).get('style_context')
+    if isinstance(style, dict):
+        rotation = style.get("sector_rotation") or {}
+        observed_count = (
+            len(rotation.get("sectors") or []) +
+            len(rotation.get("benchmarks") or [])
+        )
+        if (rotation.get("status") in ("observed", "partial", "insufficient_data")
+                and observed_count >= 3
+                and getattr(inputs, "research_mode", "") != "historical"):
+            style["rotation_reading"] = await interpret_sector_rotation(
+                rotation,
+                stock_industry=str(
+                    getattr(getattr(inputs, "research_profile", None), "industry", "")
+                ),
+                as_of=as_of,
+            )
+            prompt_blocks.append(
+                "\n\n## 多行业风格的实际表现（价格证据，不是资金流向）\n"
+                + str(style["rotation_reading"].get("summary") or "") + "\n"
+                + "；".join(style["rotation_reading"].get("hypotheses") or [])
+                + "\n需同等重视涨跌的反例；板块价格分化不等于基金已经调仓。"
+            )
+
+        historical = getattr(inputs, "research_mode", "") == "historical"
+        if historical and as_of and as_of < "2026-10-13":
+            style["causal_knowledge_status"] = "historical_method_not_available"
+            style["causal_drivers"] = []
+            prompt_blocks.append(
+                "\n\n历史研究不能补入基准日之后才提炼的市场风格知识；"
+                "保留当时有日期的行情，不事后编造调仓原因。"
+            )
+        else:
+            # Always try the vetted, anonymized, actual knowledge mechanisms,
+            # INCLUDING when rich industry rotation evidence exists.
+            reasons = await build_market_style_reasons(
+                getattr(inputs, "knowledge_excerpts", None) or [],
+                as_of=as_of,
+                market_context=style,
+                industry=str(getattr(
+                    getattr(inputs, "research_profile", None), "industry", ""
+                ) or ""),
+            )
+            style["causal_knowledge_status"] = reasons["status"]
+            style["causal_drivers"] = reasons["drivers"]
+            style["private_excerpt_count"] = reasons["private_excerpt_count"]
+            style["private_transcript_count"] = reasons["private_transcript_count"]
+            utils.logger.info(
+                "[analysis.report] 风格解释覆盖 usable=%d, transcript=%d, drivers=%d, status=%s",
+                reasons["private_excerpt_count"], reasons["private_transcript_count"],
+                len(reasons["drivers"]), reasons["status"],
+            )
+        prompt_blocks.append("\n\n" + market_style_reasons_prompt_block(style))
+
+    return "".join(prompt_blocks)
+
+
 async def _generate_summary(
     inputs: Any,
     candidates: List[CandidateOpinion],
@@ -298,56 +366,7 @@ async def _generate_summary(
     if context:
         prompt += "\n\n" + position_risk_prompt_block(context)
 
-    # Integrate the private corpus as a causal hypothesis, not mere index stats.
-    style = (getattr(inputs, 'valuation_model_result', None) or {}).get('style_context')
-    if isinstance(style, dict):
-        rotation = style.get("sector_rotation") or {}
-        observed_count = len(rotation.get("sectors") or []) + len(rotation.get("benchmarks") or [])
-        if (rotation.get("status") in ("observed", "partial", "insufficient_data")
-                and observed_count >= 3
-                and getattr(inputs, "research_mode", "") != "historical"):
-            style["rotation_reading"] = await interpret_sector_rotation(
-                rotation, stock_industry=str(getattr(getattr(inputs, "research_profile", None), "industry", "")),
-                as_of=as_of,
-            )
-            style["causal_knowledge_status"] = (
-                "sector_rotation_observed" if rotation.get("status") == "observed"
-                else "limited_market_indices_or_sectors"
-            )
-            style["causal_drivers"] = []
-            prompt += (
-                "\n\n## 多行业风格研判（非固定红利/科技比较）\n"
-                + str(style["rotation_reading"].get("summary") or "") + "\n"
-                + "；".join(style["rotation_reading"].get("hypotheses") or [])
-                + "\n结合公司行业和实际价格解释投资赔率，禁止把涨跌认定为已证实的资金流向。"
-            )
-        else:
-            historical = getattr(inputs, 'research_mode', '') == 'historical'
-            if historical and as_of and as_of < '2026-10-13':
-                style['causal_knowledge_status'] = 'historical_method_not_available'
-                style['causal_drivers'] = []
-            else:
-                reasons = await build_market_style_reasons(
-                    getattr(inputs, 'knowledge_excerpts', None) or [],
-                    # Exact style returns describe the outcome the hypothesis must explain.
-                    # General market_context is a stock/index summary and does not contain
-                    # the red-versus-growth pair; passing it left the model direction-blind.
-                    as_of=as_of, market_context=style,
-                    industry=str(getattr(getattr(inputs, 'research_profile', None),
-                                         'industry', '') or ''),
-                )
-                style['causal_knowledge_status'] = reasons['status']
-                style['causal_drivers'] = reasons['drivers']
-                # Counts are internal diagnostics; never expose sources to the UI.
-                style['private_excerpt_count'] = reasons['private_excerpt_count']
-                style['private_transcript_count'] = reasons['private_transcript_count']
-                utils.logger.info(
-                    '[analysis.report] 市场风格因果知识覆盖 usable=%d, transcript=%d, drivers=%d, status=%s',
-                    reasons['private_excerpt_count'], reasons['private_transcript_count'],
-                    len(reasons['drivers']), reasons['status'],
-                )
-            prompt += '\n\n' + market_style_reasons_prompt_block(style)
-
+    prompt += await _enrich_style_context(inputs, as_of)
 
     # Subjective investment methods are synthesized from private knowledge,
     # then anonymized and checked before entering the final report model.
@@ -499,6 +518,15 @@ async def _generate_summary(
     if lynch_category not in _VALID_LYNCH_CATEGORIES:
         lynch_category = "unclear"
     dimension_scores = await _score_dimensions(analyses, inputs.stock_code)
+    # The chart interpreter sees the actual vetted knowledge methods, the
+    # finished detailed research and the exact data behind each available
+    # chart. It may propose mechanisms, not invent additional factual figures.
+    chart_interpretations = (
+        await build_chart_interpretations(
+            inputs, readable_analyses, methods, dimension_scores,
+        )
+        if getattr(inputs, "research_mode", "") != "historical" else {}
+    )
     summary = StructuredSummary(
         lynch_category=lynch_category,
         stance=parsed.get("stance", ""),
@@ -515,6 +543,7 @@ async def _generate_summary(
         risk_notes=_scrub_process_terms(parsed.get("risk_notes", "") or "", inputs.stock_code),
         dimension_scores=dimension_scores,
         dimension_analyses=readable_analyses or None,
+        chart_interpretations=chart_interpretations or None,
     )
     # Data validity is enforced in report validation. A deterministic screening
     # rule must NEVER overwrite the LLM's portfolio-manager conclusion.

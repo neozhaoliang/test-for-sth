@@ -152,6 +152,50 @@ body, input, select, textarea, button { font-family:inherit; }
   background:linear-gradient(120deg,#345bb6,#284993);
   box-shadow:0 7px 15px rgba(35,75,156,.18);
 }
+/* Feedback stays in the Analyze button; no separate "状态: running" row. */
+.search-bar #submitBtn {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:9px;
+  white-space:nowrap;
+}
+.search-bar #submitBtn .submit-btn-spinner {
+  display:none;
+  width:17px;
+  height:17px;
+  flex:0 0 17px;
+  border:2px solid rgba(255,255,255,.32);
+  border-top-color:#fff;
+  border-radius:50%;
+  animation:analyze-button-spin .7s linear infinite;
+}
+.search-bar #submitBtn.is-loading .submit-btn-spinner { display:inline-block; }
+.search-bar #submitBtn.is-loading,
+.search-bar #submitBtn.is-loading:hover {
+  opacity:.95;
+  cursor:progress;
+  filter:none;
+  transform:none;
+  box-shadow:0 5px 12px rgba(35,75,156,.13);
+}
+.search-bar #submitBtn.is-loading .submit-btn-text { font-weight:750; }
+@keyframes analyze-button-spin { to { transform:rotate(360deg); } }
+.analysis-error[hidden] { display:none; }
+.analysis-error {
+  padding:9px 12px;
+  margin:0 0 12px;
+  border:1px solid #f4cdcb;
+  border-radius:9px;
+  color:#aa393c;
+  background:#fff5f4;
+  font-size:13px;
+  line-height:1.5;
+}
+@media(prefers-reduced-motion:reduce){
+  .search-bar #submitBtn .submit-btn-spinner { animation:none; }
+}
+
 .app-shell .research-options {
   display:flex;
   align-items:center;
@@ -224,20 +268,21 @@ body, input, select, textarea, button { font-family:inherit; }
 #result .result-summary h3 { margin:0 0 10px;font-size:18px; }
 .verdict-line { align-items:center;gap:9px 14px; }
 
-/* Broker-style metrics: source dates stay next to every value. The cards
-   sit under 投资结论, never in the later data-overview dashboard. */
-#result #report-verdict .verdict-market-strip {
+/* Six compact sourced facts live WITH the company identity, not below the
+   research TOC or in the Investment Conclusion card. */
+#result .report-company-card .verdict-market-strip {
   display:grid;
   grid-template-columns:minmax(150px,1.25fr) repeat(5,minmax(0,1fr));
   gap:0;
-  margin:12px 0 17px;
+  width:100%;
+  min-width:0;
+  margin:17px 0 0;
   padding:7px 0;
   border:1px solid #dce5f3;
   border-radius:13px;
   background:linear-gradient(100deg,#f6f9ff,#fbfdff);
-  min-width:0;
 }
-#result #report-verdict .verdict-market-metric {
+#result .report-company-card .verdict-market-metric {
   --kpi-ink:#2d598e;
   display:flex;
   flex-direction:column;
@@ -248,15 +293,15 @@ body, input, select, textarea, button { font-family:inherit; }
   min-width:0;
   border-left:1px solid #e0e8f3;
 }
-#result #report-verdict .verdict-market-metric:first-child { border-left:0; }
-#result #report-verdict .verdict-market-label {
+#result .report-company-card .verdict-market-metric:first-child { border-left:0; }
+#result .report-company-card .verdict-market-label {
   font-size:11px;
   font-weight:650;
   line-height:1.45;
   color:#65748c;
   white-space:nowrap;
 }
-#result #report-verdict .verdict-market-value {
+#result .report-company-card .verdict-market-value {
   font-size:clamp(17px,1.5vw,21px);
   font-weight:800;
   letter-spacing:-.035em;
@@ -265,57 +310,53 @@ body, input, select, textarea, button { font-family:inherit; }
   white-space:nowrap;
   color:var(--kpi-ink);
 }
-#result #report-verdict .verdict-market-date,
-#result #report-verdict .verdict-market-context {
+#result .report-company-card .verdict-market-date,
+#result .report-company-card .verdict-market-context {
   font-size:10px;
   line-height:1.45;
   color:#7c8a9f;
 }
-#result #report-verdict .verdict-market-price { --kpi-ink:#22529e; }
-#result #report-verdict .verdict-market-price .verdict-market-value {
+#result .report-company-card .verdict-market-price { --kpi-ink:#22529e; }
+#result .report-company-card .verdict-market-price .verdict-market-value {
   font-size:clamp(22px,2vw,27px);
 }
-#result #report-verdict .verdict-market-valuation { --kpi-ink:#6955a1; }
-#result #report-verdict .verdict-market-profit { --kpi-ink:#158578; }
-#result #report-verdict .verdict-market-cash { --kpi-ink:#16847d; }
-#result #report-verdict .verdict-market-low { --kpi-ink:#168578; }
-#result #report-verdict .verdict-market-mid { --kpi-ink:#3c6baf; }
-#result #report-verdict .verdict-market-high { --kpi-ink:#bd7740; }
-#result #report-verdict .verdict-market-missing { --kpi-ink:#939eae; }
-#result #report-verdict .verdict-market-strip + .verdict-line { margin-top:11px; }
+#result .report-company-card .verdict-market-valuation { --kpi-ink:#6955a1; }
+#result .report-company-card .verdict-market-profit { --kpi-ink:#158578; }
+#result .report-company-card .verdict-market-cash { --kpi-ink:#16847d; }
+#result .report-company-card .verdict-market-low { --kpi-ink:#168578; }
+#result .report-company-card .verdict-market-mid { --kpi-ink:#3c6baf; }
+#result .report-company-card .verdict-market-high { --kpi-ink:#bd7740; }
+#result .report-company-card .verdict-market-missing { --kpi-ink:#939eae; }
 @media(max-width:1080px){
-  #result #report-verdict .verdict-market-strip {
+  #result .report-company-card .verdict-market-strip {
     grid-template-columns:repeat(3,minmax(0,1fr));
   }
-  #result #report-verdict .verdict-market-metric:nth-child(3n+1) { border-left:0; }
-  #result #report-verdict .verdict-market-metric:nth-child(n+4) {
+  #result .report-company-card .verdict-market-metric:nth-child(3n+1) { border-left:0; }
+  #result .report-company-card .verdict-market-metric:nth-child(n+4) {
     border-top:1px solid #e0e8f3;
   }
 }
 @media(max-width:600px){
-  #result #report-verdict .verdict-market-strip {
+  #result .report-company-card .verdict-market-strip {
     grid-template-columns:repeat(2,minmax(0,1fr));
+    margin-top:14px;
   }
-  #result #report-verdict .verdict-market-metric {
-    padding:8px 11px;
-  }
-  #result #report-verdict .verdict-market-metric:nth-child(n) {
+  #result .report-company-card .verdict-market-metric { padding:8px 11px; }
+  #result .report-company-card .verdict-market-metric:nth-child(n) {
     border-left:0;
     border-top:1px solid #e0e8f3;
   }
-  #result #report-verdict .verdict-market-metric:nth-child(even) {
+  #result .report-company-card .verdict-market-metric:nth-child(even) {
     border-left:1px solid #e0e8f3;
   }
-  #result #report-verdict .verdict-market-metric:first-child {
+  #result .report-company-card .verdict-market-metric:first-child {
     grid-column:1 / -1;
     border-top:0;
     border-left:0;
   }
-  #result #report-verdict .verdict-market-metric:nth-child(2) {
-    border-left:0;
-  }
-  #result #report-verdict .verdict-market-value { font-size:18px; }
-  #result #report-verdict .verdict-market-price .verdict-market-value { font-size:25px; }
+  #result .report-company-card .verdict-market-metric:nth-child(2) { border-left:0; }
+  #result .report-company-card .verdict-market-value { font-size:18px; }
+  #result .report-company-card .verdict-market-price .verdict-market-value { font-size:25px; }
 }
 
 .verdict-item { border-left:1px solid #e3eaf4;padding-left:12px; }
@@ -346,6 +387,24 @@ body, input, select, textarea, button { font-family:inherit; }
 }
 .chart-tile h4 { font-size:14px;line-height:1.5; }
 .chart-tile svg { max-width:100%;height:auto; }
+/* The explanation belongs INSIDE the same card as its chart.
+   It explains causes and investment impact, never just repeats axis values. */
+#result .chart-tile .chart-reading,
+#result .market-structure-lines .chart-reading {
+  margin:13px 0 0;
+  padding:12px 13px 2px;
+  border-top:1px solid #dce5f2;
+  color:#364967;
+  font-size:13px;
+  line-height:1.85;
+  overflow-wrap:anywhere;
+}
+#result .market-structure-lines .chart-reading {
+  width:100%;
+  flex-basis:100%;
+  margin-bottom:7px;
+}
+
 #result .evidence-block {
   margin:12px 0;
   padding:15px 18px;
@@ -511,18 +570,16 @@ body, input, select, textarea, button { font-family:inherit; }
 }
 
 
-/* Broker-style identity card: a strong company name, quiet ticker, and
-   compact trading facts. Responsive wrapping replaces the old scrolling row. */
+/* Large company name and small ticker above its six financial facts. */
 #result .report-header-inline.report-company-card {
   display:flex;
-  align-items:center;
-  justify-content:space-between;
-  flex-wrap:wrap;
-  gap:12px 24px;
+  flex-direction:column;
+  align-items:stretch;
+  gap:0;
   width:100%;
   min-width:0;
   margin:0;
-  padding:17px 23px;
+  padding:21px 25px 23px;
   overflow:visible;
   border:1px solid #d5e2f2;
   border-radius:17px;
@@ -532,19 +589,17 @@ body, input, select, textarea, button { font-family:inherit; }
 #result .report-company-identity {
   display:flex;
   align-items:baseline;
-  flex:0 1 auto;
-  gap:10px;
+  gap:12px;
   min-width:0;
 }
 #result .report-header-inline h2 {
   margin:0;
-  flex:0 1 auto;
-  font-size:clamp(28px,2.9vw,36px);
+  font-size:clamp(30px,3vw,38px);
   line-height:1.25;
   font-weight:850;
   letter-spacing:-.035em;
   color:#183653;
-  white-space:nowrap;
+  overflow-wrap:anywhere;
 }
 #result .report-header-inline .report-stock-code {
   font-size:12px;
@@ -555,148 +610,19 @@ body, input, select, textarea, button { font-family:inherit; }
   color:#8191aa;
   white-space:nowrap;
 }
-#result .report-header-detail {
-  display:flex;
-  align-items:center;
-  justify-content:flex-end;
-  flex:1 1 auto;
-  gap:8px 17px;
-  flex-wrap:wrap;
-  min-width:0;
-  margin-left:auto;
-}
-#result .report-header-inline .report-mode-inline {
-  display:inline-flex;
-  align-items:center;
-  gap:10px;
-  flex:0 0 auto;
-  min-width:0;
-  margin:0;
-  padding:5px 10px;
-  border:1px solid #dce6f5;
-  border-radius:9px;
-  background:#f2f6fd;
-  font-size:11px;
-  font-weight:550;
-  line-height:1.5;
-  color:#506685;
-  white-space:nowrap;
-  box-shadow:none;
-}
-#result .report-mode-inline .report-research-tag {
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  font-weight:750;
-  color:#27558f;
-}
-#result .report-mode-inline .report-research-tag::before {
-  content:"";
-  display:inline-block;
-  width:6px;
-  height:6px;
-  border-radius:50%;
-  background:#3478d5;
-}
-#result .report-mode-inline.historical-banner .report-research-tag {
-  color:#92723e;
-}
-#result .report-mode-inline.historical-banner .report-research-tag::before {
-  background:#b48a47;
-}
-#result .report-mode-inline .report-research-date {
-  border-left:1px solid #cfdef0;
-  padding-left:10px;
-  color:#617590;
-  font-variant-numeric:tabular-nums;
-}
-#result .report-header-inline .report-quote-inline {
-  display:inline-flex;
-  align-items:center;
-  justify-content:flex-end;
-  flex-wrap:wrap;
-  gap:6px 12px;
-  flex:0 1 auto;
-  min-width:0;
-  margin:0;
-  font-size:12px;
-  font-weight:550;
-  line-height:1.5;
-  color:#354d6b;
-  font-variant-numeric:tabular-nums;
-}
-#result .report-quote-inline .report-quote-price,
-#result .report-quote-inline .report-quote-item {
-  display:inline-flex;
-  align-items:baseline;
-  gap:5px;
-  white-space:nowrap;
-}
-#result .report-quote-inline .report-quote-price strong {
-  font-size:18px;
-  font-weight:800;
-  color:#234e89;
-  letter-spacing:-.02em;
-}
-#result .report-quote-inline .report-quote-item {
-  border-left:1px solid #d7e2f0;
-  padding-left:12px;
-}
-#result .report-quote-inline .report-quote-item strong {
-  font-size:13px;
-  font-weight:750;
-}
-#result .report-quote-inline .report-quote-label {
-  font-size:11px;
-  color:#72849d;
-  font-weight:550;
-}
-#result .report-quote-inline .report-change-up strong { color:#c94c50; }
-#result .report-quote-inline .report-change-down strong { color:#188474; }
-#result .report-quote-inline .report-change-neutral strong { color:#506887; }
-#result .report-quote-note {
-  flex-basis:100%;
-  font-size:10px;
-  color:#6c7d96;
-  font-weight:450;
-  text-align:right;
-}
-#result .report-quote-unavailable {
-  color:#8793a5;
-  font-size:12px;
-}
 #result .report-historical-note {
   font-size:12px;
   color:#76624a;
   margin:0 2px;
 }
-@media(max-width:1130px) {
-  #result .report-header-detail {
-    flex-basis:100%;
-    justify-content:flex-start;
-    margin-left:0;
-  }
-  #result .report-header-inline .report-quote-inline {
-    justify-content:flex-start;
-  }
-  #result .report-quote-note { text-align:left; }
-}
-@media(max-width:600px) {
+@media(max-width:600px){
   #result .report-header-inline.report-company-card {
-    padding:15px 16px;
-    gap:11px;
+    padding:16px 15px 18px;
     border-radius:14px;
   }
   #result .report-header-inline h2 { font-size:29px; }
   #result .report-header-inline .report-stock-code { font-size:11px; }
-  #result .report-header-detail { gap:10px; }
-  #result .report-header-inline .report-quote-inline {
-    width:100%;
-    justify-content:flex-start;
-    gap:7px 10px;
-  }
-  #result .report-quote-inline .report-quote-price strong { font-size:17px; }
-  #result .report-quote-inline .report-quote-item { padding-left:9px; }
+  #result .report-company-identity { align-items:baseline;gap:8px;flex-wrap:wrap; }
 }
 
 /* Single visible TOC heading: 研究目录, without an English eyebrow or count. */
