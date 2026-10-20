@@ -80,16 +80,19 @@ async def test_dimension_pipeline_cleans_proven_duplicate_before_any_optional_ll
 @pytest.mark.asyncio
 async def test_dimension_polish_rejects_llm_edit_that_adds_repeated_tail(monkeypatch):
     import backtest.llm_client
-    old = ("总体来看，现金流质量没有跟上收入变化。"
+    old = ("总体来看，需要强调的是，现金流质量没有跟上收入变化。"
            "公司连续三个季度继续增加存货，未来回款情况需要关注。"
            "这项经营风险没有证据证明会自动消失。")
+    calls = []
     edit = ("现金流落后于收入，存货增加会占用资金。"
             "未来回款情况还没有完全确认，公司的实际现金流需要继续核对。"
             "\n\n，存货增加会占用资金。未来回款情况还没有完全确认，公司的实际现金流")
     async def fake_llm(*args, **kwargs):
+        calls.append(1)
         return {"chip_flow": edit}, "end_turn"
     monkeypatch.setattr(backtest.llm_client, "call_json_ex", fake_llm)
     result = await polish_dimension_prose({"chip_flow": old})
+    assert calls == [1], "the broken LLM edit must actually be evaluated"
     assert result["chip_flow"] == old
 
 
