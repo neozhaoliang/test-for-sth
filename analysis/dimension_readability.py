@@ -14,6 +14,9 @@ from typing import Any, Mapping
 from analysis.thesis_readability import (
     _numbers, _preserves_material_themes, _PRIVATE, _scripted_score,
 )
+from analysis.prose_integrity import (
+    has_malformed_prose, remove_repeated_trailing_excerpt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +45,7 @@ def _max_sentence_numbers(text: str) -> int:
 
 
 def _needs_dimension_edit(text: str) -> bool:
-    return _scripted_score(text) >= 2 or (
+    return has_malformed_prose(text) or _scripted_score(text) >= 2 or (
         len(text) >= 150 and _max_sentence_numbers(text) >= 9
     )
 
@@ -52,7 +55,7 @@ def accept_dimension_edit(original: str, edited: Any) -> bool:
     if not isinstance(original, str) or not isinstance(edited, str):
         return False
     new = edited.strip()
-    if not new or _PRIVATE.search(new):
+    if not new or _PRIVATE.search(new) or has_malformed_prose(new):
         return False
     if len(new) < max(35, int(len(original) * .68)):
         return False
@@ -70,7 +73,7 @@ def accept_dimension_edit(original: str, edited: Any) -> bool:
     new_score = _scripted_score(new)
     if old_score >= 2 and (new_score >= old_score or new_score >= 2):
         return False
-    if old_score < 2:
+    if old_score < 2 and not has_malformed_prose(original):
         if _max_sentence_numbers(original) < 9:
             return False
         if _max_sentence_numbers(new) >= _max_sentence_numbers(original):
@@ -86,7 +89,13 @@ async def polish_dimension_prose(
     Return a new public-facing mapping. Original analyses remain untouched,
     including the model's scoring / research-review source.
     """
-    result = dict(analyses or {})
+    # Exact repeated endings can be removed without changing any claim:
+    # every retained fact already appears in the preceding prose.
+    result = {
+        key: remove_repeated_trailing_excerpt(value) if isinstance(value, str)
+        else value
+        for key, value in (analyses or {}).items()
+    }
     flagged = sorted(
         (
             (key, text)
@@ -113,6 +122,8 @@ async def polish_dimension_prose(
             "公司名称、名单事件，也不能把风险假设写成已发生的事实。\n"
             "原稿里所有数字及其单位必须保留，不能新增任何数字。"
             "数字挤在一句话时可以拆成几句，把数字与原因和后果讲清，但不要删。"
+            "最后检查是否重复粘贴了前面的半句话，是否出现残缺的逗号开头段落，"
+            "或一句话没写完就停下。发现后要重写完整句子，不能补一段重复的尾巴。"
             "原因和后果要具体说清，不用'经营韧性'、'风险与机遇并存'、"
             "'整体而言'等套话，不能段段套'先表态、再列数字、最后说仍需关注'。"
             "不要故意扮演股民、模仿任何知识库作者，"
