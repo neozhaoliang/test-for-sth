@@ -226,8 +226,40 @@ async def build_market_style_reasons(
         "窗口=" + str(style.get("style_window") or "未知") +
         "，观测形态=" + rotation + "。"
     ) if isinstance(style, Mapping) else "当前行情缺失，不能证明任何资金流向。"
+    # Rich cross-industry evidence must reach the KB causal interpreter.
+    # Without this, even when many sector prices were fetched, the prompt
+    # saw only generic dividend/growth returns and could propose an unrelated
+    # story about the opposite market regime.
+    rotation_data = style.get("sector_rotation") or {} if isinstance(style, Mapping) else {}
+    if not isinstance(rotation_data, Mapping):
+        rotation_data = {}
+    sector_rows = rotation_data.get("sectors") or []
+    dated_sectors = [
+        row for row in sector_rows if isinstance(row, Mapping)
+        and row.get("name") and row.get("latest_date")
+        and isinstance(row.get("d20_pct"), (int, float))
+    ]
+    sectors_observation = ""
+    if dated_sectors:
+        ordered = sorted(dated_sectors, key=lambda row: -row["d20_pct"])
+        leaders = ordered[:4]
+        laggards = ordered[-4:]
+        sector_desc = lambda rows: "、".join(
+            str(row["name"]) + " " + str(row["d20_pct"]) + "%"
+            for row in rows
+        )
+        sectors_observation = (
+            "同期行业样本（只是价格变动，不是资金净流量）："
+            + "相对靠前 " + sector_desc(leaders)
+            + "；相对靠后 " + sector_desc(laggards)
+            + "。行业观察截止 "
+            + str(rotation_data.get("as_of") or "未知")
+            + "，覆盖 " + str(rotation_data.get("coverage") or len(ordered))
+            + " 个样本。请解释与本轮样本方向一致的可能原因；"
+            "不要假设所有有色、黄金、煤炭、科技股票都同涨同跌。"
+        )
     prompt = (
-        observation +
+        observation + sectors_observation +
         "先回答上述真实涨跌格局。知识库材料可能来自科技领涨的旧阶段，"
         "不能把旧阶段的主张改写成这轮科技下跌、红利上涨的原因。"
         "尤其在红利上涨而科技下跌时，红利承压、资金仍集中追逐科技"
