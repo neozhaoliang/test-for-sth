@@ -46,8 +46,8 @@ const report={
 };
 assert.ok(ctx.renderProfitabilityTrendChart(report.profitability_trend).includes('<svg'));
 assert.ok(ctx.renderDashboardCharts(report).includes('数据概览与维度图谱'));
-// The four original dashboard KPIs are now in the investment conclusion,
-// together with historical PE/PB percentiles, like a broker quote row.
+// The six source-backed KPIs belong directly BELOW the company name in the
+// top identity card, not the dashboard and not the Investment Conclusion.
 const headlineReport={
   ...report,
   as_of:'2026-10-20',
@@ -63,7 +63,7 @@ const headlineReport={
     dimension_scores:[]},
 };
 const marketHtml=ctx.renderVerdictMarketStrip(headlineReport);
-assert.ok(marketHtml.includes('aria-label="投资结论行情与关键指标"'));
+assert.ok(marketHtml.includes('aria-label="公司行情与关键指标"'));
 assert.equal((marketHtml.match(/class="verdict-market-metric /g)||[]).length,6);
 for(const expected of [
   '82.94 元','2026-10-20','市净率 PB','3.17 倍',
@@ -82,20 +82,32 @@ assert.ok(marketHtml.includes('verdict-market-low'));
 
 ctx.renderResult(headlineReport);
 const rendered=nodes.result.innerHTML;
-const conclusion=rendered.indexOf('<h3>投资结论</h3>');
+const company=rendered.indexOf('<div class="report-company-identity">');
+const title=rendered.indexOf('<h2 id="report-top">');
 const kpis=rendered.indexOf('class="verdict-market-strip"');
+const toc=rendered.indexOf('id="report-toc"');
+const conclusion=rendered.indexOf('<h3>投资结论</h3>');
 const stance=rendered.indexOf('class="verdict-line"');
 const thesis=rendered.indexOf('公司的估值与股东回报');
 const dashboard=rendered.indexOf('id="report-charts"');
-assert.ok(conclusion>=0 && conclusion<kpis && kpis<stance && stance<thesis);
-assert.ok(thesis<dashboard);
+assert.ok(company>=0 && company<title && title<kpis && kpis<toc &&
+  toc<conclusion && conclusion<stance && stance<thesis && thesis<dashboard,
+  'source-backed KPI strip must sit inside top company card, before contents and verdict');
 assert.equal((rendered.match(/class="verdict-market-strip"/g)||[]).length,1);
+const companyCard=rendered.slice(rendered.indexOf('<section class="report-header-inline'),toc);
+assert.ok(companyCard.includes('class="verdict-market-strip"'));
+assert.ok(!rendered.slice(conclusion,dashboard).includes('class="verdict-market-strip"'));
+assert.ok(!companyCard.includes('Live 研究'));
+assert.ok(!companyCard.includes('基准日 2026-10-20'));
+assert.ok(!companyCard.includes('report-quote-inline'));
+assert.ok(!companyCard.includes('非盘中实时价'));
 assert.ok(!ctx.renderDashboardCharts(headlineReport).includes('primary-kpis'),
   'no duplicate quote or financial KPI row in the later dashboard');
 assert.ok(!ctx.renderDashboardCharts(headlineReport).includes('82.94 元'));
 
 const css=fs.readFileSync('web/research_desk.css','utf8');
-assert.ok(css.includes('#result #report-verdict .verdict-market-strip'));
+assert.ok(css.includes('#result .report-company-card .verdict-market-strip'));
+assert.ok(!css.includes('#result #report-verdict .verdict-market-strip'));
 assert.ok(css.includes('grid-template-columns:repeat(3,minmax(0,1fr))'));
 assert.ok(css.includes('grid-template-columns:repeat(2,minmax(0,1fr))'));
 assert.ok(css.includes('.verdict-market-price'));
