@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from analysis.evidence import ResearchQuality
 from analysis.knowledge_context import build_knowledge_hypotheses, format_knowledge_hypotheses
+from analysis.investment_method_distiller import _deidentify_seed
 from analysis.research_profile import ResearchProfile, profile_prompt_block
 from analysis.report_contract import _PROMPT_TEMPLATE
 from analysis.succession_risk import succession_prompt_block
@@ -65,70 +66,73 @@ def _build_knowledge_hypotheses_block(inputs: Any) -> str:
         fundamentals=fundamentals,
         limit=24,
     )
-    # The old projection passed only questions to the final model. This lost
-    # the economic mechanism itself, so a directly relevant KB observation
-    # (crowded institutional ownership / overseas-policy dependence) rarely
-    # influenced the investment conclusion. Pass reusable *mechanisms*, never
-    # private source text, identities or assertions about this issuer.
-    mechanisms = {
-        "fund_flow": (
-            "基金抱团可能形成价格与业绩的正反馈；当持仓拥挤、边际买家变少，"
-            "相同盈利增长也可能对应较低估值。持仓市值随股价上涨不等于净买入；"
-            "要核对基金持股数量、主动与被动资金、成交和融资余额。"
-        ),
-        "valuation_reflexivity": (
-            "经营利润增长与主题溢价扩张可能同时推动股价；当市场预期降温，"
-            "盈利预期下调与估值收缩可能叠加，不能只按高增长期的PE判断便宜。"
-        ),
-        "customer_dependency": (
-            "客户集中且由客户主导技术选型时，供应商可能有量产和认证壁垒，"
-            "但未必有定价和路线控制权；大客户压价、导入第二供应商可影响利润率。"
-        ),
-        "policy_geopolitics": (
-            "海外订单的政策风险应拆成：最终客户所在国、订单和生产所在地、"
-            "关键上游器件来源、清单的具体法律效力，以及客户主动调整供应链的可能。"
-            "海外营收不等于北美营收；已列入某项名单不等于被全面禁售。"
-        ),
-        "demand_financing": (
-            "AI硬件需求由云厂商资本开支驱动；资本开支如果更多依赖举债，"
-            "投资放缓可能依次传导到订单、售价、备货、应收账款和现金回款。"
-        ),
-        "moat_control": (
-            "量产良率与客户认证是真实的竞争能力，但不自动等于掌握标准、"
-            "关键器件和底层知识产权；应分别评估替代难度与价格谈判权。"
-        ),
-        "accounting_quality": (
-            "利润暴增而经营现金流跟不上，可能是回款账期、应收、库存和扩产占款；"
-            "须核对资产负债表与现金流量表变动，不能直接认定利润造假。"
-        ),
-    }
-    topics = {tag for item in hypotheses for tag in (item.get("topics") or [])}
+    # Actual knowledge is structured as 主张/机制/适用/失效. The previous
+    # implementation threw those sections away and substituted seven
+    # hard-coded generic investment slogans. That prevented distinctive
+    # arguments (including commodity-cycle PE traps) from surviving retrieval.
+    #
+    # These are still PRIVATE prompt-only hypotheses, NOT factual assertions
+    # or public article quotes. The final report must reason from issuer
+    # and dated market evidence and may reject each hypothesis.
+    source_excerpts = list(getattr(inputs, "knowledge_excerpts", None) or [])
     topic_labels = list(dict.fromkeys(
         label for item in hypotheses for label in (item.get("topic_labels") or [])
     ))
-    # Keep the upstream retrieval choice: no KB entry -> no invented KB view.
-    active_mechanisms = [mechanisms[tag] for tag in mechanisms if tag in topics]
+    candidates = []
+    used = set()
+    for item in hypotheses:
+        mechanism = str(item.get("mechanism") or "").strip()
+        claim = str(item.get("claim") or "").strip()
+        if not mechanism and not claim:
+            continue
+        key = re.sub(r"\\s+", "", mechanism or claim)[:150]
+        if key in used:
+            continue
+        used.add(key)
+        # Removing identifiers in the *internal prompt* is a first line of
+        # defence. The public projection independently rejects copied
+        # private phrases, names, accounts, URLs and other issuers.
+        def sanitized(value: str, limit: int) -> str:
+            return _deidentify_seed(value[:limit], source_excerpts).replace(
+                str(getattr(inputs, "stock_name", "") or ""), "本公司"
+            ).strip()
+        mechanism = sanitized(mechanism, 270)
+        claim = sanitized(claim, 180)
+        when = sanitized(str(item.get("applicability") or ""), 140)
+        invalid = sanitized(str(item.get("failure_conditions") or ""), 140)
+        lines = ["涉及：" + "、".join((item.get("topic_labels") or [])[:2])]
+        if mechanism:
+            lines.append("可能的因果机制：" + mechanism)
+        if claim and claim != mechanism:
+            lines.append("原观点的待核验主张：" + claim)
+        if when:
+            lines.append("可能适用：" + when)
+        if invalid:
+            lines.append("可能不成立：" + invalid)
+        candidates.append("；".join(lines))
+        if len(candidates) >= 10:
+            break
     unique_questions = []
-    seen = set()
+    seen_questions = set()
     for item in hypotheses:
         for question in item.get("verification_questions") or []:
-            if question not in seen:
+            if question not in seen_questions:
                 unique_questions.append(question)
-                seen.add(question)
-            if len(unique_questions) >= 12:
-                break
+                seen_questions.add(question)
         if len(unique_questions) >= 12:
             break
-    if not active_mechanisms:
+    if not candidates:
         return "本次没有检索到适用的知识库因果线索；依据公司事实和市场数据独立分析。"
     return (
-        "知识库启发的待核验假设与机制（不是事实断言，也不是本公司的已证实事实，不得引用作者或原帖）：\n"
-        + "相关主题：" + "、".join(topic_labels[:10]) + "\n"
-        + "\n".join("· " + x for x in active_mechanisms[:7])
-        + "\n可结合公司数据核验：\n"
-        + "\n".join("· " + q for q in unique_questions[:12])
-        + "\n只有当本公司财报、公告和有日期的资金证据支持时，"
-          "才将上述机制转为投资判断；也要评价反例，不能机械看空。"
+        "知识库启发的待核验假设与机制（不是事实断言，"
+        "也不是本公司的已证实事实，不得引用作者或原帖）：\\n"
+        + "相关主题：" + "、".join(topic_labels[:10]) + "\\n"
+        + "\\n".join("· " + line for line in candidates)
+        + "\\n以下问题必须回到本公司数据判断：\\n"
+        + "\\n".join("· " + question for question in unique_questions[:12])
+        + "\\n不能把这些机制写成已经发生的事件，也不能逐句拷进公开报告。"
+          "请挑出有日期事实能支撑的因果链，解释对未来利润、现金、估值和股价的影响；"
+          "要评估反例。"
     )
 
 def _build_margin_block(
