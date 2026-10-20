@@ -96,6 +96,13 @@ async def polish_dimension_prose(
         else value
         for key, value in (analyses or {}).items()
     }
+    for key, before in (analyses or {}).items():
+        if isinstance(before, str) and result[key] != before:
+            logger.warning(
+                "[analysis.dimension_readability] removed provably duplicated "
+                "trailing text from %s (%d chars)", key,
+                len(before) - len(result[key]),
+            )
     flagged = sorted(
         (
             (key, text)
