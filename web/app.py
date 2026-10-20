@@ -2184,9 +2184,13 @@ function metricCard(label, value, source) {
   return '<div class="metric"><label>' + escapeHtml(label) + '</label><strong>' +
     escapeHtml(String(value)) + '</strong><small>' + escapeHtml(source) + '</small></div>';
 }
-function chartTile(title, subtitle, image) {
+function chartTile(title, subtitle, image, interpretation = '') {
+  const reading = image && typeof interpretation==='string' && interpretation.trim() ?
+    '<p class="chart-reading" aria-label="这张图对公司的投资含义">'+
+      escapeHtml(interpretation.trim())+'</p>' : '';
   return '<div class="chart-tile"><h4>' + escapeHtml(title) + '</h4><p class="section-caption">' +
-    escapeHtml(subtitle) + '</p>' + (image || '<div class="chart-empty">当前没有足够的可比数据，暂不绘图</div>') + '</div>';
+    escapeHtml(subtitle) + '</p>' + (image || '<div class="chart-empty">当前没有足够的可比数据，暂不绘图</div>') +
+    reading+'</div>';
 }
 
 // Three reported-ratio trend lines. Values are shown as reported: do not
@@ -2434,22 +2438,30 @@ function renderChipPositionChart(context, report) {
 }
 
 function renderDashboardCharts(report) {
-  const scores=(report.summary || {}).dimension_scores || [];
+  const summary=report.summary||{};
+  const scores=summary.dimension_scores||[];
+  const readings=summary.chart_interpretations||{};
   let html='<section class="dashboard-charts" id="report-charts"><h3>数据概览与维度图谱</h3>'+
-    '<p class="section-caption">图表仅展示当前报告真实返回的数据，不对缺失年份插值，也不自动将半年ROE年化。</p>';
+    '<p class="section-caption">图表仅展示本次有日期的真实数据；下方解读区别已知事实与可能的经济机制。</p>';
   html+=renderInvestmentStyleStrip(report.valuation_model);
-  // Stock quote, PB, F10 ROE, cash conversion and PE/PB percentiles now
-  // live together under 投资结论, not scattered across two report sections.
   html+='<div class="chart-grid" style="margin-top:16px;">';
   html+=chartTile('盈利质量的变化','ROE、毛利率与净利率；季报ROE为报告期间累计数，不跨期年化',
-    renderProfitabilityTrendChart(report.profitability_trend));
+    renderProfitabilityTrendChart(report.profitability_trend),
+    readings.profitability);
   html+=chartTile('研究视角倾向（非综合评分）','各方面的文字分析倾向示意；不得求和、平均或据此推导买卖结论',
-    scores.length>=6?renderDimensionBars(scores):'');
+    scores.length>=6?renderDimensionBars(scores):'',
+    readings.dimension_scores);
+  const sentimentHtml=renderSentimentMixChart(report.sentiment);
+  const industryHtml=renderIndustryBreadthChart(report.industry_comparison);
   html+='<div class="market-structure-lines" role="group" aria-label="市场情绪与行业广度">'+
-    renderSentimentMixChart(report.sentiment)+
-    renderIndustryBreadthChart(report.industry_comparison)+'</div>';
+    sentimentHtml+industryHtml+
+    ((sentimentHtml||industryHtml) && typeof readings.market_breadth==='string' &&
+     readings.market_breadth.trim()?
+     '<p class="chart-reading" aria-label="市场情绪和行业广度解读">'+
+       escapeHtml(readings.market_breadth.trim())+'</p>':'')+'</div>';
   html+=chartTile('历史估值区间','PE(TTM)历史序列，失真区间将按原图分位裁剪',
-    renderValuationHistoryChart((report.valuation_history || {}).history_monthly || []));
+    renderValuationHistoryChart((report.valuation_history||{}).history_monthly||[]),
+    readings.valuation_history);
   html+='</div></section>';
   return html;
 }
