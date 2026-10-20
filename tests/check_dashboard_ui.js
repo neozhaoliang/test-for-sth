@@ -506,7 +506,7 @@ report.position_risk={
 };
 ctx.renderResult(report);
 const verdict=nodes.result.innerHTML;
-assert.ok(verdict.includes('最近可核验收盘价 775.29元'));
+assert.ok(verdict.includes('最近可核验收盘价</span> <strong>775.29元</strong>'));
 assert.ok(verdict.includes('不是盘中实时价'));
 assert.ok(!verdict.includes('成交量 null'));
 assert.ok(!verdict.includes('涨跌幅 null%'));
