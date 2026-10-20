@@ -114,6 +114,60 @@ assert.ok(css.includes('.verdict-market-price'));
 assert.ok(css.includes('.verdict-market-low'));
 assert.ok(css.includes('.stock-ytd-position-meta'));
 
+// 紫金矿业 screenshot regression: all six facts live directly below the
+// large company name, and the redundant Live/as-of/right quote disappear.
+const zijinReport={
+  ...headlineReport,
+  stock_name:'紫金矿业',
+  stock_code:'SH601899',
+  as_of:'2026-10-20',
+  realtime_quote:{
+    latest_price:29.73,
+    quote_mode:'verified_previous_close',
+    date:'2026-10-19',
+    volume:null,change_pct:null,
+  },
+  valuation:{pb:3.92,roe_pct:19.60,valuation_as_of:'2026-10-16'},
+  fundamentals:{facts:{
+    cash_to_profit_ratio:1.42,cash_profit_period:'2026-06-30'
+  }},
+  valuation_history:{
+    as_of:'2026-10-20',
+    pe_percentiles:[{years:5,percentile:5.2}],
+    pb_percentiles:[{years:5,percentile:63.6}],
+  },
+};
+ctx.renderResult(zijinReport);
+const zijinPage=nodes.result.innerHTML;
+const ziCompanyStart=zijinPage.indexOf('<section class="report-header-inline report-company-card"');
+const ziTitle=zijinPage.indexOf('<h2 id="report-top">紫金矿业</h2>');
+const ziFacts=zijinPage.indexOf('class="verdict-market-strip"');
+const ziCompanyEnd=zijinPage.indexOf('</section>',ziFacts);
+const ziToc=zijinPage.indexOf('id="report-toc"');
+const ziConclusion=zijinPage.indexOf('<h3>投资结论</h3>');
+assert.ok(ziCompanyStart>=0 && ziCompanyStart<ziTitle &&
+  ziTitle<ziFacts && ziFacts<ziCompanyEnd &&
+  ziCompanyEnd<ziToc && ziToc<ziConclusion,
+  'six data points must sit within the company header, below 紫金矿业');
+const ziHeader=zijinPage.slice(ziCompanyStart,ziCompanyEnd);
+for(const fact of [
+  '最近核验收盘价','29.73 元','2026-10-19',
+  '市净率 PB','3.92 倍','F10 披露ROE','19.60%',
+  '2026-10-16','现金流/归母净利','1.42 倍',
+  '2026-06-30','5.2%','63.6%','历史5年分位',
+]){
+  assert.ok(ziHeader.includes(fact),'missing Zijin header field: '+fact);
+}
+assert.equal((ziHeader.match(/class="verdict-market-metric /g)||[]).length,6);
+assert.equal((zijinPage.match(/class="verdict-market-strip"/g)||[]).length,1);
+assert.ok(!ziHeader.includes('Live 研究'));
+assert.ok(!ziHeader.includes('基准日 2026-10-20'));
+assert.ok(!ziHeader.includes('最近可核验收盘价'));
+assert.ok(!ziHeader.includes('不是盘中实时价'));
+assert.ok(!ziHeader.includes('report-header-detail'));
+assert.ok(!ziHeader.includes('report-quote-inline'));
+assert.ok(!zijinPage.slice(ziConclusion).includes('class="verdict-market-strip"'));
+
 // Display all dates independently rather than attaching the latest quote
 // date to an older F10 ROE or an even older quarterly cash-flow figure.
 const dates=['2026-10-20','2026-10-16','2026-03-31'];
