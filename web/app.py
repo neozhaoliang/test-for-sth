@@ -2364,25 +2364,12 @@ function renderChipPositionChart(context, report) {
 }
 
 function renderDashboardCharts(report) {
-  const quote=report.realtime_quote || {};
-  const val=report.valuation || {};
-  const facts=(report.fundamentals || {}).facts || {};
   const scores=(report.summary || {}).dimension_scores || [];
-  const price=numericOrNull(quote.latest_price);
-  const pb=numericOrNull(val.pb);
-  const roe=numericOrNull(val.roe_pct);
-  const cashRatio=numericOrNull(facts.cash_to_profit_ratio);
   let html='<section class="dashboard-charts" id="report-charts"><h3>数据概览与维度图谱</h3>'+
     '<p class="section-caption">图表仅展示当前报告真实返回的数据，不对缺失年份插值，也不自动将半年ROE年化。</p>';
   html+=renderInvestmentStyleStrip(report.valuation_model);
-  html+='<div class="metric-strip primary-kpis" role="group" aria-label="股票主要财务指标">'+
-    metricCard('参考股价',price===null?'暂缺':price.toFixed(2)+' 元',quote.quote_time || report.as_of || '报价时点未知')+
-    metricCard('市净率 PB',pb===null?'暂缺':pb.toFixed(2)+' 倍',val.valuation_as_of || 'F10时点未知')+
-    metricCard('F10 披露ROE',roe===null?'暂缺':roe.toFixed(2)+'%',val.valuation_as_of || '需注意报告期间')+
-    metricCard('现金流/归母净利',cashRatio===null?'暂缺':cashRatio.toFixed(2)+' 倍',
-      (facts.cash_profit_period || facts.finance_period || '报告期未知')+
-      (facts.cash_profit_source?' · 官方财报':''))+
-    '</div>';
+  // Stock quote, PB, F10 ROE, cash conversion and PE/PB percentiles now
+  // live together under 投资结论, not scattered across two report sections.
   html+='<div class="chart-grid" style="margin-top:16px;">';
   html+=chartTile('盈利质量的变化','ROE、毛利率与净利率；季报ROE为报告期间累计数，不跨期年化',
     renderProfitabilityTrendChart(report.profitability_trend));
@@ -2720,6 +2707,7 @@ function assignVerdictFiguresToParagraphs(paragraphs, report) {
   const figures=collectVerdictFigures(report);
   const candidates=[];
   figures.forEach((figure,figureIndex)=>{
+    if(figure.id==='valuation')return;  // now in header KPI strip
     paragraphs.forEach((paragraph,paragraphIndex)=>{
       const score=scoreVerdictFigureParagraph(figure,paragraph);
       if(score>=6)candidates.push({figure,figureIndex,paragraphIndex,score});
@@ -3619,6 +3607,58 @@ function renderReportToc(reportHtml) {
   return html+'</nav>';
 }
 
+// The stock-broker-style quote/valuation strip belongs immediately below the
+// Investment Conclusion heading. All six indicators come from source-backed
+// report fields; historical research must use its as-of snapshot, not today's.
+function verdictMetric(label, value, date, tone, detail) {
+  const safeTone=['price','valuation','profit','cash','low','mid','high','missing'].includes(tone)?
+    tone:'mid';
+  return '<div class="verdict-market-metric verdict-market-'+safeTone+'">'+
+    '<span class="verdict-market-label">'+escapeHtml(String(label))+'</span>'+
+    '<span class="verdict-market-value">'+escapeHtml(String(value))+'</span>'+
+    (detail?'<span class="verdict-market-context">'+escapeHtml(String(detail))+'</span>':'')+
+    (date?'<span class="verdict-market-date">'+escapeHtml(String(date))+'</span>':'')+
+    '</div>';
+}
+function renderVerdictMarketStrip(report) {
+  const quote=report.realtime_quote||{};
+  const valuation=report.valuation||{};
+  const facts=(report.fundamentals||{}).facts||{};
+  const history=report.valuation_history||{};
+  const isHistorical=report.research_mode==='historical';
+  const price=numericOrNull(quote.latest_price);
+  const pb=numericOrNull(valuation.pb);
+  const roe=numericOrNull(valuation.roe_pct);
+  const cash=numericOrNull(facts.cash_to_profit_ratio);
+  const peRow=verdictPercentileRow(history.pe_percentiles);
+  const pbRow=verdictPercentileRow(history.pb_percentiles);
+  const quotedAt=quote.quote_time||quote.date||quote.timestamp||report.as_of||'报价日期暂缺';
+  const quoteLabel=isHistorical?'截止日收盘价':
+    (quote.quote_mode==='verified_previous_close'?'最近核验收盘价':'参考股价');
+  const items=[
+    verdictMetric(quoteLabel,price!==null&&price>0?price.toFixed(2)+' 元':'暂缺',
+      quotedAt,price!==null&&price>0?'price':'missing'),
+    verdictMetric('市净率 PB',pb!==null?pb.toFixed(2)+' 倍':'暂缺',
+      valuation.valuation_as_of||'披露日期暂缺',pb!==null?'valuation':'missing'),
+    verdictMetric('F10 披露ROE',roe!==null?roe.toFixed(2)+'%':'暂缺',
+      valuation.valuation_as_of||'报告期暂缺',roe!==null?(roe>=0?'profit':'high'):'missing'),
+    verdictMetric('现金流/归母净利',cash!==null?cash.toFixed(2)+' 倍':'暂缺',
+      (facts.cash_profit_period||facts.finance_period||'报告期暂缺')+
+        (facts.cash_profit_source?' · 官方财报':''),
+      cash!==null?(cash>=1?'profit':cash>=0?'mid':'high'):'missing'),
+  ];
+  const makePercentile=(name,row)=>{
+    const pct=row?numericOrNull(row.percentile):null;
+    const valid=pct!==null&&pct>=0&&pct<=100;
+    return verdictMetric(name,valid?pct.toFixed(1)+'%':'暂缺',
+      history.as_of||'估值日期暂缺',valid?(pct<=20?'low':pct>=80?'high':'mid'):'missing',
+      row?'历史'+row.years+'年分位':'历史分位暂缺');
+  };
+  items.push(makePercentile('PE',peRow),makePercentile('PB',pbRow));
+  return '<div class="verdict-market-strip" role="group" aria-label="投资结论行情与关键指标">'+
+    items.join('')+'</div>';
+}
+
 function renderResult(report) {
   const el = document.getElementById('result');
   const isHistorical = report.research_mode === 'historical';
@@ -3664,6 +3704,7 @@ function renderResult(report) {
   const summary = report.summary || {};
   const stanceClass = 'stance-' + (summary.stance || 'neutral');
   html += '<section class="result-summary" id="report-verdict"><h3>投资结论</h3>';
+  html += renderVerdictMarketStrip(report);
   html += '<div class="verdict-line"><span class="stance-badge ' + stanceClass + '">' +
     stanceLabel(summary.stance) + '</span>';
   if (summary.company_quality_stance) {
