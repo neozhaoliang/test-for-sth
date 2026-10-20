@@ -640,9 +640,39 @@ _INDEX_HTML = """<!DOCTYPE html>
   .inline-verdict-figures .verdict-figure { background:#fafdff; }
   .verdict-figures-title { font-weight:750; color:#2c3e58; font-size:15px; margin:0 0 4px; }
   .verdict-figures-note { font-size:12px; color:var(--muted); margin:0 0 12px; }
-  .verdict-figure-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
-  .verdict-figure { padding:16px 17px 13px; background:#fff; border:1px solid var(--line);
-    border-radius:13px; min-width:0; }
+  .verdict-figure-grid { display:flex; flex-wrap:wrap; justify-content:center; align-items:stretch; gap:10px; }
+  .verdict-figure { flex:1 1 320px; max-width:620px; padding:16px 17px 13px;
+    background:#fff; border:1px solid var(--line); border-radius:13px; min-width:0; }
+  /* One-to-three-value comparisons belong in a centered horizontal strip,
+     not in a tall, half-page column chart. Never stretch these to fill a row. */
+  .verdict-figure.verdict-figure-compact { flex:0 1 auto; width:max-content; max-width:100%;
+    padding:10px 14px; border-radius:11px; }
+  .verdict-compact-line { display:flex; flex-wrap:wrap; justify-content:center;
+    align-items:center; column-gap:15px; row-gap:8px; }
+  .verdict-compact-title { display:flex; align-items:baseline; flex-wrap:wrap;
+    gap:4px 7px; font-size:13px; color:var(--ink); }
+  .verdict-compact-title b { font-size:13px; white-space:nowrap; }
+  .verdict-compact-period { font-size:10px; color:var(--muted); white-space:nowrap; }
+  .verdict-compact-metrics { display:flex; flex-wrap:wrap; align-items:center;
+    justify-content:center; gap:5px 0; font-variant-numeric:tabular-nums; }
+  .verdict-compact-metric { display:inline-flex; align-items:baseline; gap:6px;
+    white-space:nowrap; padding:0 12px; border-left:1px solid #dce3ef; }
+  .verdict-compact-metric .metric-name { font-size:12px; color:#53627a; }
+  .verdict-compact-metric strong { font-size:15px; color:var(--ink); font-weight:750; }
+  .verdict-compact-metric small { color:#7a879a; font-size:11px; }
+  .verdict-compact-details { position:relative; font-size:11px; color:var(--muted); }
+  .verdict-compact-details summary { cursor:pointer; white-space:nowrap;
+    padding:4px 5px; list-style:none; border-radius:5px; user-select:none; }
+  .verdict-compact-details summary::-webkit-details-marker { display:none; }
+  .verdict-compact-details summary:hover { color:var(--brand-strong); background:#edf2ff; }
+  .verdict-compact-details[open] { flex-basis:100%; }
+  .verdict-compact-details p { margin:5px 0 0; font-size:11px; line-height:1.55;
+    color:#637188; max-width:640px; }
+  @media(max-width:730px){ .verdict-figure-grid { gap:8px; }
+    .verdict-figure { flex-basis:100%; padding:14px; }
+    .verdict-figure.verdict-figure-compact { max-width:100%; padding:10px 12px; }
+    .verdict-compact-line { column-gap:8px; }
+    .verdict-compact-metric { padding:0 8px; } }
   .verdict-figure h4 { margin:0 0 3px; font-size:14px; font-weight:750; }
   .verdict-figure .figure-period { margin:0 0 12px; font-size:11px; color:var(--muted); line-height:1.55; }
   .verdict-figure .figure-foot { margin:12px 0 0; font-size:11px; line-height:1.65; color:#637188; }
@@ -661,8 +691,7 @@ _INDEX_HTML = """<!DOCTYPE html>
     background:#5266c9; border-radius:4px 4px 0 0; }
   .verdict-yearcol .year { font-size:11px; margin-top:5px; white-space:nowrap; }
   .verdict-rail-marker { display:flex; justify-content:space-between; font-size:10px; color:#8090a9; margin-top:2px; }
-  @media(max-width:730px){.verdict-figure-grid{grid-template-columns:1fr;}
-    .verdict-figure{padding:14px;} }
+
 
 
   .dashboard-charts h3, .valuation-lab h3 { margin:0 0 5px; font-size:21px; }
@@ -2442,6 +2471,28 @@ function verdictFigure(title, period, body, foot) {
     '<p class="figure-period">'+escapeHtml(period)+'</p>'+
     body+(foot?'<p class="figure-foot">'+escapeHtml(foot)+'</p>':'')+'</section>';
 }
+// Short evidence belongs on ONE centered row. The complete caveat stays
+// available behind an explicit, keyboard-accessible disclosure.
+function verdictCompactFigure(title, period, items, note) {
+  if(!Array.isArray(items) || !items.length || items.length>3)return '';
+  const line=items.map(item=>{
+    const extra=item.detail?
+      '<small>'+escapeHtml(String(item.detail))+'</small>':'';
+    return '<span class="verdict-compact-metric">'+
+      '<span class="metric-name">'+escapeHtml(String(item.label||''))+'</span>'+
+      '<strong>'+escapeHtml(String(item.value))+'</strong>'+extra+'</span>';
+  }).join('');
+  return '<section class="verdict-figure verdict-figure-compact">'+
+    '<div class="verdict-compact-line">'+
+    '<div class="verdict-compact-title"><b>'+escapeHtml(title)+'</b>'+
+      (period?'<span class="verdict-compact-period">'+escapeHtml(period)+'</span>':'')+
+    '</div>'+
+    '<div class="verdict-compact-metrics">'+line+'</div>'+
+    (note?'<details class="verdict-compact-details"><summary aria-label="查看图表说明">口径</summary>'+
+      '<p>'+escapeHtml(note)+'</p></details>':'')+
+    '</div></section>';
+}
+
 function verdictBar(label, value, upper, unit, color) {
   const width=Math.min(100,Math.max(0,upper>0?Math.abs(value)/upper*100:0));
   return '<div class="verdict-bar">'+
