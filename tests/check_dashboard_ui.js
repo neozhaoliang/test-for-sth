@@ -179,6 +179,63 @@ assert.ok(sparseKpis.includes('历史分位暂缺'));
 assert.ok(!sparseKpis.includes('39.6%'));
 assert.ok(!sparseKpis.includes('1.1%'));
 
+// A graph must now have an investor-readable causal explanation attached
+// directly under that graph, not merely a title and a pile of ratios.
+// These are model-produced, fact-screened comments, NOT canned UI text.
+const interpretedReport={
+  ...headlineReport,
+  profitability_trend:{periods:[
+    {period:'2025-12-31',roe_pct:18,gross_margin_pct:27,net_margin_pct:13},
+    {period:'2026-06-30',roe_pct:21,gross_margin_pct:34,net_margin_pct:18},
+  ]},
+  valuation_history:{
+    as_of:'2026-10-20',
+    current_pe_ttm:11.7,current_pb:3.9,
+    pe_percentiles:[{years:5,percentile:5.2}],
+    pb_percentiles:[{years:5,percentile:63.6}],
+    history_monthly:[
+      {date:'2026-01-30',price:28,pe_ttm:16,pb:2.8},
+      {date:'2026-02-28',price:30,pe_ttm:14,pb:3.0},
+      {date:'2026-03-30',price:32,pe_ttm:13,pb:3.2},
+      {date:'2026-04-30',price:33,pe_ttm:12,pb:3.4},
+      {date:'2026-05-30',price:35,pe_ttm:11,pb:3.6},
+      {date:'2026-06-30',price:36,pe_ttm:10,pb:3.9},
+    ],
+  },
+  summary:{
+    ...headlineReport.summary,
+    chart_interpretations:{
+      profitability:'毛利率的上升可能受商品报价影响，产量和成本变化需要拆开看。股价是否便宜取决于利润能持续多久。',
+      valuation_history:'低市盈率可能由周期上行阶段的高利润造成，并不自动代表便宜。要看金铜回落后的利润和后续资本开支。',
+    }
+  },
+};
+const explained=ctx.renderDashboardCharts(interpretedReport);
+for(const note of [
+  '毛利率的上升可能受商品报价影响',
+  '低市盈率可能由周期上行阶段的高利润造成',
+]){
+  assert.ok(explained.includes(note),'missing chart explanation '+note);
+}
+assert.equal((explained.match(/class="chart-reading"/g)||[]).length,2);
+assert.ok(explained.indexOf('盈利质量的变化') <
+  explained.indexOf('毛利率的上升可能受商品报价影响'));
+assert.ok(explained.indexOf('毛利率的上升可能受商品报价影响') <
+  explained.indexOf('历史估值区间'));
+assert.ok(explained.indexOf('历史估值区间') <
+  explained.indexOf('低市盈率可能由周期上行阶段的高利润造成'));
+assert.ok(!explained.includes('<script>'));
+assert.ok(!ctx.chartTile('图例','说明','',
+  '没有真实数据时不要假装有解释').includes('class="chart-reading"'));
+assert.ok(ctx.chartTile('图例','说明','<svg></svg>',
+  '<img src=x onerror=alert(1)>').includes('&lt;img'));
+
+// Old cached results do not have commentary; never invent a graph reading
+// from the chart percentile alone or from generic business heuristics.
+const oldInterpreted=JSON.parse(JSON.stringify(interpretedReport));
+delete oldInterpreted.summary.chart_interpretations;
+assert.ok(!ctx.renderDashboardCharts(oldInterpreted).includes('class="chart-reading"'));
+
 assert.ok(ctx.renderChipPositionChart({
     status:'contextualized',position_52w_pct:12.5,
     holder_change_pct:20,holder_period:'2026-09-30',
