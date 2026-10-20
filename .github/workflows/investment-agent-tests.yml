@@ -80,6 +80,7 @@ jobs:
             analysis/resource_mining_thesis.py \
             analysis/thesis_readability.py \
             analysis/dimension_readability.py \
+            analysis/chart_interpretation.py \
             analysis/resource_macro_transmission.py \
             analysis/macro_rates.py \
             analysis/rd_team.py \
@@ -184,6 +185,7 @@ jobs:
             tests/test_valuation_industry_models.py \
             tests/test_investor_reference_style.py \
             tests/test_market_style_reasons.py \
+            tests/test_style_enrichment.py \
             tests/test_market_rotation.py \
             tests/test_investor_return_decomposition.py \
             tests/test_roe_discount_valuation.py \
@@ -205,6 +207,7 @@ jobs:
             tests/test_resource_mining_thesis.py \
             tests/test_thesis_readability.py \
             tests/test_dimension_readability.py \
+            tests/test_chart_interpretation.py \
             tests/test_resource_macro_transmission.py \
             tests/test_market_context_asof.py \
             tests/test_realtime_price_asof.py \
