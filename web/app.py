@@ -3703,7 +3703,7 @@ function renderResult(report) {
           escapeHtml(String(q.volume))+'</strong></span>';
       if(previous)
         html+='<span class="report-quote-note">（'+
-          escapeHtml(q.date||q.timestamp||'未知日期')+'，非盘中实时价）</span>';
+          escapeHtml(q.date||q.timestamp||'未知日期')+'，不是盘中实时价）</span>';
       html+='</div>';
     }else {
       html+='<span class="report-quote-unavailable">有效股价暂缺，不能判断当前股票赔率。</span>';
