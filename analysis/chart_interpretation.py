@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 _KEYS = frozenset(("profitability", "valuation_history", "market_breadth",
                    "dimension_scores"))
 _PRIVATE = re.compile(
-    r"https?://|(?:SH|SZ|BJ)\\d{6}|(?<!\\d)\\d{6}(?!\\d)|"
+    r"https?://|(?:SH|SZ|BJ)\d{6}|(?<!\d)\d{6}(?!\d)|"
     r"买股票的老木匠|军师祭咖啡|双木林叔|陈chensir|"
     r"原帖|博主|某投资者|雪球账号|据投资者|资料显示",
     re.I,
 )
 # The actual numbers already appear in chart labels. Suppressing new numeric
 # assertions eliminates one important source of incorrect narrative figures.
-_DIGIT = re.compile(r"\\d")
+_DIGIT = re.compile(r"\d")
 
 
 def _number(value: Any):
@@ -101,7 +101,7 @@ def validate_chart_interpretations(
     if not isinstance(candidate, dict):
         return {}
     source_texts = [
-        re.sub(r"\\s+", "", str(getattr(e, "distilled", "") or ""))
+        re.sub(r"\s+", "", str(getattr(e, "distilled", "") or ""))
         for e in private_excerpts or []
     ]
     source_names = {
@@ -120,7 +120,7 @@ def validate_chart_interpretations(
         if (_PRIVATE.search(text) or _DIGIT.search(text)
                 or any(name in text for name in source_names)):
             continue
-        compact = re.sub(r"\\s+", "", text)
+        compact = re.sub(r"\s+", "", text)
         # Never copy raw distilled prose or an identifiable phrase from it.
         if any(
             source[i:i+35] in compact
