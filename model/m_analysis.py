@@ -77,6 +77,10 @@ class StructuredSummary(BaseModel):
         default=None,
         description="十二维度完整分析原文 (工具名 -> 该维度完整分析，UI 直接展示且不重复概述)",
     )
+    chart_interpretations: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="数据图表下方的简短投资解读：真实证据与知识库机制结合，缺证据则不生成",
+    )
 
 
 class AnalysisReport(BaseModel):
