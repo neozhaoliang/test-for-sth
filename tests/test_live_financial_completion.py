@@ -73,6 +73,72 @@ async def test_existing_f10_ratio_is_not_refetched_or_overwritten(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_byd_h1_cash_conversion_recovers_when_f10_still_shows_q1(monkeypatch):
+    """A stale F10 report period must not conceal released H1 figures."""
+    calls = []
+    async def fake_parse(filing):
+        calls.append(filing)
+        return {
+            "period": "2026-06-30",
+            "monetary_unit": "元(原表:归母净利及经营现金流逐行标注)",
+            "net_profit": 12_325_408_000.0,
+            "operating_cash_flow": 37_334_744_000.0,
+        }
+    monkeypatch.setattr(completion, "_fetch_and_parse", fake_parse)
+    h1 = {
+        "period": "2026-06-30",
+        "published_at": "2026-08-29",
+        "report_type": "semiannual",
+        "url": "https://static.cninfo.com.cn/finalpage/2026-08-29/1225531835.PDF",
+    }
+    f10 = {
+        "facts": {
+            "finance_period": "2026-03-31",
+            "net_profit": 2_000_000_000,
+            "operating_cash_flow": None,
+            "cash_to_profit_ratio": None,
+            "roe_pct": 4.86,
+        },
+        "sources": [],
+    }
+    out = await completion.complete_live_cash_profit(
+        f10, [h1], as_of=date(2026, 10, 20),
+    )
+    facts = out["facts"]
+    assert len(calls) == 1
+    assert facts["finance_period"] == "2026-03-31", "F10 fields keep their actual date"
+    assert facts["roe_pct"] == 4.86
+    assert facts["cash_profit_period"] == "2026-06-30"
+    assert facts["cash_to_profit_ratio"] == pytest.approx(3.029)
+    assert facts["operating_cash_flow"] == 37_334_744_000.0
+    assert facts["net_profit"] == 12_325_408_000.0
+    assert f10["facts"]["net_profit"] == 2_000_000_000
+    assert out["source_map"]["cash_profit_official_filing"] == h1["url"]
+
+
+@pytest.mark.asyncio
+async def test_newer_official_filing_replaces_stale_f10_ratio(monkeypatch):
+    """An older valid ratio is not the latest available reporting period."""
+    async def fake_parse(filing):
+        return {
+            "period": "2026-06-30", "monetary_unit": "元",
+            "net_profit": 100, "operating_cash_flow": 303,
+        }
+    monkeypatch.setattr(completion, "_fetch_and_parse", fake_parse)
+    old_f10 = {
+        "facts": {"finance_period": "2026-03-31", "cash_to_profit_ratio": 1.2}
+    }
+    updated = await completion.complete_live_cash_profit(
+        old_f10,
+        [{"period": "2026-06-30", "published_at": "2026-08-29",
+          "url": "https://static.cninfo.com.cn/example.pdf"}],
+        as_of=date(2026, 10, 20),
+    )
+    assert updated["facts"]["cash_to_profit_ratio"] == pytest.approx(3.03)
+    assert updated["facts"]["cash_profit_period"] == "2026-06-30"
+
+
+@pytest.mark.asyncio
 async def test_financial_quarters_cannot_be_combined(monkeypatch):
     async def should_not_fetch(*args, **kwargs):
         raise AssertionError("No cross-period mixing permitted")
