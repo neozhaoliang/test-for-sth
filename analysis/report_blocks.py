@@ -85,7 +85,7 @@ def _build_knowledge_hypotheses_block(inputs: Any) -> str:
         claim = str(item.get("claim") or "").strip()
         if not mechanism and not claim:
             continue
-        key = re.sub(r"\\s+", "", mechanism or claim)[:150]
+        key = re.sub(r"\s+", "", mechanism or claim)[:150]
         if key in used:
             continue
         used.add(key)
