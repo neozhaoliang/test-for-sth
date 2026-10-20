@@ -472,8 +472,10 @@ async def crawled_users() -> List[Dict]:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index() -> str:
-    return _INDEX_HTML
+async def index() -> HTMLResponse:
+    # App code is embedded into Python's _INDEX_HTML at import time. Do not
+    # let a browser/proxy retain an outdated page across server redeploys.
+    return HTMLResponse(_INDEX_HTML, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/assets/roe_discount.js")
@@ -3665,8 +3667,16 @@ function renderResult(report) {
   // A single broker-style stock identity card: prominent company name at
   // left, small UNPARENTHESIZED ticker beside it, compact quote data at right.
   // Keep the as-of/previous-close qualifications; do not imply stale data is live.
-  const displayName=String(report.stock_name||report.stock_code||'股票名称暂缺');
   const displayCode=String(report.stock_code||'').trim();
+  let displayName=String(report.stock_name||report.stock_code||'股票名称暂缺').trim();
+  // Defensive normalization for older cached provider names such as
+  // "比亚迪 (SZ002594)" or "比亚迪（SZ002594）". Never remove
+  // unrelated parentheses (e.g. a meaningful legal company suffix).
+  const embeddedTicker=displayName.match(/\s*[（(]\s*([A-Za-z]{0,3}\d{6})\s*[)）]\s*$/);
+  if(embeddedTicker && displayCode &&
+     embeddedTicker[1].replace(/\D/g,'')===displayCode.replace(/\D/g,'')){
+    displayName=displayName.slice(0,embeddedTicker.index).trim();
+  }
   let html='<section class="report-header-inline report-company-card" role="group" '+
     'aria-label="公司与行情摘要">'+
     '<div class="report-company-identity"><h2 id="report-top">'+
