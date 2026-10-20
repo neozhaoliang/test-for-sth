@@ -3683,9 +3683,9 @@ function renderReportToc(reportHtml) {
   return html+'</nav>';
 }
 
-// The stock-broker-style quote/valuation strip belongs immediately below the
-// Investment Conclusion heading. All six indicators come from source-backed
-// report fields; historical research must use its as-of snapshot, not today's.
+// The six source-backed quote/valuation facts sit directly under the
+// company name in the top identity card, before the report contents.
+// Historical snapshots use the values supplied for the as-of date.
 function verdictMetric(label, value, date, tone, detail) {
   const safeTone=['price','valuation','profit','cash','low','mid','high','missing'].includes(tone)?
     tone:'mid';
@@ -3738,62 +3738,23 @@ function renderVerdictMarketStrip(report) {
 function renderResult(report) {
   const el = document.getElementById('result');
   const isHistorical = report.research_mode === 'historical';
-  // A single broker-style stock identity card: prominent company name at
-  // left, small UNPARENTHESIZED ticker beside it, compact quote data at right.
-  // Keep the as-of/previous-close qualifications; do not imply stale data is live.
+  // The top card holds the company name, small ticker, and the six key
+  // sourced facts. No separate Live/date banner or redundant quote row.
   const displayCode=String(report.stock_code||'').trim();
   let displayName=String(report.stock_name||report.stock_code||'股票名称暂缺').trim();
-  // Defensive normalization for older cached provider names such as
-  // "比亚迪 (SZ002594)" or "比亚迪（SZ002594）". Never remove
-  // unrelated parentheses (e.g. a meaningful legal company suffix).
   const embeddedTicker=displayName.match(/\s*[（(]\s*([A-Za-z]{0,3}\d{6})\s*[)）]\s*$/);
   if(embeddedTicker && displayCode &&
      embeddedTicker[1].replace(/\D/g,'')===displayCode.replace(/\D/g,'')){
     displayName=displayName.slice(0,embeddedTicker.index).trim()||displayCode;
   }
   let html='<section class="report-header-inline report-company-card" role="group" '+
-    'aria-label="公司与行情摘要">'+
+    'aria-label="公司与关键行情数据">'+
     '<div class="report-company-identity"><h2 id="report-top">'+
       escapeHtml(displayName)+'</h2>'+
       (displayCode && displayCode!==displayName?
         '<span class="report-stock-code">'+escapeHtml(displayCode)+'</span>':'')+
     '</div>'+
-    '<div class="report-header-detail">'+
-      '<div class="report-mode-inline '+(isHistorical?'historical-banner':'live-banner')+'">'+
-        '<span class="report-research-tag">'+(isHistorical?'历史研究':'Live 研究')+'</span>'+
-        '<span class="report-research-date">'+
-          (isHistorical?'截止日 ':'基准日 ')+
-          escapeHtml(report.as_of||(isHistorical?'未知':'今天'))+
-        '</span></div>';
-
-  if (report.realtime_quote) {
-    const q=report.realtime_quote;
-    const price=numericOrNull(q.latest_price);
-    if(price!==null && price>0) {
-      const previous=q.quote_mode==='verified_previous_close';
-      const priceLabel=previous?'最近可核验收盘价':isHistorical?'截止日收盘价':'最新价';
-      const change=numericOrNull(q.change_pct);
-      const changeStyle=change===null?'neutral':change>0?'up':change<0?'down':'neutral';
-      html+='<div class="report-quote-inline quote" role="group" aria-label="股价和交易数据">'+
-        '<span class="report-quote-price"><span class="report-quote-label">'+
-          priceLabel+'</span> <strong>'+escapeHtml(String(price))+'元</strong></span>';
-      if(change!==null)
-        html+='<span class="report-quote-item report-quote-change report-change-'+changeStyle+
-          '"><span class="report-quote-label">涨跌幅</span> <strong>'+
-          escapeHtml(String(change))+'%</strong></span>';
-      if(numericOrNull(q.volume)!==null)
-        html+='<span class="report-quote-item report-quote-volume">'+
-          '<span class="report-quote-label">成交量</span> <strong>'+
-          escapeHtml(String(q.volume))+'</strong></span>';
-      if(previous)
-        html+='<span class="report-quote-note">（'+
-          escapeHtml(q.date||q.timestamp||'未知日期')+'，不是盘中实时价）</span>';
-      html+='</div>';
-    }else {
-      html+='<span class="report-quote-unavailable">有效股价暂缺，不能判断当前股票赔率。</span>';
-    }
-  }
-  html+='</div></section>';
+    renderVerdictMarketStrip(report)+'</section>';
   if (isHistorical) {
     html += '<p class="report-historical-note">结论只允许使用该日及之前已公开的信息；当前知识不会用于补全历史缺口。</p>';
   }
@@ -3801,7 +3762,6 @@ function renderResult(report) {
   const summary = report.summary || {};
   const stanceClass = 'stance-' + (summary.stance || 'neutral');
   html += '<section class="result-summary" id="report-verdict"><h3>投资结论</h3>';
-  html += renderVerdictMarketStrip(report);
   html += '<div class="verdict-line"><span class="stance-badge ' + stanceClass + '">' +
     stanceLabel(summary.stance) + '</span>';
   if (summary.company_quality_stance) {
