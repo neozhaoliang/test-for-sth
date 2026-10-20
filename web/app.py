@@ -3731,7 +3731,7 @@ function renderVerdictMarketStrip(report) {
       row?'历史'+row.years+'年分位':'历史分位暂缺');
   };
   items.push(makePercentile('PE',peRow),makePercentile('PB',pbRow));
-  return '<div class="verdict-market-strip" role="group" aria-label="投资结论行情与关键指标">'+
+  return '<div class="verdict-market-strip" role="group" aria-label="公司行情与关键指标">'+
     items.join('')+'</div>';
 }
 
