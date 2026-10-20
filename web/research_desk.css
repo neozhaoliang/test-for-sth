@@ -387,6 +387,24 @@ body, input, select, textarea, button { font-family:inherit; }
 }
 .chart-tile h4 { font-size:14px;line-height:1.5; }
 .chart-tile svg { max-width:100%;height:auto; }
+/* The explanation belongs INSIDE the same card as its chart.
+   It explains causes and investment impact, never just repeats axis values. */
+#result .chart-tile .chart-reading,
+#result .market-structure-lines .chart-reading {
+  margin:13px 0 0;
+  padding:12px 13px 2px;
+  border-top:1px solid #dce5f2;
+  color:#364967;
+  font-size:13px;
+  line-height:1.85;
+  overflow-wrap:anywhere;
+}
+#result .market-structure-lines .chart-reading {
+  width:100%;
+  flex-basis:100%;
+  margin-bottom:7px;
+}
+
 #result .evidence-block {
   margin:12px 0;
   padding:15px 18px;
