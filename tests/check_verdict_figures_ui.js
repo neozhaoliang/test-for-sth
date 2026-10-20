@@ -277,6 +277,27 @@ assert.ok(headerPartial.includes('PB</span>'));
 assert.ok(headerPartial.includes('99.4%'));
 assert.ok(!headerPartial.includes('99.9%'));
 
+// A newer H1 issuer report can coexist with stale Q1 F10 fields. The
+// reader sees the dated H1 pair, never a mixture of different periods.
+const staleF10=JSON.parse(JSON.stringify(report));
+staleF10.fundamentals.facts.finance_period='2026-03-31';
+staleF10.fundamentals.facts.net_profit=2_000_000_000;
+staleF10.fundamentals.facts.operating_cash_flow=null;
+staleF10.fundamentals.facts.cash_profit_net_profit=12_325_408_000;
+staleF10.fundamentals.facts.cash_profit_operating_cash_flow=37_334_744_000;
+staleF10.fundamentals.facts.cash_profit_period='2026-06-30';
+staleF10.fundamentals.facts.cash_profit_source='巨潮资讯原始定期报告';
+staleF10.fundamentals.facts.cash_to_profit_ratio=3.029;
+const bydcash=ctx.collectVerdictFigures(staleF10).find(x=>x.id==='cash').html;
+assert.ok(bydcash.includes('123.25亿元'));
+assert.ok(bydcash.includes('373.35亿元'));
+assert.ok(bydcash.includes('3.03倍'));
+assert.ok(bydcash.includes('2026-06-30'));
+assert.ok(!bydcash.includes('20.00亿元'),'never chart stale Q1 profit as H1');
+const bydHeader=ctx.renderVerdictMarketStrip(staleF10);
+assert.ok(bydHeader.includes('3.03 倍'));
+assert.ok(bydHeader.includes('2026-06-30'));
+
 const cashNegative=JSON.parse(JSON.stringify(report));
 cashNegative.fundamentals.facts.operating_cash_flow=-12000000000;
 cashNegative.fundamentals.facts.cash_to_profit_ratio=-0.42;
