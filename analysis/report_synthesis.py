@@ -61,6 +61,7 @@ from analysis.thesis_readability import (
     suppress_invalid_share_sale_totals,
 )
 from analysis.dimension_readability import polish_dimension_prose
+from analysis.chart_interpretation import build_chart_interpretations
 
 
 _PROCESS_TERM_RE = re.compile(r"六查|第[一二三四五六七八九十\d]+步|检查项\d*")
@@ -501,6 +502,15 @@ async def _generate_summary(
     if lynch_category not in _VALID_LYNCH_CATEGORIES:
         lynch_category = "unclear"
     dimension_scores = await _score_dimensions(analyses, inputs.stock_code)
+    # The chart interpreter sees the actual vetted knowledge methods, the
+    # finished detailed research and the exact data behind each available
+    # chart. It may propose mechanisms, not invent additional factual figures.
+    chart_interpretations = (
+        await build_chart_interpretations(
+            inputs, readable_analyses, methods, dimension_scores,
+        )
+        if getattr(inputs, "research_mode", "") != "historical" else {}
+    )
     summary = StructuredSummary(
         lynch_category=lynch_category,
         stance=parsed.get("stance", ""),
@@ -517,6 +527,7 @@ async def _generate_summary(
         risk_notes=_scrub_process_terms(parsed.get("risk_notes", "") or "", inputs.stock_code),
         dimension_scores=dimension_scores,
         dimension_analyses=readable_analyses or None,
+        chart_interpretations=chart_interpretations or None,
     )
     # Data validity is enforced in report validation. A deterministic screening
     # rule must NEVER overwrite the LLM's portfolio-manager conclusion.
