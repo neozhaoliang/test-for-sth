@@ -657,6 +657,7 @@ _INDEX_HTML = """<!DOCTYPE html>
     justify-content:center; gap:5px 0; font-variant-numeric:tabular-nums; }
   .verdict-compact-metric { display:inline-flex; align-items:baseline; gap:6px;
     white-space:nowrap; padding:0 12px; border-left:1px solid #dce3ef; }
+  .verdict-compact-metric:first-child { border-left:0; padding-left:0; }
   .verdict-compact-metric .metric-name { font-size:12px; color:#53627a; }
   .verdict-compact-metric strong { font-size:15px; color:var(--ink); font-weight:750; }
   .verdict-compact-metric small { color:#7a879a; font-size:11px; }
@@ -2482,12 +2483,18 @@ function verdictCompactFigure(title, period, items, note) {
       '<span class="metric-name">'+escapeHtml(String(item.label||''))+'</span>'+
       '<strong>'+escapeHtml(String(item.value))+'</strong>'+extra+'</span>';
   }).join('');
-  return '<section class="verdict-figure verdict-figure-compact">'+
-    '<div class="verdict-compact-line">'+
+  // Allow a genuinely title-free metric strip. Keep the report period
+  // unobtrusively at the end so figures from different dates aren't mixed.
+  const heading=title ?
     '<div class="verdict-compact-title"><b>'+escapeHtml(title)+'</b>'+
       (period?'<span class="verdict-compact-period">'+escapeHtml(period)+'</span>':'')+
-    '</div>'+
+    '</div>':'';
+  const trailingPeriod=(!title && period)?
+    '<span class="verdict-compact-period">'+escapeHtml(period)+'</span>':'';
+  return '<section class="verdict-figure verdict-figure-compact">'+
+    '<div class="verdict-compact-line">'+heading+
     '<div class="verdict-compact-metrics">'+line+'</div>'+
+    trailingPeriod+
     (note?'<details class="verdict-compact-details"><summary aria-label="查看图表说明">口径</summary>'+
       '<p>'+escapeHtml(note)+'</p></details>':'')+
     '</div></section>';
@@ -2525,14 +2532,12 @@ function verdictPercentileRow(rows) {
 function collectVerdictFigures(report) {
   const facts=((report.fundamentals||{}).facts)||{};
   const hist=report.valuation_history||{};
-  const val=report.valuation||{};
   const figures=[];
 
   const profit=verdictNumber(facts.net_profit);
   const cash=verdictNumber(facts.operating_cash_flow);
   if(profit!==null && cash!==null && profit>0) {
     const net=profit/1e8, operating=cash/1e8;
-    const max=Math.max(net,Math.abs(operating),.001);
     const ratio=verdictNumber(facts.cash_to_profit_ratio);
     const cashItems=[
       {label:'净利润',value:verdictFixed(net)+'亿元'},
@@ -2540,34 +2545,27 @@ function collectVerdictFigures(report) {
     ];
     if(ratio!==null)cashItems.push({label:'现金／利润',value:verdictFixed(ratio,2)+'倍'});
     figures.push({id:'cash',match:/现金流|净利润|利润|回款|经营现金/,
-      html:verdictCompactFigure('利润与经营现金流',
+      html:verdictCompactFigure('',
         String(facts.cash_profit_period||facts.finance_period||'报告期未注明'),
-        cashItems,
-        (ratio===null?'':('经营现金流／净利润：'+verdictFixed(ratio,2)+'倍。'))+
-        '同一报告期金额对比，经营现金流不等于自由现金流。'+
-        (operating<0?'经营现金流为负数，数值保留负号。':''))});
+        cashItems, '')});
   }
 
   const pe=verdictPercentileRow(hist.pe_percentiles);
   const pb=verdictPercentileRow(hist.pb_percentiles);
-  const peNow=verdictNumber(hist.current_pe_ttm);
-  const pbNow=verdictNumber(hist.current_pb);
   if(pe || pb) {
     const valuations=[];
     if(pe)valuations.push({
-      label:'PE（近'+pe.years+'年）',
+      label:'PE',
       value:verdictFixed(pe.percentile,1)+'%',
-      detail:peNow===null?'':('现值 '+verdictFixed(peNow,2)+' 倍'),
+      detail:'（历史'+pe.years+'年分位）',
     });
     if(pb)valuations.push({
-      label:'PB（近'+pb.years+'年）',
+      label:'PB',
       value:verdictFixed(pb.percentile,1)+'%',
-      detail:pbNow===null?'':('现值 '+verdictFixed(pbNow,2)+' 倍'),
+      detail:'（历史'+pb.years+'年分位）',
     });
     figures.push({id:'valuation',match:/估值|市盈率|市净率|PE|PB|分位|价格|便宜|贵/,
-      html:verdictCompactFigure('估值处于历史什么位置',
-        String(hist.as_of||val.valuation_as_of||'估值日期未知'),valuations,
-        '百分比为历史估值分位数：越高表示当前比过去更多交易日的估值高。PE和PB要分别看。')});
+      html:verdictCompactFigure('', '', valuations, '')});
   }
 
   const payout=Array.isArray(report.dividend_chart)?
@@ -2621,10 +2619,9 @@ function collectVerdictFigures(report) {
     if(overseas!==null && overseas>=0 && overseas<=100)
       concentrations.push({label:'海外收入占比',value:verdictFixed(overseas)+'%'});
     figures.push({id:'customers',match:/客户|煤电|航运|海外|收入结构|出口|集中度/,
-      html:verdictCompactFigure('客户和收入分布',
+      html:verdictCompactFigure('',
         String((report.fundamentals||{}).concentration_period||
-          facts.finance_period||'披露期间未注明'),concentrations,
-        '两条比例的分母与分类不同，不可相加。海外收入不等于某一国家的收入。')});
+          facts.finance_period||'披露期间未注明'),concentrations, '')});
   }
 
   const ref=((report.valuation_model||{}).investor_reference)||{};
@@ -2666,7 +2663,6 @@ function collectVerdictFigures(report) {
   const price=verdictNumber((report.realtime_quote||{}).latest_price);
   const pbAnchor=verdictNumber((ref.historical_pb_anchor||{}).median_pb_reference_price);
   if(price!==null&&price>0&&pbAnchor!==null&&pbAnchor>0){
-    const upper=Math.max(price,pbAnchor);
     figures.push({id:'price_refs',match:/参考价|估值|买入|合理|安全边际|价格/,
       html:verdictCompactFigure('现价与历史PB参考价',
         String(ref.as_of||report.as_of||'参考日期未知'),

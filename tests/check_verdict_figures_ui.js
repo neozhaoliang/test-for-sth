@@ -103,8 +103,14 @@ for(const item of compactFigures){
     item.id+' should use a short comparison strip');
   assert.ok(item.html.includes('verdict-compact-line'),
     item.id+' must expose its data on one row');
-  assert.ok(item.html.includes('verdict-compact-details'),
-    item.id+' must preserve its explanatory note');
+  if(['valuation','cash','customers'].includes(item.id)){
+    assert.ok(!item.html.includes('verdict-compact-details'),
+      item.id+' must not show a 口径 control');
+    assert.ok(!item.html.includes('>口径<'));
+  }else{
+    assert.ok(item.html.includes('verdict-compact-details'),
+      item.id+' should still allow details when needed');
+  }
   assert.ok(!item.html.includes('verdict-track'),
     item.id+' must not show tall bars for one to three values');
   const valueCount=(item.html.match(/class="verdict-compact-metric"/g)||[]).length;
@@ -117,12 +123,15 @@ assert.ok(debtCompact.includes('2026-06-30'));
 assert.ok(debtCompact.includes('23.31%'));
 assert.ok(debtCompact.includes('40.27%'));
 const valuationCompact=compactFigures.find(item=>item.id==='valuation').html;
-assert.ok(valuationCompact.includes('PE（近5年）'));
-assert.ok(valuationCompact.includes('PB（近5年）'));
+assert.ok(valuationCompact.includes('class="metric-name">PE</span>'));
+assert.ok(valuationCompact.includes('class="metric-name">PB</span>'));
 assert.ok(valuationCompact.includes('99.9%'));
 assert.ok(valuationCompact.includes('99.4%'));
-assert.ok(valuationCompact.includes('现值 20.69 倍'));
-assert.ok(valuationCompact.includes('现值 2.48 倍'));
+assert.ok(valuationCompact.includes('（历史5年分位）'));
+assert.ok(!valuationCompact.includes('估值处于历史什么位置'));
+assert.ok(!valuationCompact.includes('20.69 倍'));
+assert.ok(!valuationCompact.includes('2.48 倍'));
+assert.ok(!valuationCompact.includes('>口径<'));
 const dividendCompact=compactFigures.find(item=>item.id==='dividends').html;
 assert.equal((dividendCompact.match(/class="verdict-compact-metric"/g)||[]).length,3);
 assert.ok(dividendCompact.includes('25.50元'));
@@ -142,10 +151,11 @@ assert.equal(chartCount(html),6);
 assert.ok(html.includes('546.64亿元'));
 assert.ok(html.includes('287.70亿元'));
 assert.ok(html.includes('2026-06-30'));
-assert.ok(html.includes('经营现金流／净利润：1.90倍'));
+assert.ok(html.includes('class="metric-name">现金／利润</span>'));
+assert.ok(html.includes('1.90倍'));
 assert.ok(html.includes('99.9%'));
 assert.ok(html.includes('99.4%'));
-assert.ok(html.includes('20.69 倍'));
+assert.ok(!html.includes('现值 20.69 倍'));
 assert.ok(html.includes('按公告年度归集'));
 assert.ok(html.includes('25.50'));
 assert.ok(html.includes('20.10'));
@@ -156,26 +166,26 @@ assert.ok(!html.includes('海外收入占比'),'unknown exposure must not be dra
 assert.ok(html.includes('36.99元'));
 assert.ok(html.includes('51.50元'));
 assert.ok(html.includes('不是内在价值或推荐买入价'));
-for(const [i,expectedTitle] of [
-  [0,'利润与经营现金流'],
-  [1,'估值处于历史什么位置'],
+for(const [i,expectedFigureText] of [
+  [0,'287.70亿元'],
+  [1,'99.9%'],
   [2,'每10股现金分红（元）'],
   [3,'资产负债率前后比较'],
   [4,'现价与历史PB参考价'],
 ]){
   const paragraph=html.indexOf(paragraphs[i]);
-  const chart=html.indexOf(expectedTitle);
+  const chart=html.indexOf(expectedFigureText);
   const next=html.indexOf(paragraphs[i+1]);
   assert.ok(paragraph>=0&&paragraph<chart&&chart<next,
-    expectedTitle+' must follow its paragraph and precede the next paragraph');
+    expectedFigureText+' must follow its paragraph and precede the next paragraph');
 }
 assert.equal((html.match(/上段文字对应的财务与估值图表/g)||[]).length,5);
 
 // Render the actual report page: no separate gallery before all the text.
 ctx.renderResult(report);
 const page=nodes.result.innerHTML;
-assert.ok(page.indexOf(paragraphs[0])<page.indexOf('利润与经营现金流'));
-assert.ok(page.indexOf('利润与经营现金流')<page.indexOf(paragraphs[1]));
+assert.ok(page.indexOf(paragraphs[0])<page.indexOf('287.70亿元'));
+assert.ok(page.indexOf('287.70亿元')<page.indexOf(paragraphs[1]));
 assert.ok(page.indexOf(paragraphs[4])<page.indexOf('现价与历史PB参考价'));
 assert.ok(page.indexOf('id="report-charts"')>page.indexOf(paragraphs[5]));
 assert.equal(chartCount(page.split('id="report-charts"')[0]),6);
@@ -252,19 +262,20 @@ partial.dividend_chart=[];
 partial.profitability_trend.periods=[];
 delete partial.valuation_model.investor_reference;
 const smaller=inline(partial);
-assert.ok(!smaller.includes('利润与经营现金流'));
+assert.ok(!smaller.includes('287.70亿元'));
 assert.ok(!smaller.includes('每10股现金分红'));
 assert.ok(!smaller.includes('资产负债率前后比较'));
 assert.ok(!smaller.includes('现价与历史PB参考价'));
-assert.ok(smaller.includes('PB（近5年）'));
-assert.ok(!smaller.includes('PE（近5年）'));
+assert.ok(smaller.includes('class="metric-name">PB</span>'));
+assert.ok(!smaller.includes('class="metric-name">PE</span>'));
 
 const cashNegative=JSON.parse(JSON.stringify(report));
 cashNegative.fundamentals.facts.operating_cash_flow=-12000000000;
 cashNegative.fundamentals.facts.cash_to_profit_ratio=-0.42;
 const negativeHtml=inline(cashNegative);
 assert.ok(negativeHtml.includes('-120.00亿元'));
-assert.ok(negativeHtml.includes('经营现金流为负数，数值保留负号'));
+assert.ok(!ctx.collectVerdictFigures(cashNegative)
+  .find(item=>item.id==='cash').html.includes('口径'));
 assert.ok(negativeHtml.includes('verdict-figure-compact'));
 assert.ok(!negativeHtml.includes('verdict-track'));
 
@@ -274,5 +285,27 @@ hostile.fundamentals.concentration_period='<svg onload=alert(1)>';
 const safe=inline(hostile);
 assert.ok(!safe.includes('<svg onload=alert(1)>'));
 assert.ok(safe.includes('&lt;svg'));
+
+
+const stripped=ctx.collectVerdictFigures(report);
+for(const id of ['valuation','cash','customers']){
+  const card=stripped.find(item=>item.id===id).html;
+  assert.ok(!card.includes('<b>估值处于历史什么位置</b>'));
+  assert.ok(!card.includes('<b>利润与经营现金流</b>'));
+  assert.ok(!card.includes('<b>客户和收入分布</b>'));
+  assert.ok(!card.includes('verdict-compact-details'));
+  assert.ok(!card.includes('>口径<'));
+}
+const bareVal=stripped.find(item=>item.id==='valuation').html;
+assert.ok(bareVal.includes('PE</span><strong>99.9%</strong>'));
+assert.ok(bareVal.includes('PB</span><strong>99.4%</strong>'));
+assert.ok(bareVal.includes('（历史5年分位）'));
+const bareCash=stripped.find(item=>item.id==='cash').html;
+assert.ok(bareCash.includes('287.70亿元'));
+assert.ok(bareCash.includes('546.64亿元'));
+assert.ok(bareCash.includes('2026-06-30'),'cash values must retain their period');
+const bareCustomers=stripped.find(item=>item.id==='customers').html;
+assert.ok(bareCustomers.includes('14.60%'));
+assert.ok(bareCustomers.includes('2025-12-31'),'customer figures must retain the disclosure date');
 
 console.log('Inline investment chart checks passed: paragraph-first placement, one-time matching, sources and missing data.');
