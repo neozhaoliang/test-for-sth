@@ -61,8 +61,9 @@ def has_malformed_prose(text: str) -> bool:
         return True
     if len(trimmed) >= 75 and _LEADING_BREAK.search(trimmed):
         return True
-    if len(trimmed) >= 100 and trimmed[-1] not in _END_MARKS:
-        # A very short clause after a completed sentence, with no ending
+    if (len(trimmed) >= 100 or
+            sum(trimmed.count(mark) for mark in "。！？") >= 2) and trimmed[-1] not in _END_MARKS:
+        # A very short clause after completed sentences, with no ending
         # punctuation, resembles the clipped "属于温和" in the user report.
         fragment = re.split(r"[。！？\n]", trimmed)[-1].strip()
         if 0 < len(fragment) <= 16 and re.search(r"[\u4e00-\u9fff]", fragment):
