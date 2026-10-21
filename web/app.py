@@ -46,6 +46,7 @@ from analysis.realtime_price import resolve_stock_code
 from analysis.stock_suggest import search_stocks, warm_stock_catalog
 from analysis.report import generate_report
 from analysis.public_report import public_stock_report
+from web.intranet_access import IntranetAccessMiddleware, load_access_settings
 from analysis.json_safety import finite_json_numbers, nonfinite_number_paths
 from analysis.research_context import (
     ResearchRequest,
@@ -62,6 +63,9 @@ def normalize_user_id(raw: str) -> str:
 from tools.utils import utils
 
 app = FastAPI(title="股票投资助手")
+# OFF by default. With INTRANET_ACCESS=1 this protects every UI, asset and
+# /api/* request (including crawler, backtest and paid research endpoints).
+app.add_middleware(IntranetAccessMiddleware)
 
 _tasks: Dict[str, Dict] = {}
 
@@ -70,6 +74,12 @@ _CRAWL_LOG_TAIL_LINES = 200
 
 _crawl_tasks: Dict[str, Dict] = {}
 _crawl_lock = asyncio.Lock()
+
+
+@app.on_event("startup")
+async def _validate_intranet_guard() -> None:
+    # Reject invalid settings before the server accepts LAN connections.
+    load_access_settings()
 
 
 @app.on_event("startup")
@@ -151,6 +161,18 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
                 "reasons": readiness.reasons,
             },
         ) from e
+
+    # Shared LAN access should not let one busy department launch unlimited
+    # paid LLM analyses concurrently. In local/private mode this is unchanged.
+    access = load_access_settings()
+    if access.enabled:
+        active = sum(1 for item in _tasks.values()
+                     if item.get("status") in ("pending", "running"))
+        if active >= access.max_concurrent:
+            raise HTTPException(
+                status_code=429,
+                detail="分析任务已达到并发上限，请等待其他任务完成后重试。",
+            )
 
     task_id = str(uuid.uuid4())
     _tasks[task_id] = {
@@ -469,6 +491,12 @@ async def crawled_users() -> List[Dict]:
         except OSError:
             continue
     return sorted(users.values(), key=lambda u: -u["post_count"])
+
+
+@app.get("/healthz")
+async def healthz() -> Dict[str, str]:
+    """Tiny service health check. LAN IP allowlist still applies."""
+    return {"status": "ok"}
 
 
 @app.get("/", response_class=HTMLResponse)

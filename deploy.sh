@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Linux (Ubuntu/Debian + systemd): deploy the investment research WebUI.
-# Usage: bash deploy.sh [deploy|update|start|restart|stop|status|logs]
+# Usage: bash deploy.sh [deploy|update|start|restart|stop|status|logs|lan-enable|lan-disable]
 # API keys stay in the server-local .env (mode 0600, gitignored).
 set -Eeuo pipefail
 umask 077
@@ -14,7 +14,7 @@ REPO_URL="$REPO_URL_SSH"
 BRANCH="main"
 SERVICE_NAME="${SERVICE_NAME:-investment-agent}"
 APP_PORT="${APP_PORT:-8000}"
-BIND_HOST="127.0.0.1"  # Deliberately private: this app has no login/rate-limit layer.
+BIND_HOST="127.0.0.1"  # Private by default; LAN exposure is opt-in and authenticated.
 ACTION="${1:-deploy}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -33,6 +33,8 @@ usage() {
   bash deploy.sh stop      停止服务
   bash deploy.sh status    查看服务状态
   bash deploy.sh logs      查看最近 100 行服务日志
+  bash deploy.sh lan-enable   启用内网访问，不重新下载项目
+  bash deploy.sh lan-disable  关闭内网访问，恢复仅本机监听
 
 可选环境变量：
   APP_DIR=/opt/investment-agent   安装路径（默认在运行用户家目录）
@@ -44,15 +46,21 @@ usage() {
   GIT_TRANSPORT=ssh             默认：SSH via ssh.github.com:443
   GIT_TRANSPORT=https           可选：原 HTTPS 模式（当前代理不稳定）
   APP_ARCHIVE=/app/test-for-sth-main.zip   本地 ZIP 部署，不访问 GitHub
+  LAN_BIND_IP=192.168.10.20   服务器自身的企业内网 IPv4（必须指定）
+  LAN_ALLOWED_CIDRS=192.168.10.0/24   允许连接的客户端网段
+  LAN_USERNAME=research       内网登录用户名（默认）
+  LAN_MAX_CONCURRENT=2        同时运行的付费分析任务上限（1～10）
 
-安全说明：服务仅绑定 127.0.0.1，不会将 API Key 暴露给网页。
-远程浏览器访问请使用 SSH 端口转发或带身份认证的 HTTPS 反向代理。
+安全说明：默认仅绑定 127.0.0.1。内网模式只绑定指定私网网卡，
+所有页面/API 均有密码及客户端网段限制，不监听公网网卡。
+HTTP Basic 经普通 HTTP 传输不加密，请通过可信企业 VPN 或 HTTPS 使用。
+VPS 若未加入企业内网/VPN，企业同事无法直接访问其内网 IP。
 HELP
 }
 
 case "$ACTION" in
   -h|--help|help) usage; exit 0 ;;
-  deploy|update|start|restart|stop|status|logs) ;;
+  deploy|update|start|restart|stop|status|logs|lan-enable|lan-disable) ;;
   *) usage; die "不认识的命令：$ACTION" ;;
 esac
 
@@ -117,6 +125,223 @@ UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 ENV_FILE="$APP_DIR/.env"
 [[ ! -L "$ENV_FILE" ]] || die "为保护服务器密钥，.env 不能是符号链接。"
 
+
+# Safely preserve all API credentials while updating only INTRANET_* keys.
+env_get() {
+  local name="$1" line
+  [[ -f "$ENV_FILE" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "$name="* ]]; then
+      printf '%s' "${line#*=}"
+      return 0
+    fi
+  done < "$ENV_FILE"
+}
+
+env_set() {
+  local name="$1" value="$2" line seen=0 tmp
+  [[ "$name" =~ ^INTRANET_[A-Z_]+$ ]] || die "非法内网配置键。"
+  [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] ||
+    die "内网配置不得包含换行符。"
+  tmp="$(mktemp "$APP_DIR/.env.XXXXXXXX")"
+  {
+    if [[ -f "$ENV_FILE" ]]; then
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" == "$name="* ]]; then
+          if (( ! seen )); then
+            printf '%s=%s\n' "$name" "$value"
+            seen=1
+          fi
+        else
+          printf '%s\n' "$line"
+        fi
+      done < "$ENV_FILE"
+    fi
+    if (( ! seen )); then printf '%s=%s\n' "$name" "$value"; fi
+  } > "$tmp"
+  as_root chown "$RUN_USER:$RUN_GROUP" "$tmp"
+  as_root chmod 600 "$tmp"
+  mv -f -- "$tmp" "$ENV_FILE"
+}
+
+validate_lan_ip() {
+  local host="$1"
+  [[ -x "$APP_DIR/.venv/bin/python" ]] || die "请先部署服务；没有 Python 虚拟环境。"
+  if ! "$APP_DIR/.venv/bin/python" - "$host" <<'PY'
+import ipaddress, sys
+try:
+    addr = ipaddress.IPv4Address(sys.argv[1])
+except ValueError:
+    sys.exit(1)
+allowed = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")
+sys.exit(0 if any(addr in ipaddress.ip_network(n) for n in allowed) else 1)
+PY
+  then
+    die "LAN_BIND_IP 必须是服务器真实配置的内网 IPv4；不能用 0.0.0.0 或公网 IP。"
+  fi
+  if command -v ip >/dev/null 2>&1; then
+    if ! ip -o -4 addr show | awk '{print $4}' | cut -d/ -f1 | grep -Fxq "$host"; then
+      die "本机没有 IP $host。请先运行 ip -4 addr 查看网卡的内网 IP。"
+    fi
+  fi
+}
+
+validate_lan_ranges() {
+  if ! "$APP_DIR/.venv/bin/python" - "$1" "$2" <<'PY'
+import ipaddress, sys
+try:
+    networks = [ipaddress.ip_network(part.strip(), strict=True)
+                for part in sys.argv[1].split(",") if part.strip()]
+    n = int(sys.argv[2])
+    assert networks and all(net.prefixlen > 0 for net in networks)
+    assert 1 <= n <= 10
+except (AssertionError, ValueError):
+    sys.exit(1)
+PY
+  then
+    die "LAN_ALLOWED_CIDRS 或 LAN_MAX_CONCURRENT 无效。示例：192.168.10.0/24"
+  fi
+}
+
+# The same unit is used for first deployment and LAN toggles. Uvicorn proxy
+# headers are disabled to prevent forged X-Forwarded-For bypass of source IP.
+write_systemd_unit() {
+  local host="$1" tmp
+  tmp="$(mktemp)"
+  cat > "$tmp" <<EOF
+[Unit]
+Description=Private Investment Research Agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=$RUN_USER
+Group=$RUN_GROUP
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$ENV_FILE
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
+Environment=TZ=Asia/Shanghai
+UMask=0077
+ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 1920x1080x24" $APP_DIR/.venv/bin/python -m uvicorn web.app:app --host $host --port $APP_PORT --workers 1 --no-proxy-headers
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  as_root install -m 0644 "$tmp" "$UNIT_FILE"
+  rm -f -- "$tmp"
+  as_root systemctl daemon-reload
+}
+
+
+
+# Confirm the new systemd worker has bound its socket before printing success.
+# /healthz returns only a status and has no login prompt, but source CIDRs
+# still apply. This is safe even when requests are routed through an HTTP proxy.
+verify_service_health() {
+  local host="$1" success=0
+  for _ in {1..15}; do
+    if as_root systemctl is-active --quiet "$SERVICE_NAME" &&
+       curl --noproxy '*' --silent --fail --max-time 3 \
+         "http://$host:$APP_PORT/healthz" >/dev/null 2>&1; then
+      success=1
+      break
+    fi
+    sleep 1
+  done
+  if (( ! success )); then
+    as_root journalctl -u "$SERVICE_NAME" -n 35 --no-pager >&2 || true
+    die "服务没有正常启动。请检查日志：bash deploy.sh logs"
+  fi
+}
+
+configure_lan_mode() {
+  [[ -f "$UNIT_FILE" && -f "$ENV_FILE" ]] ||
+    die "请先部署并启动服务，然后切换企业内网访问。"
+  [[ -f "$APP_DIR/web/app.py" ]] || die "Web 服务入口不存在。"
+  if [[ "$ACTION" == lan-disable ]]; then
+    env_set INTRANET_ACCESS 0
+    env_set INTRANET_BIND_IP 127.0.0.1
+    write_systemd_unit 127.0.0.1
+    as_root systemctl restart "$SERVICE_NAME"
+    verify_service_health 127.0.0.1
+    say "内网访问已关闭；恢复仅本机监听：http://127.0.0.1:$APP_PORT"
+    return
+  fi
+  [[ -f "$APP_DIR/web/intranet_access.py" ]] ||
+    die "服务器尚未安装新版内网鉴权代码。请先通过 ZIP 或 Git 更新项目，再运行 lan-enable。"
+  grep -Fq 'IntranetAccessMiddleware' "$APP_DIR/web/app.py" ||
+    die "应用入口仍然是旧版，拒绝向内网开放未经认证的服务。"
+
+  local host ranges max username password new_password
+  host="${LAN_BIND_IP:-$(env_get INTRANET_BIND_IP)}"
+  [[ -n "$host" && "$host" != 127.0.0.1 ]] ||
+    die "请指定 LAN_BIND_IP=服务器私网IP，例如 LAN_BIND_IP=192.168.10.20 bash deploy.sh lan-enable"
+  validate_lan_ip "$host"
+  ranges="${LAN_ALLOWED_CIDRS:-$(env_get INTRANET_ALLOWED_CIDRS)}"
+  if [[ -z "$ranges" ]]; then
+    ranges="$("$APP_DIR/.venv/bin/python" - "$host" <<'PY'
+import ipaddress, sys
+print(ipaddress.ip_network(sys.argv[1] + "/24", strict=False))
+PY
+)"
+    warn "未给出公司内网网段，暂以 $ranges 作为允许网段。"
+  fi
+  max="${LAN_MAX_CONCURRENT:-$(env_get INTRANET_MAX_CONCURRENT)}"
+  max="${max:-2}"
+
+  validate_lan_ranges "$ranges" "$max"
+  # Always allow the server's own private interface to reach /healthz,
+  # including when admin narrows the client allowlist to another VLAN.
+  ranges="$("$APP_DIR/.venv/bin/python" - "$host" "$ranges" <<'PY'
+import ipaddress, sys
+host = ipaddress.ip_address(sys.argv[1])
+parts = [ipaddress.ip_network(x.strip()) for x in sys.argv[2].split(",")]
+print(sys.argv[2] if any(host in net for net in parts)
+      else sys.argv[2] + "," + str(host) + "/32")
+PY
+)"
+  username="${LAN_USERNAME:-$(env_get INTRANET_USERNAME)}"
+  username="${username:-research}"
+  [[ "$username" =~ ^[A-Za-z0-9_.-]{1,40}$ ]] ||
+    die "登录用户名只能由字母、数字、下划线、点、短横线构成。"
+
+  password="$(env_get INTRANET_PASSWORD)"
+  new_password=0
+  if [[ ${#password} -lt 20 ]]; then
+    password="$("$APP_DIR/.venv/bin/python" -c 'import secrets; print(secrets.token_hex(24))')"
+    new_password=1
+  fi
+
+  # Store credentials before exposing the listener, fail closed on startup.
+  env_set INTRANET_ACCESS 1
+  env_set INTRANET_BIND_IP "$host"
+  env_set INTRANET_USERNAME "$username"
+  env_set INTRANET_PASSWORD "$password"
+  env_set INTRANET_ALLOWED_CIDRS "$ranges"
+  env_set INTRANET_MAX_CONCURRENT "$max"
+  write_systemd_unit "$host"
+  as_root systemctl restart "$SERVICE_NAME"
+  verify_service_health "$host"
+
+  say "内网访问地址：http://$host:$APP_PORT"
+  printf '登录用户名：%s\n' "$username"
+  if (( new_password )); then
+    printf '首次生成的访问密码：%s\n' "$password"
+    warn "仅在当前终端显示一次密码，请通过可信渠道分享，切勿上传 GitHub。"
+  else
+    printf '密码继续使用服务器 .env 中的原有配置。\n'
+  fi
+  warn "允许来源网段：$ranges。请在企业防火墙/云安全组中只对内网开放端口 $APP_PORT。"
+  warn "HTTP Basic 在普通 HTTP 上不加密；通过企业 VPN 或 HTTPS 使用。"
+}
+
 service_command() {
   [[ -f "$UNIT_FILE" ]] || die "服务未安装，请先运行 bash deploy.sh。"
   case "$ACTION" in
@@ -125,6 +350,10 @@ service_command() {
     logs) as_root journalctl -u "$SERVICE_NAME" -n 100 --no-pager ;;
   esac
 }
+if [[ "$ACTION" == lan-enable || "$ACTION" == lan-disable ]]; then
+  configure_lan_mode
+  exit 0
+fi
 if [[ "$ACTION" != deploy && "$ACTION" != update ]]; then
   service_command
   exit 0
@@ -412,39 +641,18 @@ else
   warn "已跳过浏览器安装；雪球/直播抓取等依赖浏览器的功能可能不可用。"
 fi
 
-say "注册 systemd 服务（单进程，任务状态保存在进程内存）"
-# No paid API on a public listener. Front this with authenticated HTTPS or SSH.
-# The browser uses Xvfb because upstream launches a headed browser even on Linux.
-TEMP_UNIT="$(mktemp)"
-cat > "$TEMP_UNIT" <<EOF
-[Unit]
-Description=Private Investment Research Agent
-Wants=network-online.target
-After=network-online.target
 
-[Service]
-Type=simple
-User=$RUN_USER
-Group=$RUN_GROUP
-WorkingDirectory=$APP_DIR
-EnvironmentFile=$ENV_FILE
-Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONIOENCODING=utf-8
-Environment=TZ=Asia/Shanghai
-UMask=0077
-ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 1920x1080x24" $APP_DIR/.venv/bin/python -m uvicorn web.app:app --host $BIND_HOST --port $APP_PORT --workers 1
-Restart=on-failure
-RestartSec=5
-TimeoutStopSec=30
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-EOF
-as_root install -m 0644 "$TEMP_UNIT" "$UNIT_FILE"
-rm -f "$TEMP_UNIT"
-as_root systemctl daemon-reload
+# Preserve LAN settings when updating from Git or uploaded ZIP.
+if [[ "$(env_get INTRANET_ACCESS)" == 1 ]]; then
+  BIND_HOST="$(env_get INTRANET_BIND_IP)"
+  validate_lan_ip "$BIND_HOST"
+  validate_lan_ranges "$(env_get INTRANET_ALLOWED_CIDRS)" \
+    "$(env_get INTRANET_MAX_CONCURRENT)"
+  [[ -f "$APP_DIR/web/intranet_access.py" ]] ||
+    die "更新不包含内网鉴权模块，拒绝启动不安全的监听。"
+fi
+say "注册 systemd 服务（监听 $BIND_HOST，内网模式需登录）"
+write_systemd_unit "$BIND_HOST"
 as_root systemctl enable "$SERVICE_NAME"
 as_root systemctl restart "$SERVICE_NAME"
 
@@ -452,7 +660,7 @@ say "检查 Web 服务启动"
 ready=0
 for _ in {1..20}; do
   if as_root systemctl is-active --quiet "$SERVICE_NAME" && \
-     curl -fsS --max-time 3 "http://127.0.0.1:${APP_PORT}/" >/dev/null 2>&1; then
+     curl --noproxy '*' -fsS --max-time 3 "http://${BIND_HOST}:${APP_PORT}/healthz" >/dev/null 2>&1; then
     ready=1
     break
   fi
@@ -466,8 +674,16 @@ fi
 say "部署成功"
 printf '项目目录：%s\n服务名称：%s\n本机地址：http://127.0.0.1:%s\n' \
   "$APP_DIR" "$SERVICE_NAME" "$APP_PORT"
-printf '本地电脑访问：ssh -L %s:127.0.0.1:%s 用户名@服务器IP\n' \
-  "$APP_PORT" "$APP_PORT"
-printf '然后浏览器打开：http://127.0.0.1:%s\n' "$APP_PORT"
+
+if [[ "$BIND_HOST" != 127.0.0.1 ]]; then
+  printf '企业内网地址：http://%s:%s（需要浏览器账号/密码）\n' "$BIND_HOST" "$APP_PORT"
+  printf '访问白名单：%s\n' "$(env_get INTRANET_ALLOWED_CIDRS)"
+  warn "如有服务器安全组/防火墙，只允许公司内网网段访问端口 $APP_PORT。"
+else
+  printf '本地电脑访问：ssh -L %s:127.0.0.1:%s 用户名@服务器IP\n' \
+    "$APP_PORT" "$APP_PORT"
+  printf '然后浏览器打开：http://127.0.0.1:%s\n' "$APP_PORT"
+fi
+
 printf '查看日志：bash deploy.sh logs；更新并重启：bash deploy.sh update\n'
 warn '只启动投资助手，不代表雪球已登录。无桌面的 Xvfb 不能人工完成 WAF 滑块，需要另配可交互浏览器会话。'
