@@ -1,0 +1,42 @@
+name: Local Windows/LAN sharing checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - local_share.py
+      - start_lan.bat
+      - start_local.bat
+      - web/intranet_access.py
+      - tests/test_local_share.py
+      - tests/test_intranet_access.py
+      - .github/workflows/local-lan-tests.yml
+  pull_request:
+    paths:
+      - local_share.py
+      - start_lan.bat
+      - start_local.bat
+      - web/intranet_access.py
+      - tests/test_local_share.py
+      - tests/test_intranet_access.py
+      - .github/workflows/local-lan-tests.yml
+  workflow_dispatch:
+
+jobs:
+  lan-launcher:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install focused dependencies
+        run: python -m pip install pytest pytest-asyncio "fastapi>=0.115,<1" "httpx>=0.28,<1" uvicorn python-dotenv
+      - name: Verify local launcher syntax
+        run: python -m py_compile local_share.py tests/test_local_share.py
+      - name: Test authenticated local/LAN startup on both operating systems
+        run: python -m pytest -q tests/test_local_share.py tests/test_intranet_access.py
