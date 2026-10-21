@@ -183,3 +183,6 @@ database/*.db
 
 # User-audited valuation scenarios; do not publish company-specific assumptions
 config/valuation_cases.local.json
+
+# Local Docker deployment secrets / credentials
+docker.env
