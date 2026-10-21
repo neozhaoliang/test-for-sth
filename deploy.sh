@@ -40,8 +40,10 @@ usage() {
   SERVICE_NAME=investment-agent  systemd 服务名
   DEPLOY_USER=investment-agent   仅 root 直接执行时指定服务运行用户
   SKIP_BROWSER_INSTALL=1        跳过浏览器安装（部分雪球功能可能失效）
+  SKIP_NODE_UPGRADE=1           暂跳过 Node.js 升级（Node 12 下采集功能可能异常）
   GIT_TRANSPORT=ssh             默认：SSH via ssh.github.com:443
   GIT_TRANSPORT=https           可选：原 HTTPS 模式（当前代理不稳定）
+  APP_ARCHIVE=/app/test-for-sth-main.zip   本地 ZIP 部署，不访问 GitHub
 
 安全说明：服务仅绑定 127.0.0.1，不会将 API Key 暴露给网页。
 远程浏览器访问请使用 SSH 端口转发或带身份认证的 HTTPS 反向代理。
@@ -59,6 +61,14 @@ command -v systemctl >/dev/null 2>&1 || die "服务器需要 systemd。"
 [[ "$SERVICE_NAME" =~ ^[A-Za-z0-9_-]+$ ]] || die "SERVICE_NAME 只能包含字母、数字、-、_。"
 [[ "$GIT_TRANSPORT" == ssh || "$GIT_TRANSPORT" == https ]] || die "GIT_TRANSPORT 只能是 ssh 或 https。"
 if [[ "$GIT_TRANSPORT" == https ]]; then REPO_URL="$REPO_URL_HTTPS"; fi
+# Offline here means only the source checkout: uv, PyPI and Chromium still
+# need their normal package mirrors unless installed or cached already.
+APP_ARCHIVE="${APP_ARCHIVE:-}"
+if [[ -n "$APP_ARCHIVE" ]]; then
+  [[ "$APP_ARCHIVE" == /* ]] || die "APP_ARCHIVE 必须是绝对路径。"
+  [[ -f "$APP_ARCHIVE" && -r "$APP_ARCHIVE" ]] || die "本地 ZIP 文件不存在或无法读取：$APP_ARCHIVE"
+  [[ "$APP_ARCHIVE" == *.zip ]] || die "APP_ARCHIVE 目前只支持 GitHub 下载的 .zip 文件。"
+fi
 [[ "$APP_PORT" =~ ^[0-9]+$ ]] && (( 10#$APP_PORT >= 1 && 10#$APP_PORT <= 65535 )) || die "APP_PORT 必须在 1～65535 之间。"
 if [[ "${BIND_HOST_OVERRIDE:-127.0.0.1}" != "127.0.0.1" ]]; then
   die "为避免陌生人调用你的付费 API，脚本只支持本机监听；请在前面加带认证的反向代理。"
@@ -131,10 +141,11 @@ esac
 say "准备系统依赖（git、curl、Node.js、Xvfb 等）"
 if ! command -v git >/dev/null || ! command -v curl >/dev/null || \
    ! command -v node >/dev/null || ! command -v xvfb-run >/dev/null || \
-   ! command -v xauth >/dev/null || ! command -v ssh >/dev/null || ! command -v ssh-keygen >/dev/null; then
+   ! command -v xauth >/dev/null || ! command -v ssh >/dev/null || ! command -v ssh-keygen >/dev/null ||
+   ( -n "$APP_ARCHIVE" && ( ! -x /usr/bin/unzip || ! -x /usr/bin/rsync ) ); then
   as_root apt-get update
   as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    git curl ca-certificates nodejs xvfb xauth openssh-client
+    git curl ca-certificates nodejs xvfb xauth openssh-client unzip rsync
 fi
 node_major() {
   if ! command -v node >/dev/null 2>&1; then echo 0; return; fi
@@ -142,7 +153,7 @@ node_major() {
 }
 
 NODE_MAJOR="$(node_major)"
-if (( NODE_MAJOR < 18 )); then
+if (( NODE_MAJOR < 18 )) && [[ "${SKIP_NODE_UPGRADE:-0}" != 1 ]]; then
   say "Node.js $(node -v 2>/dev/null || echo 未安装) 过旧，自动升级到 Node.js 22 LTS"
   NODE_SETUP="$(mktemp)"
   if ! curl --http1.1 -fLsS --retry 3 --retry-delay 3 --connect-timeout 20 https://deb.nodesource.com/setup_22.x -o "$NODE_SETUP"; then
@@ -205,7 +216,7 @@ configure_git_ssh() {
   say "SSH 443 已连通，仓库读取权限正常。"
 }
 
-if [[ "$GIT_TRANSPORT" == ssh ]]; then
+if [[ "$GIT_TRANSPORT" == ssh && -z "$APP_ARCHIVE" ]]; then
   configure_git_ssh
 fi
 
@@ -230,7 +241,62 @@ retry_git() {
   return 1
 }
 
+# If the VPS cannot reach GitHub, upload the official "Download ZIP" from
+# another machine and run APP_ARCHIVE=/app/test-for-sth-main.zip bash deploy.sh.
+# Source files are local; only package/dependency installations may use network.
+install_local_zip() {
+  local archive="$1" staging source_root candidate
+  say "从本地 ZIP 部署源码（不访问 GitHub）：$archive"
+  local parent
+  parent="$(dirname "$APP_DIR")"
+  [[ -d "$parent" ]] || as_root install -d -m 0755 -o "$RUN_USER" -g "$RUN_GROUP" "$parent"
+  staging="$(as_root mktemp -d "$parent/.$SERVICE_NAME-archive.XXXXXXXX")"
+  cleanup_archive_staging() {
+    if [[ -n "$staging" && -d "$staging" ]]; then
+      as_root rm -rf -- "$staging"
+    fi
+  }
+  trap cleanup_archive_staging EXIT
+
+  as_root unzip -q "$archive" -d "$staging" || die "ZIP 解压失败，请重新从 GitHub 下载完整 ZIP。"
+  candidate="$(find "$staging" -maxdepth 3 -type f -name pyproject.toml -print -quit)"
+  [[ -n "$candidate" ]] || die "ZIP 缺少 pyproject.toml：请下载项目的 Code → Download ZIP。"
+  source_root="$(dirname "$candidate")"
+  [[ -f "$source_root/web/app.py" && -f "$source_root/uv.lock" ]] ||
+    die "ZIP 缺少 web/app.py 或 uv.lock，不能部署。"
+
+  # Local data, secrets, virtualenv and browser sessions must survive future
+  # uploads. Existing source files are replaced, but no user files deleted.
+  if [[ -L "$APP_DIR" ]]; then die "APP_DIR 不支持符号链接，请检查安装目录。"; fi
+  if [[ -d "$APP_DIR/.git" ]] &&
+     ! git_safe -C "$APP_DIR" rev-parse --verify HEAD >/dev/null 2>&1; then
+    local backup="$APP_DIR.incomplete.$(date -u +%Y%m%dT%H%M%SZ)"
+    as_root mv -- "$APP_DIR" "$backup"
+    warn "上次 Git 克隆不完整，旧目录已备份到：$backup"
+  fi
+
+  if [[ ! -d "$APP_DIR" ]]; then
+    as_root install -d -m 0750 -o "$RUN_USER" -g "$RUN_GROUP" "$APP_DIR"
+  fi
+  as_root chown -R "$RUN_USER:$RUN_GROUP" "$source_root"
+  as_user rsync -a \
+    --exclude='/.git/' --exclude='/.env' --exclude='/.venv/' \
+    --exclude='/data/' --exclude='/browser_data/' \
+    --exclude='/cache/' --exclude='/logs/' --exclude='/instance/' \
+    --exclude='/database/*.db' \
+    --exclude='/config/valuation_cases.local.json' \
+    "$source_root/" "$APP_DIR/" ||
+    die "本地 ZIP 复制失败，请检查目录权限。"
+  as_root chown "$RUN_USER:$RUN_GROUP" "$APP_DIR"
+  cleanup_archive_staging
+  trap - EXIT
+  say "本地 ZIP 源码部署成功；本地密钥、数据目录和浏览器会话没有被覆盖。"
+}
+
 say "安装/更新项目：$APP_DIR"
+if [[ -n "$APP_ARCHIVE" ]]; then
+  install_local_zip "$APP_ARCHIVE"
+else
 # An older deploy.sh may have left behind .git before its HTTP/2 download
 # failed. Keep that entire directory as a timestamped backup, don't delete
 # local data, then retry cleanly with the HTTP/1.1 shallow clone.
@@ -289,6 +355,7 @@ else
   retry_git -C "$APP_DIR" fetch --depth=200 --no-tags origin "$BRANCH" || die "GitHub 更新失败，请检查网络或 SSH 密钥。"
   git_safe -C "$APP_DIR" merge --ff-only FETCH_HEAD || die "更新无法快进，请检查本地修改；不会执行 reset/clean。"
 fi
+fi # APP_ARCHIVE bypasses Git/SSH/HTTPS entirely
 [[ -f "$APP_DIR/pyproject.toml" && -f "$APP_DIR/web/app.py" ]] || die "仓库不包含预期的投资助手入口。"
 
 # The existing, server-local key is never overwritten by a git update.
