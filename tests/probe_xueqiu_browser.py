@@ -79,6 +79,23 @@ async def run(mode: str) -> dict:
                         output["api_non_json"] = True
                 except Exception as exc:
                     output["api_error"] = type(exc).__name__ + ": " + str(exc)[:180]
+                # A full-history crawler must advance beyond the first page.
+                try:
+                    page2 = TIMELINE.replace("page=1", "page=2")
+                    resp = await page.goto(page2, wait_until="domcontentloaded", timeout=25000)
+                    output["page2_http"] = resp.status if resp else None
+                    await page.wait_for_timeout(5000)
+                    body = await page.evaluate("() => document.body ? document.body.innerText : ''")
+                    output["page2"] = diagnostics(body)
+                    try:
+                        payload2 = json.loads(body.strip())
+                        entries2 = payload2.get("statuses") or payload2.get("list") or []
+                        output["page2_post_count"] = len(entries2)
+                        output["page2_error_code"] = payload2.get("error_code")
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        output["page2_non_json"] = True
+                except Exception as exc:
+                    output["page2_error"] = type(exc).__name__ + ": " + str(exc)[:180]
             finally:
                 await context.close()
     output["success"] = bool(output.get("api_post_count", 0) or output.get("timeline_post_ids", 0))
