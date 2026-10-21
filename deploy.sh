@@ -148,6 +148,10 @@ env_set() {
     logs) as_root journalctl -u "$SERVICE_NAME" -n 100 --no-pager ;;
   esac
 }
+if [[ "$ACTION" == lan-enable || "$ACTION" == lan-disable ]]; then
+  configure_lan_mode
+  exit 0
+fi
 if [[ "$ACTION" != deploy && "$ACTION" != update ]]; then
   service_command
   exit 0
@@ -943,6 +947,75 @@ EOF
   as_root install -m 0644 "$tmp" "$UNIT_FILE"
   rm -f -- "$tmp"
   as_root systemctl daemon-reload
+}
+
+
+configure_lan_mode() {
+  [[ -f "$UNIT_FILE" && -f "$ENV_FILE" ]] ||
+    die "请先安装并启动服务，再启用内网模式。"
+  [[ -f "$APP_DIR/web/intranet_access.py" ]] ||
+    die "服务器代码尚未包含内网访问保护，请先更新项目代码（可使用 APP_ARCHIVE ZIP 模式）。"
+  [[ -f "$APP_DIR/web/app.py" ]] || die "Web 服务入口不存在。"
+
+  if [[ "$ACTION" == lan-disable ]]; then
+    env_set INTRANET_ACCESS 0
+    env_set INTRANET_BIND_IP 127.0.0.1
+    write_systemd_unit 127.0.0.1
+    as_root systemctl restart "$SERVICE_NAME"
+    say "内网访问已关闭，服务恢复本机：http://127.0.0.1:$APP_PORT"
+    return
+  fi
+
+  local host ranges max username password new_password
+  host="${LAN_BIND_IP:-$(env_get INTRANET_BIND_IP)}"
+  [[ -n "$host" && "$host" != 127.0.0.1 ]] ||
+    die "请指定 LAN_BIND_IP=服务器私网IP，例如：LAN_BIND_IP=192.168.10.20 bash deploy.sh lan-enable"
+  validate_lan_ip "$host"
+
+  ranges="${LAN_ALLOWED_CIDRS:-$(env_get INTRANET_ALLOWED_CIDRS)}"
+  if [[ -z "$ranges" ]]; then
+    ranges="$("$APP_DIR/.venv/bin/python" - "$host" <<'PY'
+import ipaddress, sys
+print(ipaddress.ip_network(sys.argv[1] + "/24", strict=False))
+PY
+)"
+    warn "未指定允许网段，暂用较严格的 /24：$ranges；不在此网段的同事会被拒绝。"
+  fi
+  max="${LAN_MAX_CONCURRENT:-$(env_get INTRANET_MAX_CONCURRENT)}"
+  max="${max:-2}"
+  validate_lan_ranges "$ranges" "$max"
+  username="${LAN_USERNAME:-$(env_get INTRANET_USERNAME)}"
+  username="${username:-research}"
+  [[ "$username" =~ ^[A-Za-z0-9_.-]{1,40}$ ]] ||
+    die "内网用户名仅支持 1～40 位字母、数字、点、短横线和下划线。"
+
+  password="$(env_get INTRANET_PASSWORD)"
+  new_password=0
+  if [[ ${#password} -lt 20 ]]; then
+    password="$("$APP_DIR/.venv/bin/python" -c 'import secrets; print(secrets.token_hex(24))')"
+    new_password=1
+  fi
+  # Write secrets BEFORE switching from loopback. A bad password makes the
+  # FastAPI middleware reject service startup, rather than expose paid APIs.
+  env_set INTRANET_ACCESS 1
+  env_set INTRANET_BIND_IP "$host"
+  env_set INTRANET_USERNAME "$username"
+  env_set INTRANET_PASSWORD "$password"
+  env_set INTRANET_ALLOWED_CIDRS "$ranges"
+  env_set INTRANET_MAX_CONCURRENT "$max"
+  write_systemd_unit "$host"
+  as_root systemctl restart "$SERVICE_NAME"
+
+  say "企业内网访问地址：http://$host:$APP_PORT"
+  printf '浏览器登录用户名：%s\n' "$username"
+  if (( new_password )); then
+    printf '首次生成的访问密码：%s\n' "$password"
+    warn "密码只存于服务器的 .env，首次仅在当前终端展示，请通过可信渠道发给同事。"
+  else
+    printf '继续使用服务器本地 .env 中保存的访问密码。\n'
+  fi
+  warn "仅允许 $ranges 网段访问；请在公司防火墙或云安全组中限制端口 $APP_PORT。"
+  warn "HTTP Basic 经普通 HTTP 传输并不加密。请在企业 VPN 或 HTTPS 中使用。"
 }
 
 service_command() {
