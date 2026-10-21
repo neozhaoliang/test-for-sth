@@ -38,7 +38,7 @@ ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
 VNC_ENABLE=1
 VNC_PASSWORD=自行设置的一组仅用于临时登录的随机密码
 # 如浏览器访问外网必须走企业 HTTP 代理，取消下一行注释：
-# XUEQIU_BROWSER_PROXY=http://10.18.34.194:3128
+# XUEQIU_BROWSER_PROXY=http://10.18.120.190:7890
 ~~~
 
 如已有自己的模型相关变量，继续使用即可；上面仅是变量名示例。**VNC 传统认证实际上只使用密码前8个字节，不能代替 SSH 加密**。请务必用 SSH 隧道；不要向公网映射 VNC、noVNC 或 Chrome 9222 调试端口。
