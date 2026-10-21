@@ -88,9 +88,20 @@ class XueqiuClient:
                 raise WafChallengeError(f"Xueqiu API blocked by WAF slider, url={url}")
             raise DataFetchError(f"Xueqiu API returned non-JSON, url={url}, body={stripped[:300]}")
         try:
-            return json.loads(stripped)
+            payload = json.loads(stripped)
         except json.JSONDecodeError as exc:
             raise DataFetchError(f"Xueqiu API JSON decode failed, url={url}, body={stripped[:300]}") from exc
+        # Xueqiu can return HTTP 200 plus {"error_code":"10022",
+        # "error_description":"请登录"} on page 2. That is NOT an empty page:
+        # treating it as such would mark an incomplete crawl as fully done.
+        if isinstance(payload, dict):
+            code = payload.get("error_code")
+            if code not in (None, 0, "0", ""):
+                raise DataFetchError(
+                    f"Xueqiu API error_code={code}, "
+                    f"message={str(payload.get('error_description') or '')[:100]}, url={url}"
+                )
+        return payload
 
     async def _nav_json_with_retry(self, url: str, retries: int = 3) -> Dict[str, Any]:
         """

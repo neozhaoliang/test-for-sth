@@ -85,6 +85,8 @@ class XueqiuCrawler(AbstractCrawler):
                 ip_proxy_info
             )
 
+        if config.XUEQIU_SERVER_MODE and config.XUEQIU_BROWSER_PROXY:
+            playwright_proxy_format = {"server": config.XUEQIU_BROWSER_PROXY}
         async with async_playwright() as playwright:
             # Choose launch mode based on configuration
             if config.ENABLE_CDP_MODE:
@@ -113,14 +115,20 @@ class XueqiuCrawler(AbstractCrawler):
 
             self.context_page = await self.browser_context.new_page()
 
-            # 访问首页: WAF JS 挑战会自动在真实浏览器中解析通过
-            await self._goto_with_waf(self.index_url, what="雪球首页")
+            if config.XUEQIU_SERVER_MODE:
+                # Profiles already contain saved cookies from the one-time VNC login.
+                # Avoid the 600s homepage WAF slider wait: browsing users' profiles
+                # may be blocked even when the timeline JSON API is usable.
+                try:
+                    await self.context_page.goto(
+                        self.index_url, wait_until="domcontentloaded", timeout=20000
+                    )
+                except Exception as exc:
+                    utils.logger.warning("[XueqiuCrawler] 首页预热失败: %s", exc)
+            else:
+                await self._goto_with_waf(self.index_url, what="雪球首页")
 
-            # 等待手动登录: 登录后的会话 WAF 信任度更高, 接口可以翻页;
-            # 未登录时接口大概率被拦 (此时会降级为 DOM 首屏抓取)。
-            await self._wait_for_xueqiu_login()
-
-            # 登录 (可选): 爬取公开数据无需登录; 配置了 cookie 时写入浏览器
+            # Cookie injection must occur BEFORE authentication is checked.
             if config.COOKIES:
                 login_obj = XueqiuLogin(
                     login_type="cookie",
@@ -129,6 +137,7 @@ class XueqiuCrawler(AbstractCrawler):
                     cookie_str=config.COOKIES,
                 )
                 await login_obj.begin()
+            await self._wait_for_xueqiu_login()
 
             crawler_type_var.set(config.CRAWLER_TYPE)
             if config.CRAWLER_TYPE == "creator":
@@ -184,6 +193,16 @@ class XueqiuCrawler(AbstractCrawler):
         登录后的会话 WAF 信任度更高, 接口可以正常分页; 超时后继续, 接口
         被拦时发帖抓取会降级为 DOM 首屏路径。
         """
+        if config.XUEQIU_SERVER_MODE:
+            cookies = await self.browser_context.cookies("https://xueqiu.com/")
+            names = {item["name"] for item in cookies if item.get("value")}
+            if not {"xq_a_token", "u"}.issubset(names):
+                raise RuntimeError(
+                    "Docker 中没有雪球登录态。请通过 SSH 隧道打开 noVNC，"
+                    "执行 python tools/xueqiu_server_login.py 完成一次登录。"
+                )
+            utils.logger.info("[XueqiuCrawler] 检测到持久化雪球登录 Cookie；将通过分页接口验证")
+            return
         if not getattr(config, "CDP_WAIT_FOR_LOGIN", True):
             return
         timeout = int(getattr(config, "CDP_LOGIN_WAIT_SECONDS", 120) or 0)
@@ -293,16 +312,19 @@ class XueqiuCrawler(AbstractCrawler):
         utils.logger.info(f"[XueqiuCrawler] 开始爬取用户 {user_id}")
 
         # 1. 打开用户主页 (处理 WAF 滑块)
-        ok = await self._goto_with_waf(
-            f"{self.index_url}/u/{user_id}",
-            what=f"用户 {user_id} 主页",
-        )
-        if not ok:
-            utils.logger.error(f"[XueqiuCrawler] 用户 {user_id} 主页访问失败, 跳过")
-            return
-
-        # 顺带收集主页 "用户推荐" (用户发现候选)
-        await self._collect_profile_recommendations(user_id)
+        if not config.XUEQIU_SERVER_MODE:
+            ok = await self._goto_with_waf(
+                f"{self.index_url}/u/{user_id}",
+                what=f"用户 {user_id} 主页",
+            )
+            if not ok:
+                utils.logger.error(f"[XueqiuCrawler] 用户 {user_id} 主页访问失败, 跳过")
+                return
+            await self._collect_profile_recommendations(user_id)
+        else:
+            utils.logger.info(
+                "[XueqiuCrawler] 服务器模式：跳过容易触发滑块的用户主页，直接进入 API"
+            )
 
         # 2. 抓取发帖
         if config.XUEQIU_UPDATE_MODE:
@@ -321,6 +343,12 @@ class XueqiuCrawler(AbstractCrawler):
                 try:
                     await self._crawl_user_posts_api(user_id, resume_state)
                 except CrawlInterruptedError as e:
+                    if config.XUEQIU_SERVER_MODE:
+                        raise RuntimeError(
+                            f"雪球发帖 API 在第 {e.page} 页失败；已保存断点，"
+                            "不会用不完整的 DOM 结果冒充全量抓取。"
+                            "请在远程登录工具中重新确认登录和翻页权限。"
+                        ) from e
                     utils.logger.warning(
                         f"[XueqiuCrawler] 接口全量抓取被 WAF 中断 (位置 {e.page}), "
                         f"降级为 DOM 首屏路径, 下次运行将重试接口"
@@ -331,7 +359,7 @@ class XueqiuCrawler(AbstractCrawler):
         creator: Optional[XueqiuCreator] = None
         if self._last_status_user_obj:
             creator = extract_creator_from_user_obj(self._last_status_user_obj, user_id)
-        if not creator:
+        if not creator and not config.XUEQIU_SERVER_MODE:
             creator = await self._extract_creator_from_profile(user_id)
         if creator:
             utils.logger.info(f"[XueqiuCrawler] Creator info: {creator}")
@@ -466,6 +494,10 @@ class XueqiuCrawler(AbstractCrawler):
             utils.logger.info(f"[XueqiuCrawler] 增量更新 (接口路径) 新增 {new_total} 条")
             return
         except (WafChallengeError, DataFetchError) as e:
+            if config.XUEQIU_SERVER_MODE:
+                raise RuntimeError(
+                    "雪球增量抓取 API 失败；保留已有帖子，跳过可能卡住的 DOM 降级。"
+                ) from e
             utils.logger.warning(
                 f"[XueqiuCrawler] 接口被 WAF 拦截 ({type(e).__name__}: {str(e)[:80]}), "
                 f"降级为 DOM 首屏路径 (仅约 20 条)"
@@ -743,6 +775,11 @@ class XueqiuCrawler(AbstractCrawler):
         try:
             await self._crawl_user_replies_api(user_id, resume_state)
         except CrawlInterruptedError as e:
+            if config.XUEQIU_SERVER_MODE:
+                raise RuntimeError(
+                    f"雪球回复 API 在游标 {e.page} 被中断；保存已有数据，"
+                    "没有把 DOM 部分抓取标记为完成。"
+                ) from e
             utils.logger.warning(
                 f"[XueqiuCrawler] 回复接口被 WAF 中断 (游标 {e.page}), 降级为 DOM 路径"
             )
@@ -940,7 +977,10 @@ class XueqiuCrawler(AbstractCrawler):
         强制有头模式: headless 参数被忽略, 始终可见。
         """
         utils.logger.info("[XueqiuCrawler.launch_browser] Begin create browser context (headed) ...")
-        headless = False  # 强制有头
+        headless = False  # 即使在 Docker/Xvfb 环境也使用有头 Chromium
+        # Docker installs Playwright-managed Chromium, not a system Google Chrome.
+        browser_option = ({"executable_path": chromium.executable_path}
+                          if config.XUEQIU_SERVER_MODE else {"channel": "chrome"})
         if config.SAVE_LOGIN_STATE:
             # 保存登录状态, 避免每次重复验证/登录
             user_data_dir = os.path.join(
@@ -953,11 +993,11 @@ class XueqiuCrawler(AbstractCrawler):
                 proxy=playwright_proxy,  # type: ignore
                 viewport={"width": 1920, "height": 1080},
                 user_agent=user_agent,
-                channel="chrome",  # 使用系统安装的稳定版 Chrome
+                **browser_option,
             )
             return browser_context
         else:
-            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, channel="chrome")  # type: ignore
+            browser = await chromium.launch(headless=headless, proxy=playwright_proxy, **browser_option)  # type: ignore
             browser_context = await browser.new_context(
                 viewport={"width": 1920, "height": 1080}, user_agent=user_agent
             )
