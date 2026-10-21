@@ -85,6 +85,8 @@ class XueqiuCrawler(AbstractCrawler):
                 ip_proxy_info
             )
 
+        if config.XUEQIU_SERVER_MODE and config.XUEQIU_BROWSER_PROXY:
+            playwright_proxy_format = {"server": config.XUEQIU_BROWSER_PROXY}
         async with async_playwright() as playwright:
             # Choose launch mode based on configuration
             if config.ENABLE_CDP_MODE:
