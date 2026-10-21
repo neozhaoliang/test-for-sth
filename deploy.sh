@@ -251,6 +251,9 @@ install_local_zip() {
   parent="$(dirname "$APP_DIR")"
   [[ -d "$parent" ]] || as_root install -d -m 0755 -o "$RUN_USER" -g "$RUN_GROUP" "$parent"
   staging="$(as_root mktemp -d "$parent/.$SERVICE_NAME-archive.XXXXXXXX")"
+  # mktemp creates a root-owned 0700 directory. Let the restricted service
+  # user traverse it before rsync, without opening it to other users.
+  as_root chown "$RUN_USER:$RUN_GROUP" "$staging"
   cleanup_archive_staging() {
     if [[ -n "$staging" && -d "$staging" ]]; then
       as_root rm -rf -- "$staging"
