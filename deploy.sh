@@ -240,6 +240,27 @@ EOF
 }
 
 
+
+# Confirm the new systemd worker has bound its socket before printing success.
+# /healthz returns only a status and has no login prompt, but source CIDRs
+# still apply. This is safe even when requests are routed through an HTTP proxy.
+verify_service_health() {
+  local host="$1" success=0
+  for _ in {1..15}; do
+    if as_root systemctl is-active --quiet "$SERVICE_NAME" &&
+       curl --noproxy '*' --silent --fail --max-time 3 \
+         "http://$host:$APP_PORT/healthz" >/dev/null 2>&1; then
+      success=1
+      break
+    fi
+    sleep 1
+  done
+  if (( ! success )); then
+    as_root journalctl -u "$SERVICE_NAME" -n 35 --no-pager >&2 || true
+    die "服务没有正常启动。请检查日志：bash deploy.sh logs"
+  fi
+}
+
 configure_lan_mode() {
   [[ -f "$UNIT_FILE" && -f "$ENV_FILE" ]] ||
     die "请先部署并启动服务，然后切换企业内网访问。"
@@ -249,6 +270,7 @@ configure_lan_mode() {
     env_set INTRANET_BIND_IP 127.0.0.1
     write_systemd_unit 127.0.0.1
     as_root systemctl restart "$SERVICE_NAME"
+    verify_service_health 127.0.0.1
     say "内网访问已关闭；恢复仅本机监听：http://127.0.0.1:$APP_PORT"
     return
   fi
@@ -273,7 +295,18 @@ PY
   fi
   max="${LAN_MAX_CONCURRENT:-$(env_get INTRANET_MAX_CONCURRENT)}"
   max="${max:-2}"
+
   validate_lan_ranges "$ranges" "$max"
+  # Always allow the server's own private interface to reach /healthz,
+  # including when admin narrows the client allowlist to another VLAN.
+  ranges="$("$APP_DIR/.venv/bin/python" - "$host" "$ranges" <<'PY'
+import ipaddress, sys
+host = ipaddress.ip_address(sys.argv[1])
+parts = [ipaddress.ip_network(x.strip()) for x in sys.argv[2].split(",")]
+print(sys.argv[2] if any(host in net for net in parts)
+      else sys.argv[2] + "," + str(host) + "/32")
+PY
+)"
   username="${LAN_USERNAME:-$(env_get INTRANET_USERNAME)}"
   username="${username:-research}"
   [[ "$username" =~ ^[A-Za-z0-9_.-]{1,40}$ ]] ||
@@ -295,6 +328,7 @@ PY
   env_set INTRANET_MAX_CONCURRENT "$max"
   write_systemd_unit "$host"
   as_root systemctl restart "$SERVICE_NAME"
+  verify_service_health "$host"
 
   say "内网访问地址：http://$host:$APP_PORT"
   printf '登录用户名：%s\n' "$username"
