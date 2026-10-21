@@ -607,39 +607,18 @@ else
   warn "已跳过浏览器安装；雪球/直播抓取等依赖浏览器的功能可能不可用。"
 fi
 
-say "注册 systemd 服务（单进程，任务状态保存在进程内存）"
-# No paid API on a public listener. Front this with authenticated HTTPS or SSH.
-# The browser uses Xvfb because upstream launches a headed browser even on Linux.
-TEMP_UNIT="$(mktemp)"
-cat > "$TEMP_UNIT" <<EOF
-[Unit]
-Description=Private Investment Research Agent
-Wants=network-online.target
-After=network-online.target
 
-[Service]
-Type=simple
-User=$RUN_USER
-Group=$RUN_GROUP
-WorkingDirectory=$APP_DIR
-EnvironmentFile=$ENV_FILE
-Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONIOENCODING=utf-8
-Environment=TZ=Asia/Shanghai
-UMask=0077
-ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 1920x1080x24" $APP_DIR/.venv/bin/python -m uvicorn web.app:app --host $BIND_HOST --port $APP_PORT --workers 1
-Restart=on-failure
-RestartSec=5
-TimeoutStopSec=30
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-EOF
-as_root install -m 0644 "$TEMP_UNIT" "$UNIT_FILE"
-rm -f "$TEMP_UNIT"
-as_root systemctl daemon-reload
+# Preserve LAN settings when updating from Git or uploaded ZIP.
+if [[ "$(env_get INTRANET_ACCESS)" == 1 ]]; then
+  BIND_HOST="$(env_get INTRANET_BIND_IP)"
+  validate_lan_ip "$BIND_HOST"
+  validate_lan_ranges "$(env_get INTRANET_ALLOWED_CIDRS)" \
+    "$(env_get INTRANET_MAX_CONCURRENT)"
+  [[ -f "$APP_DIR/web/intranet_access.py" ]] ||
+    die "更新不包含内网鉴权模块，拒绝启动不安全的监听。"
+fi
+say "注册 systemd 服务（监听 $BIND_HOST，内网模式需登录）"
+write_systemd_unit "$BIND_HOST"
 as_root systemctl enable "$SERVICE_NAME"
 as_root systemctl restart "$SERVICE_NAME"
 
@@ -647,7 +626,7 @@ say "检查 Web 服务启动"
 ready=0
 for _ in {1..20}; do
   if as_root systemctl is-active --quiet "$SERVICE_NAME" && \
-     curl -fsS --max-time 3 "http://127.0.0.1:${APP_PORT}/" >/dev/null 2>&1; then
+     curl --noproxy '*' -fsS --max-time 3 "http://${BIND_HOST}:${APP_PORT}/healthz" >/dev/null 2>&1; then
     ready=1
     break
   fi
@@ -661,8 +640,16 @@ fi
 say "部署成功"
 printf '项目目录：%s\n服务名称：%s\n本机地址：http://127.0.0.1:%s\n' \
   "$APP_DIR" "$SERVICE_NAME" "$APP_PORT"
-printf '本地电脑访问：ssh -L %s:127.0.0.1:%s 用户名@服务器IP\n' \
-  "$APP_PORT" "$APP_PORT"
-printf '然后浏览器打开：http://127.0.0.1:%s\n' "$APP_PORT"
+
+if [[ "$BIND_HOST" != 127.0.0.1 ]]; then
+  printf '企业内网地址：http://%s:%s（需要浏览器账号/密码）\n' "$BIND_HOST" "$APP_PORT"
+  printf '访问白名单：%s\n' "$(env_get INTRANET_ALLOWED_CIDRS)"
+  warn "如有服务器安全组/防火墙，只允许公司内网网段访问端口 $APP_PORT。"
+else
+  printf '本地电脑访问：ssh -L %s:127.0.0.1:%s 用户名@服务器IP\n' \
+    "$APP_PORT" "$APP_PORT"
+  printf '然后浏览器打开：http://127.0.0.1:%s\n' "$APP_PORT"
+fi
+
 printf '查看日志：bash deploy.sh logs；更新并重启：bash deploy.sh update\n'
 warn '只启动投资助手，不代表雪球已登录。无桌面的 Xvfb 不能人工完成 WAF 滑块，需要另配可交互浏览器会话。'
