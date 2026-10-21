@@ -16,6 +16,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify Linux one-click deployment script
+        run: |
+          bash -n deploy.sh
+          grep -Fq 'http.version=HTTP/1.1' deploy.sh
+          grep -Fq -- '--depth 1 --single-branch' deploy.sh
+          grep -Fq 'setup_22.x' deploy.sh
+          grep -Fq '127.0.0.1' deploy.sh
+          grep -Fq 'ssh://git@ssh.github.com:443/' deploy.sh
+          grep -Fq 'GIT_TRANSPORT="${GIT_TRANSPORT:-ssh}"' deploy.sh
+          grep -Fq 'StrictHostKeyChecking=yes' deploy.sh
+          grep -Fq 'GIT_SSH_COMMAND=' deploy.sh
+          grep -Fq 'id_ed25519_investment_agent' deploy.sh
+          grep -Fq 'APP_ARCHIVE=' deploy.sh
+          grep -Fq 'install_local_zip' deploy.sh
+          grep -Fq 'as_user rsync -a --checksum' deploy.sh
+          ! grep -Fq 'StrictHostKeyChecking=no -o' deploy.sh
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -80,6 +97,7 @@ jobs:
             analysis/resource_mining_thesis.py \
             analysis/thesis_readability.py \
             analysis/dimension_readability.py \
+            analysis/prose_integrity.py \
             analysis/chart_interpretation.py \
             analysis/resource_macro_transmission.py \
             analysis/macro_rates.py \
@@ -207,6 +225,7 @@ jobs:
             tests/test_resource_mining_thesis.py \
             tests/test_thesis_readability.py \
             tests/test_dimension_readability.py \
+            tests/test_prose_integrity.py \
             tests/test_chart_interpretation.py \
             tests/test_resource_macro_transmission.py \
             tests/test_market_context_asof.py \

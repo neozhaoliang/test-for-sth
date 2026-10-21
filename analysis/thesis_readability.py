@@ -16,6 +16,9 @@ from decimal import Decimal, InvalidOperation
 import logging
 import re
 from typing import Any, Mapping
+from analysis.prose_integrity import (
+    has_malformed_prose, remove_repeated_trailing_excerpt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +300,7 @@ def readability_signals(text: str) -> dict:
     )
     return {
         "needs_edit": (
+            has_malformed_prose(raw) or
             overloaded or verbose or tone_score >= 2
             or layout["dense_sentences"] >= 2
             or layout["packed_paragraphs"] >= 1
@@ -334,7 +338,7 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
     # 850-character ceiling silently discarded valid, readable paragraphs.
     if len(revised) < 100:
         return False
-    if _PRIVATE.search(revised):
+    if _PRIVATE.search(revised) or has_malformed_prose(revised):
         return False
     if not _preserves_material_themes(original, revised):
         return False
@@ -387,7 +391,10 @@ def accept_readable_edit(original: str, edited: str, inputs: Any = None) -> bool
 
 async def polish_thesis_prose(parsed: dict, inputs: Any = None) -> dict:
     """Optional post-review, post-miner stage. Changes ONLY thesis_summary."""
-    original = str(parsed.get("thesis_summary") or "")
+    raw_original = str(parsed.get("thesis_summary") or "")
+    original = remove_repeated_trailing_excerpt(raw_original)
+    if original != raw_original:
+        parsed = {**parsed, "thesis_summary": original}
     stats = readability_signals(original)
     if not (stats["needs_edit"] or _lead_price_conflicts(original, inputs)
             or inconsistent_share_sale_totals(original)):
@@ -422,6 +429,8 @@ async def polish_thesis_prose(parsed: dict, inputs: Any = None) -> dict:
             "写长可以，但每段都要真的解释问题，不能堆数字或反复说同一句话。"
             "写短可以，但别为了省字数把关键原因、条件与后果都省略掉。"
             "必要的数字保留并讲清含义，非关键数字和研究记录放在专项章节。"
+            "文章末尾不能重复粘贴前面已经写过的半句话，不能以逗号开头另起段落，"
+            "更不能在句子说到一半时中断。如果出现这种情况，要给出完整的自然段。"
             "一个自然段讲一件事。句子要有停顿：数字讲完就解释数字，"
             "不许连续通过分号和顿号把三个以上独立的数据表拼在一起。"
             "一段里如果出现七八个数字，通常就应该拆开、删掉或挪到详表。"

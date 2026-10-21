@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import re
+from analysis.prose_integrity import remove_repeated_trailing_excerpt
 from typing import Any, Mapping
 
 from analysis.json_safety import finite_json_numbers
@@ -161,6 +162,10 @@ def _safe_prose(value: str, names: set[str], cases: set[str],
         if part and not _contaminated(part, names, cases, excerpts, target_code)
     ]
     result = strip_internal_process_commentary("".join(clean).strip())
+    # A public-facing cached report can predate the new generation checks.
+    # Remove only a verifiably duplicated ending; never invent replacement
+    # figures or make the customer wait for report regeneration.
+    result = remove_repeated_trailing_excerpt(result)
     return result or "本项需要依据本公司数据重新分析。"
 
 

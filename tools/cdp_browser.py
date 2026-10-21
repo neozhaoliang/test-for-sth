@@ -124,7 +124,7 @@ class CDPBrowserManager:
                     )
 
             # 1. Detect browser path
-            browser_path = await self._get_browser_path()
+            browser_path = await self._get_browser_path(playwright)
 
             # 2. Get available port
             self.debug_port = self.launcher.find_available_port(config.CDP_DEBUG_PORT)
@@ -227,7 +227,7 @@ class CDPBrowserManager:
         utils.logger.info("[CDPBrowserManager] Successfully connected to existing browser")
         return browser_context
 
-    async def _get_browser_path(self) -> str:
+    async def _get_browser_path(self, playwright: Optional[Playwright] = None) -> str:
         """
         Get browser path
         """
@@ -241,10 +241,23 @@ class CDPBrowserManager:
         # Auto-detect browser path
         browser_paths = self.launcher.detect_browser_paths()
 
+        # On a fresh headless Linux server there may be no system Chrome.
+        # The one-click deployment installs Playwright's headed Chromium.
+        # Reuse that verified browser instead of failing CDP startup.
+        if not browser_paths and playwright is not None:
+            bundled_path = playwright.chromium.executable_path
+            if (bundled_path and os.path.isfile(bundled_path)
+                    and os.access(bundled_path, os.X_OK)):
+                utils.logger.info(
+                    "[CDPBrowserManager] Using Playwright managed Chromium: %s",
+                    bundled_path,
+                )
+                return bundled_path
+
         if not browser_paths:
             raise RuntimeError(
-                "No available browser found. Please ensure Chrome or Edge browser is installed, "
-                "or set CUSTOM_BROWSER_PATH in config file to specify browser path."
+                "No usable Chrome/Chromium found. Install Chrome or run "
+                "'python -m playwright install chromium'."
             )
 
         browser_path = browser_paths[0]  # Use the first browser found
