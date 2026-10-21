@@ -105,6 +105,44 @@ docker exec -it stock-research /app/.venv/bin/python main.py \
 
 登录完成以后可以取消 VNC（Cookie 保存在 volume，重建容器时保留同一个卷）。停掉原容器并用**同名卷**、不设置 VNC_ENABLE=1 和 **不发布6080** 的方式重新运行，仍保留 -p 127.0.0.1:8000:8000。不要执行 docker volume rm research_browser。需要再次人工登录时再临时打开 VNC。
 
+
+## 8. 登录完成后给企业内网同事共享
+
+这是之前要求的**局域网共享**；登录阶段不需要直接开放网站。只在确认服务器已连接企业内网，且有批准使用 HTTP/HTTPS 的网络策略后启用。Docker 桥接模式下，应用可能只看见网关 IP，无法可靠地用客户端真实 IP 做白名单。**Linux 服务器可以使用 host 网络，此时直接连接的 IP 不经过 Docker NAT。**
+
+先保证浏览器登录完成、所有爬虫已停，停止并删除原容器（不要删除三个 Docker volumes）：
+
+~~~bash
+docker stop stock-research && docker rm stock-research
+~~~
+
+假定**服务器本机**企业网卡实际 IP 是 ~10.18.34.88~，同事来自 ~10.18.34.0/24~，执行：
+
+~~~bash
+docker run -d \
+  --name stock-research \
+  --restart unless-stopped \
+  --network host \
+  --shm-size=1g \
+  --env-file ./docker.env \
+  -e VNC_ENABLE=0 \
+  -e WEB_BIND_HOST=10.18.34.88 \
+  -e INTRANET_ACCESS=1 \
+  -e INTRANET_ALLOWED_CIDRS=10.18.34.0/24 \
+  -e INTRANET_USERNAME=research \
+  -e INTRANET_PASSWORD=自行设置一个至少20字符的独立网页登录密码 \
+  -v research_browser:/app/browser_data \
+  -v research_data:/app/data \
+  -v research_logs:/app/logs \
+  stock-research:xueqiu
+~~~
+
+其中 ~10.18.34.88~ **只是示例**，必须通过 ~ip -4 addr~ 查出服务器实际拥有的私网地址；~10.18.34.0/24~ 也仅为示例，按公司实际允许网段配置。请勿配置成 ~0.0.0.0/0~。开启 ~--network host~ 后**不写任何 ~-p~ 端口映射**。网页只在 ~WEB_BIND_HOST:8000~ 上监听，浏览器登录 noVNC 不启动；同事访问 ~http://10.18.34.88:8000~，输入 research 账号和网页登录密码。登录密码不是雪球账号密码，也不是 VNC_PASSWORD。
+
+普通 HTTP Basic 登录凭证**不会加密**，只适合企业批准的可信内网或企业 VPN，建议由 IT 在前面配置 HTTPS 反向代理及访问控制。~INTRANET_ACCESS~ 仅限制 HTTP Web/API，不保护 SSH/VNC 等其他系统服务。Docker host 网络风险高于默认桥接方式，不能在不可信宿主机或有公网网卡时随意开放。若只是个人远程使用，继续采用上面“桥接网络 + SSH 隧道”的方式。
+
+如需再登录雪球，先停止当前 host-network 容器，再按“第3步”使用桥接网络启动同一个 browser volume 和 VNC；不能让两个容器同时使用同一浏览器用户目录。
+
 ## 技术说明
 
 Dockerfile 保持用户指定的基础镜像、COPY /app、代理、清华 pip 与 apt 源。由于仓库锁定 Python >=3.11，不能直接用镜像预装的 Python3.10 运行全部依赖；构建时以 uv 单独安装3.11。Playwright 浏览器在构建阶段安装，运行时由非 root 用户（UID 10001）启动，浏览器数据通过持久卷保存。首次构建可能要下载大量 Python/Chromium 依赖，受企业代理网络影响；本环境没有你们的私有 CUDA 基础镜像，未能完成实际 Docker build。若需共享 Web 服务给整个内网，应由 IT 配置认证与 HTTPS 反向代理；不要简单去掉 127.0.0.1 绑定。
