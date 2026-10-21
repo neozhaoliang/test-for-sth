@@ -1,0 +1,26 @@
+# Never bake credentials, personal browser profiles or private research into an image.
+.git
+.env
+.env.*
+!.env.example
+browser_data/
+data/
+logs/
+instance/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+temp_image/
+tmp/
+*.zip
+*.tar
+*.sqlite3
+*.db
+dist/
+build/
+.idea/
+.vscode/
+docker.env
