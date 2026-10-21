@@ -28,6 +28,9 @@ jobs:
           grep -Fq 'StrictHostKeyChecking=yes' deploy.sh
           grep -Fq 'GIT_SSH_COMMAND=' deploy.sh
           grep -Fq 'id_ed25519_investment_agent' deploy.sh
+          grep -Fq 'APP_ARCHIVE=' deploy.sh
+          grep -Fq 'install_local_zip' deploy.sh
+          grep -Fq 'as_user rsync -a --checksum' deploy.sh
           ! grep -Fq 'StrictHostKeyChecking=no -o' deploy.sh
 
       - name: Setup Python
