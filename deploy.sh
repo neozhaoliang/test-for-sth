@@ -282,7 +282,9 @@ install_local_zip() {
     as_root install -d -m 0750 -o "$RUN_USER" -g "$RUN_GROUP" "$APP_DIR"
   fi
   as_root chown -R "$RUN_USER:$RUN_GROUP" "$source_root"
-  as_user rsync -a \
+  # ZIP timestamps are coarse; --checksum also updates same-size files
+  # changed within a minute, so repeated uploads never silently keep old code.
+  as_user rsync -a --checksum \
     --exclude='/.git/' --exclude='/.env' --exclude='/.venv/' \
     --exclude='/data/' --exclude='/browser_data/' \
     --exclude='/cache/' --exclude='/logs/' --exclude='/instance/' \
