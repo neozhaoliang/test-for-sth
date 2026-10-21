@@ -31,5 +31,5 @@ if [[ "${VNC_ENABLE:-0}" == "1" ]]; then
 fi
 echo "[Xueqiu] Xvfb ready; browser state saved in /app/browser_data"
 exec /app/.venv/bin/python -m uvicorn web.app:app \
-  --host 0.0.0.0 --port "${APP_PORT:-8000}" \
+  --host "${WEB_BIND_HOST:-0.0.0.0}" --port "${APP_PORT:-8000}" \
   --workers 1 --no-proxy-headers
