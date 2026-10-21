@@ -1,6 +1,6 @@
 # Docker 部署：无桌面服务器一次人工登录雪球，之后复用会话
 
-使用仓库根目录的 [Dockerfile](../Dockerfile)，它从指定 CUDA/Python3.10 镜像构建，但**项目本身需要 Python 3.11**。Docker 构建时由 uv 安装独立 Python 3.11 和 .venv；系统 Python3.10/Torch 仍保留。镜像含 Xvfb、Playwright Chromium、临时可启用的 noVNC。
+使用仓库根目录的 [Dockerfile](../Dockerfile)，它从指定 CUDA/Python3.10 镜像构建，但**项目本身需要 Python 3.11**。Docker 构建时从国内 Python 源码镜像下载并校验 Python 3.11.17，编译安装到 `/opt/python3.11`，然后由 uv 用该解释器创建 `.venv`；系统 Python3.10/Torch 仍保留。**uv 不再尝试从 GitHub 下载 Python 解释器。**镜像含 Xvfb、Playwright Chromium、临时可启用的 noVNC。
 
 **限制与验证：** 此前在 GitHub Linux runner 上，匿名 Xvfb Chromium 的第1页返回20条，第2页返回雪球 error_code=10022（需要登录）；真正无头 Chromium 没抓到有效 JSON。只有你亲自登录后测试第2、3页和回复接口，才能确认你的服务器网络、账号和风控状态下能否持续抓取。本文不会宣称已通过带账号登录的真实抓取。
 
@@ -14,6 +14,17 @@ docker volume create research_browser
 docker volume create research_data
 docker volume create research_logs
 ~~~
+
+
+如果你的企业代理访问默认的阿里云 Python 源码镜像也出现超时，可在构建时切换南京大学镜像（默认下载 URL 已无需走 GitHub）：
+
+~~~bash
+docker build \
+  --build-arg PYTHON_SOURCE_URL=https://mirror.nju.edu.cn/python/3.11.17/Python-3.11.17.tar.xz \
+  -t stock-research:xueqiu .
+~~~
+
+下载文件会与 Python 官方发布的 SHA-256 `bfb74ad39efae27cda510f134ab408e00f9992c56851cfc0b1cdb5646da11599` 比对；校验失败则立即停止构建，不会运行不匹配的安装包。Python 3.11.17 需要源码编译，**首次构建比直接安装预编译 Python 慢**。正常情况下无需修改其他源码或安装额外 Python；失败时根据镜像 URL 改变即可。
 
 **私有仓库的 CUDA 基础镜像及内网代理必须在构建主机上可达**。构建时不能将 .env、browser_data、data 等敏感内容 COPY 进去（.dockerignore 已排除）。需要迁移旧数据时，在启动容器后从宿主机复制到 research_data volume，或用合适权限的绑定挂载。
 
@@ -145,4 +156,4 @@ docker run -d \
 
 ## 技术说明
 
-Dockerfile 保持用户指定的基础镜像、COPY /app、代理、清华 pip 与 apt 源。由于仓库锁定 Python >=3.11，不能直接用镜像预装的 Python3.10 运行全部依赖；构建时以 uv 单独安装3.11。Playwright 浏览器在构建阶段安装，运行时由非 root 用户（UID 10001）启动，浏览器数据通过持久卷保存。首次构建可能要下载大量 Python/Chromium 依赖，受企业代理网络影响；本环境没有你们的私有 CUDA 基础镜像，未能完成实际 Docker build。若需共享 Web 服务给整个内网，应由 IT 配置认证与 HTTPS 反向代理；不要简单去掉 127.0.0.1 绑定。
+Dockerfile 保持用户指定的基础镜像、COPY /app、代理、清华 pip 与 apt 源。由于仓库锁定 Python >=3.11，不能直接用镜像预装的 Python3.10 运行全部依赖；构建时从阿里云 Python 源码镜像下载并校验官方 3.11.17 源码，在 `/opt/python3.11` 编译安装，再由 uv 使用本地解释器完成同步（`UV_PYTHON_DOWNLOADS=never`）。Playwright 浏览器在构建阶段安装，运行时由非 root 用户（UID 10001）启动，浏览器数据通过持久卷保存。首次构建可能要下载大量 Python/Chromium 依赖，受企业代理网络影响；本环境没有你们的私有 CUDA 基础镜像，未能完成实际 Docker build。若需共享 Web 服务给整个内网，应由 IT 配置认证与 HTTPS 反向代理；不要简单去掉 127.0.0.1 绑定。
