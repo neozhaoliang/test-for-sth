@@ -69,7 +69,9 @@ async def login(user_id: str, timeout_s: int) -> int:
         flush=True,
     )
     async with async_playwright() as playwright:
+        browser_proxy = os.environ.get("XUEQIU_BROWSER_PROXY", "").strip()
         context = await playwright.chromium.launch_persistent_context(
+            proxy={"server": browser_proxy} if browser_proxy else None,
             user_data_dir=str(PROFILE),
             executable_path=playwright.chromium.executable_path,
             headless=False, viewport={"width": 1440, "height": 900}, locale="zh-CN",
