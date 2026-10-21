@@ -71,12 +71,15 @@ def test_default_mode_rejects_any_lan_configuration():
 
 
 def test_uvicorn_uses_one_worker_exact_ip_and_ignores_proxy_headers(monkeypatch):
-    import uvicorn
+    import sys
+    from types import SimpleNamespace
     calls = {}
     monkeypatch.setattr(local_share, "check_host_is_local", lambda host: None)
     monkeypatch.setenv("INTRANET_PASSWORD", "super-long-stable-password-12345")
     monkeypatch.delenv("INTRANET_ALLOWED_CIDRS", raising=False)
-    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: calls.update({"app": app, **kw}))
+    monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(
+        run=lambda app, **kw: calls.update({"app": app, **kw})
+    ))
     assert local_share.main(["lan", "--host", "10.21.22.23", "--allow", "10.21.22.0/24"]) == 0
     assert calls["host"] == "10.21.22.23"
     assert calls["port"] == 8000
