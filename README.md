@@ -95,6 +95,10 @@ python main.py --platform xueqiu --type creator --creator_id 1263638109
 
 
 
+## 🐳 Linux 无桌面服务器部署（雪球需一次人工登录）
+
+新增 [Dockerfile](Dockerfile) 及 [Docker / Xvfb / SSH + noVNC 登录指南](docs/docker_xueqiu_login.md)：先在虚拟桌面里完成一次雪球登录，把浏览器状态保存在 Docker 卷中，随后复用登录态抓取；第 2 页要求登录时明确失败而非误判抓完。默认通过 SSH 隧道使用；企业内网共享需另行启用认证和私网地址绑定。
+
 ## 🚀 快速开始
 
 > 💡 **如果这个项目对您有帮助，请给个 ⭐ Star 支持一下！**
