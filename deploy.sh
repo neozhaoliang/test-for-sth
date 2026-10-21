@@ -141,8 +141,8 @@ esac
 say "准备系统依赖（git、curl、Node.js、Xvfb 等）"
 if ! command -v git >/dev/null || ! command -v curl >/dev/null || \
    ! command -v node >/dev/null || ! command -v xvfb-run >/dev/null || \
-   ! command -v xauth >/dev/null || ! command -v ssh >/dev/null || ! command -v ssh-keygen >/dev/null ||
-   ( -n "$APP_ARCHIVE" && ( ! -x /usr/bin/unzip || ! -x /usr/bin/rsync ) ); then
+   ! command -v xauth >/dev/null || ! command -v ssh >/dev/null || ! command -v ssh-keygen >/dev/null || \
+   [[ -n "$APP_ARCHIVE" && ( ! -x /usr/bin/unzip || ! -x /usr/bin/rsync ) ]]; then
   as_root apt-get update
   as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y \
     git curl ca-certificates nodejs xvfb xauth openssh-client unzip rsync
