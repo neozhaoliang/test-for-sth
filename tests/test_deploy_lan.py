@@ -66,3 +66,34 @@ def test_env_updates_do_not_erase_api_key_and_retain_mode(tmp_path):
     assert "INTRANET_ALLOWED_CIDRS=192.168.20.0/24" in output
     assert oct(original.stat().st_mode & 0o777) == "0o600"
     assert "keep-private" not in result.stdout
+
+
+def test_generated_systemd_unit_binds_exact_private_interface(tmp_path):
+    text = SCRIPT.read_text(encoding="utf-8")
+    start = text.index("write_systemd_unit() {")
+    end = text.index("verify_service_health() {", start)
+    helper = text[start:end]
+    unit = tmp_path / "investment-agent.service"
+    script = (
+        "set -Eeuo pipefail\n"
+        "APP_DIR=\"$1\"\n"
+        "ENV_FILE=\"$APP_DIR/.env\"\n"
+        "UNIT_FILE=\"$2\"\n"
+        "RUN_USER=\"$(id -un)\"\n"
+        "RUN_GROUP=\"$(id -gn)\"\n"
+        "APP_PORT=8000\n"
+        "as_root() { if [[ \"$1\" == systemctl ]]; then return 0; fi; \"$@\"; }\n"
+        + helper + "\n"
+        "write_systemd_unit 192.168.50.20\n"
+    )
+    result = subprocess.run(
+        ["bash", "-c", script, "test", str(tmp_path), str(unit)],
+        text=True, capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    content = unit.read_text(encoding="utf-8")
+    assert "--host 192.168.50.20 --port 8000" in content
+    assert "--no-proxy-headers" in content
+    assert "EnvironmentFile=" + str(tmp_path / ".env") in content
+    assert "--host 0.0.0.0" not in content
+    assert "INTRANET_PASSWORD" not in content
