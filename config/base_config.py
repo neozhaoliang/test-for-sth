@@ -23,6 +23,9 @@ import os
 # Xvfb provides a virtual display inside Docker: keep Chromium headed,
 # preserve its login profile and never wait indefinitely for a human CAPTCHA.
 XUEQIU_SERVER_MODE = os.getenv("XUEQIU_SERVER_MODE", "0") == "1"
+# Optional explicit browser proxy; the pip/apt build proxy is not automatically
+# applied to Chromium network requests.
+XUEQIU_BROWSER_PROXY = os.getenv("XUEQIU_BROWSER_PROXY", "").strip()
 PLATFORM = "xueqiu"  # Platform, xueqiu | bili
 
 # 是否使用海外版小红书 (rednote.com)
