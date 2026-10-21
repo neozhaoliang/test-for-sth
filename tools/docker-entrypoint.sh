@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-export DISPLAY="\${DISPLAY:-:99}"
+export DISPLAY="${DISPLAY:-:99}"
 mkdir -p /app/browser_data /app/data /app/logs /app/instance
-Xvfb "\${DISPLAY}" -screen 0 1600x900x24 -nolisten tcp -ac > /app/logs/xvfb.log 2>&1 &
+Xvfb "${DISPLAY}" -screen 0 1600x900x24 -nolisten tcp -ac > /app/logs/xvfb.log 2>&1 &
 xvfb_pid=$!
 sleep 2
 if ! kill -0 "$xvfb_pid" 2>/dev/null; then
@@ -11,8 +11,8 @@ if ! kill -0 "$xvfb_pid" 2>/dev/null; then
   exit 1
 fi
 
-if [[ "\${VNC_ENABLE:-0}" == "1" ]]; then
-  if [[ -z "\${VNC_PASSWORD:-}" || \${#VNC_PASSWORD} -lt 8 ]]; then
+if [[ "${VNC_ENABLE:-0}" == "1" ]]; then
+  if [[ -z "${VNC_PASSWORD:-}" || ${#VNC_PASSWORD} -lt 8 ]]; then
     echo "VNC_ENABLE=1 requires VNC_PASSWORD with at least 8 characters" >&2
     exit 2
   fi
@@ -31,5 +31,5 @@ if [[ "\${VNC_ENABLE:-0}" == "1" ]]; then
 fi
 echo "[Xueqiu] Xvfb ready; browser state saved in /app/browser_data"
 exec /app/.venv/bin/python -m uvicorn web.app:app \
-  --host 0.0.0.0 --port "\${APP_PORT:-8000}" \
+  --host 0.0.0.0 --port "${APP_PORT:-8000}" \
   --workers 1 --no-proxy-headers
