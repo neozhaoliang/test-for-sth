@@ -5,7 +5,12 @@
 set -Eeuo pipefail
 umask 077
 
-REPO_URL="https://github.com/neozhaoliang/test-for-sth.git"
+# SSH over 443 bypasses the unstable HTTPS proxy shown in the server logs.
+# SSH requires a read-only deploy key registered with this GitHub repository.
+REPO_URL_SSH="ssh://git@ssh.github.com:443/neozhaoliang/test-for-sth.git"
+REPO_URL_HTTPS="https://github.com/neozhaoliang/test-for-sth.git"
+GIT_TRANSPORT="${GIT_TRANSPORT:-ssh}"
+REPO_URL="$REPO_URL_SSH"
 BRANCH="main"
 SERVICE_NAME="${SERVICE_NAME:-investment-agent}"
 APP_PORT="${APP_PORT:-8000}"
@@ -35,6 +40,8 @@ usage() {
   SERVICE_NAME=investment-agent  systemd 服务名
   DEPLOY_USER=investment-agent   仅 root 直接执行时指定服务运行用户
   SKIP_BROWSER_INSTALL=1        跳过浏览器安装（部分雪球功能可能失效）
+  GIT_TRANSPORT=ssh             默认：SSH via ssh.github.com:443
+  GIT_TRANSPORT=https           可选：原 HTTPS 模式（当前代理不稳定）
 
 安全说明：服务仅绑定 127.0.0.1，不会将 API Key 暴露给网页。
 远程浏览器访问请使用 SSH 端口转发或带身份认证的 HTTPS 反向代理。
@@ -50,6 +57,8 @@ esac
 [[ "$(uname -s)" == Linux ]] || die "这个脚本只支持 Linux。"
 command -v systemctl >/dev/null 2>&1 || die "服务器需要 systemd。"
 [[ "$SERVICE_NAME" =~ ^[A-Za-z0-9_-]+$ ]] || die "SERVICE_NAME 只能包含字母、数字、-、_。"
+[[ "$GIT_TRANSPORT" == ssh || "$GIT_TRANSPORT" == https ]] || die "GIT_TRANSPORT 只能是 ssh 或 https。"
+if [[ "$GIT_TRANSPORT" == https ]]; then REPO_URL="$REPO_URL_HTTPS"; fi
 [[ "$APP_PORT" =~ ^[0-9]+$ ]] && (( 10#$APP_PORT >= 1 && 10#$APP_PORT <= 65535 )) || die "APP_PORT 必须在 1～65535 之间。"
 if [[ "${BIND_HOST_OVERRIDE:-127.0.0.1}" != "127.0.0.1" ]]; then
   die "为避免陌生人调用你的付费 API，脚本只支持本机监听；请在前面加带认证的反向代理。"
@@ -122,10 +131,10 @@ esac
 say "准备系统依赖（git、curl、Node.js、Xvfb 等）"
 if ! command -v git >/dev/null || ! command -v curl >/dev/null || \
    ! command -v node >/dev/null || ! command -v xvfb-run >/dev/null || \
-   ! command -v xauth >/dev/null; then
+   ! command -v xauth >/dev/null || ! command -v ssh >/dev/null || ! command -v ssh-keygen >/dev/null; then
   as_root apt-get update
   as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    git curl ca-certificates nodejs xvfb xauth
+    git curl ca-certificates nodejs xvfb xauth openssh-client
 fi
 node_major() {
   if ! command -v node >/dev/null 2>&1; then echo 0; return; fi
@@ -150,17 +159,71 @@ if (( NODE_MAJOR < 18 )); then
   (( NODE_MAJOR >= 18 )) || die "Node.js 升级失败，请检查 node -v。"
 fi
 
-# GitHub sometimes disconnects HTTP/2 streams through certain proxies.
-# HTTP/1.1 applies to these calls only, never global Git settings.
+# Official GitHub ED25519 host key for github.com / ssh.github.com:443
+# https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
+# Exact pin prevents a proxy/MITM from substituting its own SSH host identity.
+GITHUB_ED25519="AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+SSH_DIR="$RUN_HOME/.ssh"
+SSH_KEY="$SSH_DIR/id_ed25519_investment_agent"
+SSH_KNOWN_HOSTS="$SSH_DIR/known_hosts_investment_agent"
+GIT_SSH_COMMAND=""
+
+configure_git_ssh() {
+  as_user install -d -m 0700 "$SSH_DIR"
+  if [[ ! -f "$SSH_KEY" ]]; then
+    say "为 $RUN_USER 生成只用于部署的 SSH 密钥"
+    as_user ssh-keygen -q -t ed25519 -N "" \
+      -C "investment-agent-deploy" -f "$SSH_KEY"
+  fi
+  [[ -f "$SSH_KEY.pub" ]] || die "存在 SSH 私钥但缺少公钥：$SSH_KEY.pub，请人工检查。"
+  as_user chmod 0600 "$SSH_KEY"
+  as_user chmod 0644 "$SSH_KEY.pub"
+  as_user sh -c 'printf "[ssh.github.com]:443 ssh-ed25519 %s\n" "$1" > "$2"' \
+    _ "$GITHUB_ED25519" "$SSH_KNOWN_HOSTS"
+  as_user chmod 0600 "$SSH_KNOWN_HOSTS"
+
+  # Only affect THIS deployment. No global SSH config changes, no insecure
+  # StrictHostKeyChecking=no, and no secret/private-key output to terminal.
+  GIT_SSH_COMMAND="ssh -F /dev/null -i $SSH_KEY -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$SSH_KNOWN_HOSTS -o ConnectTimeout=12 -o ServerAliveInterval=10 -o ServerAliveCountMax=2"
+  say "检查 SSH 到 GitHub 443 端口及仓库只读权限"
+  local verify_output=""
+  if ! verify_output="$(as_user env GIT_SSH_COMMAND="$GIT_SSH_COMMAND" \
+      git ls-remote "$REPO_URL_SSH" HEAD 2>&1)"; then
+    if [[ "$verify_output" == *"Permission denied (publickey)"* ||
+          "$verify_output" == *"Could not read from remote repository"* ]]; then
+      warn "服务器公钥还没有在 GitHub 上获得仓库读取权限。"
+      printf '\n===== 请复制这一整行公钥（不是私钥） =====\n'
+      as_user cat "$SSH_KEY.pub"
+      printf '==========================================\n'
+      printf '请进入 https://github.com/neozhaoliang/test-for-sth/settings/keys\n'
+      printf '点击 Add deploy key，粘贴上面公钥，保持 Allow write access 未勾选。\n'
+      die "添加 GitHub Deploy Key 后，直接重新运行 bash deploy.sh。"
+    fi
+    warn "SSH 连接或 GitHub 仓库访问失败：$verify_output"
+    die "请检查 ssh.github.com 的 TCP 443 能否直连；如果代理阻断 SSH，请从其他电脑上传代码。"
+  fi
+  say "SSH 443 已连通，仓库读取权限正常。"
+}
+
+if [[ "$GIT_TRANSPORT" == ssh ]]; then
+  configure_git_ssh
+fi
+
 git_safe() {
-  as_user git -c http.version=HTTP/1.1 -c http.lowSpeedLimit=1024 -c http.lowSpeedTime=90 "$@"
+  if [[ "$GIT_TRANSPORT" == ssh ]]; then
+    as_user env GIT_SSH_COMMAND="$GIT_SSH_COMMAND" git "$@"
+  else
+    # Original HTTPS fallback, forced to HTTP/1.1 rather than HTTP/2.
+    as_user git -c http.version=HTTP/1.1 \
+      -c http.lowSpeedLimit=1024 -c http.lowSpeedTime=90 "$@"
+  fi
 }
 retry_git() {
   local attempt
   for attempt in 1 2 3 4; do
     if git_safe "$@"; then return 0; fi
     if (( attempt < 4 )); then
-      warn "Git 网络错误，第 $attempt 次；$((attempt * 3)) 秒后用 HTTP/1.1 重试。"
+      warn "Git 网络错误，第 $attempt 次；$((attempt * 3)) 秒后重试（$GIT_TRANSPORT）。"
       sleep $((attempt * 3))
     fi
   done
@@ -195,7 +258,7 @@ if [[ ! -d "$APP_DIR/.git" ]]; then
   for attempt in 1 2 3 4; do
     # Only remove the scratch clone belonging to this deployment.
     as_root rm -rf -- "$stage/repository"
-    say "GitHub 浅克隆，第 $attempt/4 次（HTTP/1.1）"
+    say "GitHub 浅克隆，第 $attempt/4 次（$GIT_TRANSPORT）"
     if git_safe clone --depth 1 --single-branch --no-tags --branch "$BRANCH" "$REPO_URL" "$stage/repository"; then
       success=1
       break
@@ -205,7 +268,7 @@ if [[ ! -d "$APP_DIR/.git" ]]; then
       sleep $((attempt * 3))
     fi
   done
-  (( success )) || die "GitHub 克隆失败。请先检查：git -c http.version=HTTP/1.1 ls-remote $REPO_URL HEAD"
+  (( success )) || die "GitHub 克隆失败；请检查 SSH 443 线路及 GitHub Deploy Key（HTTPS 备用模式检查代理）。"
   [[ -f "$stage/repository/pyproject.toml" && -f "$stage/repository/web/app.py" ]] || die "代码下载不完整。"
   if [[ -d "$APP_DIR" ]]; then
     rmdir "$APP_DIR" || die "安装目录非空，请先检查：$APP_DIR"
@@ -215,8 +278,15 @@ if [[ ! -d "$APP_DIR/.git" ]]; then
   trap - EXIT
 else
   [[ "$(git_safe -C "$APP_DIR" branch --show-current)" == "$BRANCH" ]] || die "项目分支不是 $BRANCH，拒绝强制重置。"
-  say "Git 拉取更新（HTTP/1.1，失败自动重试）"
-  retry_git -C "$APP_DIR" fetch --depth=200 --no-tags origin "$BRANCH" || die "GitHub 更新失败，请检查网络。"
+  say "Git 拉取更新（$GIT_TRANSPORT，失败自动重试）"
+  # Switch previously-cloned HTTPS worktrees to SSH after new key setup.
+  # Preserve the repo history and local edits; change only origin remote.
+  current_origin="$(git_safe -C "$APP_DIR" remote get-url origin)"
+  if [[ "$current_origin" != "$REPO_URL" ]]; then
+    say "切换 origin 远程地址为 $GIT_TRANSPORT"
+    git_safe -C "$APP_DIR" remote set-url origin "$REPO_URL"
+  fi
+  retry_git -C "$APP_DIR" fetch --depth=200 --no-tags origin "$BRANCH" || die "GitHub 更新失败，请检查网络或 SSH 密钥。"
   git_safe -C "$APP_DIR" merge --ff-only FETCH_HEAD || die "更新无法快进，请检查本地修改；不会执行 reset/clean。"
 fi
 [[ -f "$APP_DIR/pyproject.toml" && -f "$APP_DIR/web/app.py" ]] || die "仓库不包含预期的投资助手入口。"
