@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Linux (Ubuntu/Debian + systemd): deploy the investment research WebUI.
-# Usage: bash deploy.sh [deploy|update|start|restart|stop|status|logs]
+# Usage: bash deploy.sh [deploy|update|start|restart|stop|status|logs|lan-enable|lan-disable]
 # API keys stay in the server-local .env (mode 0600, gitignored).
 set -Eeuo pipefail
 umask 077
@@ -14,7 +14,7 @@ REPO_URL="$REPO_URL_SSH"
 BRANCH="main"
 SERVICE_NAME="${SERVICE_NAME:-investment-agent}"
 APP_PORT="${APP_PORT:-8000}"
-BIND_HOST="127.0.0.1"  # Deliberately private: this app has no login/rate-limit layer.
+BIND_HOST="127.0.0.1"  # Private by default; LAN exposure is opt-in and authenticated.
 ACTION="${1:-deploy}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -33,6 +33,8 @@ usage() {
   bash deploy.sh stop      停止服务
   bash deploy.sh status    查看服务状态
   bash deploy.sh logs      查看最近 100 行服务日志
+  bash deploy.sh lan-enable   启用内网访问，不重新下载项目
+  bash deploy.sh lan-disable  关闭内网访问，恢复仅本机监听
 
 可选环境变量：
   APP_DIR=/opt/investment-agent   安装路径（默认在运行用户家目录）
@@ -44,15 +46,21 @@ usage() {
   GIT_TRANSPORT=ssh             默认：SSH via ssh.github.com:443
   GIT_TRANSPORT=https           可选：原 HTTPS 模式（当前代理不稳定）
   APP_ARCHIVE=/app/test-for-sth-main.zip   本地 ZIP 部署，不访问 GitHub
+  LAN_BIND_IP=192.168.10.20   服务器自身的企业内网 IPv4（必须指定）
+  LAN_ALLOWED_CIDRS=192.168.10.0/24   允许连接的客户端网段
+  LAN_USERNAME=research       内网登录用户名（默认）
+  LAN_MAX_CONCURRENT=2        同时运行的付费分析任务上限（1～10）
 
-安全说明：服务仅绑定 127.0.0.1，不会将 API Key 暴露给网页。
-远程浏览器访问请使用 SSH 端口转发或带身份认证的 HTTPS 反向代理。
+安全说明：默认仅绑定 127.0.0.1。内网模式只绑定指定私网网卡，
+所有页面/API 均有密码及客户端网段限制，不监听公网网卡。
+HTTP Basic 经普通 HTTP 传输不加密，请通过可信企业 VPN 或 HTTPS 使用。
+VPS 若未加入企业内网/VPN，企业同事无法直接访问其内网 IP。
 HELP
 }
 
 case "$ACTION" in
   -h|--help|help) usage; exit 0 ;;
-  deploy|update|start|restart|stop|status|logs) ;;
+  deploy|update|start|restart|stop|status|logs|lan-enable|lan-disable) ;;
   *) usage; die "不认识的命令：$ACTION" ;;
 esac
 
