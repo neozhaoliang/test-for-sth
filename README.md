@@ -173,6 +173,9 @@ MediaCrawler 提供了基于 Web 的可视化操作界面，无需命令行也�
 
 #### 启动 WebUI 服务
 
+本地 Windows 电脑需要给企业内网同事共享**股票投资助手**时，请使用 [本地内网共享指南](docs/local_lan_windows.md) 中的 `start_lan.bat`，而不是 Linux 服务器 `deploy.sh`。
+
+
 ```shell
 # 启动 API 服务器（默认端口 8080）
 uv run uvicorn api.main:app --port 8080 --reload
