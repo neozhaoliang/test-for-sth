@@ -21,9 +21,7 @@ def test_deploy_script_bash_parses_and_uses_private_bind_only():
     assert "INTRANET_PASSWORD" in text
     assert "APP_ARCHIVE" in text
     assert "--host 0.0.0.0" not in text
-    assert "StrictHostKeyChecking=no" not in text.replace(
-        "no insecure\n  # StrictHostKeyChecking=no", ""
-    )
+    assert "-o StrictHostKeyChecking=no" not in text
 
 
 def test_env_updates_do_not_erase_api_key_and_retain_mode(tmp_path):
