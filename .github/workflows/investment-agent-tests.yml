@@ -146,7 +146,8 @@ jobs:
             tools/historical_corpus_cli.py \
             tools/snapshot_cli.py \
             web/intranet_access.py \
-            web/app.py
+            web/app.py \
+            local_share.py
 
       - name: Check embedded WebUI JavaScript syntax
         run: |
@@ -232,6 +233,7 @@ jobs:
             tests/test_dimension_readability.py \
             tests/test_prose_integrity.py \
             tests/test_intranet_access.py \
+            tests/test_local_share.py \
             tests/test_deploy_lan.py \
             tests/test_chart_interpretation.py \
             tests/test_resource_macro_transmission.py \
