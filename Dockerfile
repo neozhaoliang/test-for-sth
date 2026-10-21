@@ -4,8 +4,8 @@ COPY . /app
 
 WORKDIR /app
 
-ENV https_proxy=http://10.18.34.194:3128
-ENV http_proxy=http://10.18.34.194:3128
+ENV https_proxy=http://10.18.120.190:7890
+ENV http_proxy=http://10.18.120.190:7890
 ENV LANG C.UTF-8
 
 RUN pip config set global.index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
