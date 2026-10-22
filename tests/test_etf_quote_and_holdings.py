@@ -68,8 +68,9 @@ def test_old_or_unknown_quote_never_claims_verified_realtime():
     close = etf_data._with_recent_close(
         quote, {"recent_close": 1.716,
                 "recent_close_as_of": "2026-10-21"}, today)
-    assert close["latest_price"] == 1.716
-    assert close["quote_mode"] == "last_verified_daily_close"
+    assert close["latest_price"] == 1.77
+    assert close["quote_mode"] == "undated_market_snapshot"
+    assert "来源未提供报价日期" in close["quote_time"]
     assert etf_data._with_recent_close(
         _fund(), {"recent_close": 1.77,
                   "recent_close_as_of": "2026-08-01"}, today
