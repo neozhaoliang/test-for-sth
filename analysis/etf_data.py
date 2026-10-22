@@ -174,7 +174,7 @@ async def _lookup_rows(query: str) -> list[dict]:
             await asyncio.wait_for(asyncio.shield(pending), timeout=8)
         except (asyncio.TimeoutError, Exception):
             pass
-    return (_catalog_cache[1] or rows) if pending is not None and not pending.done() else rows
+    return (_catalog_cache[1] or rows) if pending is not None else rows
 
 
 def _parse_sina_scale(df: Any, now: date) -> dict[str, dict]:
