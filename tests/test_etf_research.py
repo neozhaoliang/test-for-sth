@@ -190,6 +190,13 @@ async def test_gold_equity_etf_is_not_treated_as_physical_gold(monkeypatch):
     ], "as_of": "2026-Q2"}
     monkeypatch.setattr(etf_data, "_holdings", AsyncMock(return_value=disclosure))
     monkeypatch.setattr(etf_data, "_etf_price", AsyncMock(return_value={}))
+    monkeypatch.setattr(etf_data, "get_etf_market_context", AsyncMock(return_value={
+        "sector": "黄金产业股票", "key_drivers": ["金价"],
+        "observations": {}, "as_of": "2026-10-22",
+    }))
+    monkeypatch.setattr(etf_data, "_hk_stock_price", AsyncMock(return_value={
+        "price_position_pct": 55, "price_currency": "HKD",
+    }))
     monkeypatch.setattr(etf_data, "_fund_with_live_quote",
                         AsyncMock(return_value=spot))
     monkeypatch.setattr(etf_data, "_stock_price",
@@ -201,8 +208,8 @@ async def test_gold_equity_etf_is_not_treated_as_physical_gold(monkeypatch):
     result = await etf_data.collect_etf_data(spot)
     assert "黄金产业股票ETF" in result["scope"]
     assert result["portfolio"]["holdings"][0]["price_position_pct"] == 85
-    assert "price_position_pct" not in result["portfolio"]["holdings"][1]
-    assert result["portfolio_stats"]["price_observed_weight_pct"] == 10
+    assert result["portfolio"]["holdings"][1]["price_currency"] == "HKD"
+    assert result["portfolio_stats"]["price_observed_weight_pct"] == 18
 
 
 def test_five_digit_hong_kong_holding_remains_in_disclosure_not_a_share_pipeline():
