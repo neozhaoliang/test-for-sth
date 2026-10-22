@@ -887,6 +887,9 @@ body, input, select, textarea, button { font-family:inherit; }
   box-shadow:none;
   transform:none;
 }
+.stock-suggest-info { display:flex;flex:1 1 auto;min-width:0;flex-direction:column;gap:3px; }
+.stock-suggest-meta { color:#63738b;font-size:11px;line-height:1.5;overflow-wrap:anywhere; }
+.stock-suggest-hint { padding:8px 12px;border-bottom:1px solid #e7edf6; }
 .stock-suggest-name { min-width:0;font-size:13px;font-weight:750;overflow-wrap:anywhere; }
 .stock-suggest-code { flex-shrink:0;font-size:12px;color:#75849b;font-variant-numeric:tabular-nums; }
 .stock-suggest-message { padding:14px 12px;color:#6e7c90;font-size:12px;line-height:1.6; }

@@ -45,7 +45,7 @@ from analysis.knowledge_base import (
 from analysis.realtime_price import resolve_stock_code
 from analysis.stock_suggest import search_stocks, warm_stock_catalog
 from analysis.report import generate_report
-from analysis.etf_data import resolve_etf, search_etfs
+from analysis.etf_data import resolve_etf, search_etfs, warm_etf_catalog
 from analysis.etf_report import generate_etf_report
 from analysis.public_report import public_stock_report
 from web.intranet_access import IntranetAccessMiddleware, load_access_settings
@@ -90,7 +90,7 @@ async def _preload_knowledge_base() -> None:
     # 不阻塞服务启动, 提炼完成的条目逐批进入缓存
     asyncio.create_task(ensure_knowledge_base_loaded())
     asyncio.create_task(warm_stock_catalog())
-    asyncio.create_task(search_etfs("ETF", 1))
+    asyncio.create_task(warm_etf_catalog())
 
 
 class AnalyzeRequest(BaseModel):
@@ -115,7 +115,7 @@ async def _run_analysis(
         if asset_type == "etf":
             spot = await resolve_etf(stock_code)
             if spot is None:
-                raise RuntimeError("ETF实时行情暂时无法核实，请稍后重试")
+                raise RuntimeError("未能在独立基金名录中确认ETF代码或名称")
             raw_report = await generate_etf_report(spot, research_request)
         else:
             report = await generate_report(stock_code, request=research_request)
@@ -153,6 +153,12 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     if etf:
         stock_code = etf["stock_code"]
     elif looks_like_etf:
+        alternatives = await search_etfs(raw_input, 60)
+        if len(alternatives) > 1:
+            raise HTTPException(
+                status_code=409,
+                detail=f"找到{len(alternatives)}只相关ETF，请从搜索下拉列表选择具体基金代码",
+            )
         raise HTTPException(status_code=404, detail=f"未找到可核实的ETF行情: {raw_input}")
     else:
         stock_code = await resolve_stock_code(raw_input)
@@ -216,25 +222,39 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
 @app.get("/api/stocks/suggest")
 async def suggest_stocks(
     q: str = Query(default="", max_length=80),
-    limit: int = Query(default=8, ge=1, le=15),
+    limit: int = Query(default=8, ge=1, le=60),
 ) -> Dict:
     """A-share equity and exchange-traded fund suggestions (both code and name)."""
-    equity, = await asyncio.gather(search_stocks(q, limit))
+    normalized = q.strip().casefold()
+    digits = normalized.removeprefix("sh").removeprefix("sz")
+    # Theme and full ETF-name searches take precedence over stock autocomplete.
+    etf_first = ("etf" in normalized or "基金" in normalized or
+                 "沪深300" in normalized or "黄金股" in normalized or
+                 "黄金产业" in normalized or
+                 (len(digits) == 6 and digits.isdigit() and digits[0] in "15"))
+    fund_task = asyncio.create_task(search_etfs(q, limit))
+    stock_task = None if etf_first else asyncio.create_task(search_stocks(q, limit))
     try:
-        funds = await asyncio.wait_for(search_etfs(q, limit), timeout=6.0)
-    except Exception:
+        funds = await asyncio.wait_for(fund_task, timeout=18.0)
+    except Exception as exc:
+        utils.logger.warning("[web.app] ETF suggestions unavailable: %s", exc)
         funds = []
+    equity = {"items": [], "source": "none"}
+    if stock_task is not None:
+        try:
+            equity = await asyncio.wait_for(stock_task, timeout=5.0)
+        except Exception as exc:
+            utils.logger.warning("[web.app] stock suggestions unavailable: %s", exc)
     stock_items = [{**item, "asset_type": "stock"} for item in equity.get("items", [])]
-    combined = stock_items + funds
-    query = q.strip().lower()
-    combined.sort(key=lambda item: (
-        str(item["code"]).lower() != query
-        and str(item["code"])[-6:].lower() != query
-        and str(item["name"]).lower() != query,
-        not str(item["name"]).lower().startswith(query),
-        len(str(item["name"])),
-    ))
-    return {"items": combined[:limit], "source": "stock+etf" if funds else equity.get("source")}
+    # Preserve size order across ETF issuers. Stock ranking is only meaningful
+    # for mixed queries where there is no explicit ETF theme.
+    combined = funds + stock_items if etf_first else stock_items + funds
+    return {
+        "items": combined[:limit],
+        "source": "stock+etf" if funds else equity.get("source"),
+        "etf_count": len(funds),
+        "etf_sort": "fund_assets_desc_unknown_last",
+    }
 
 
 @app.get("/api/research/time-capabilities")
