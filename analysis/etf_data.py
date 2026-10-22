@@ -441,8 +441,10 @@ def _with_recent_close(fund: dict, etf_price: dict, today: date) -> dict:
     day = _valid_close_date(date_text, today)
     if price is None or price <= 0 or day is None:
         return fund
-    # Never downgrade a dated current trading quote to a daily close.
-    if fund.get("quote_mode") == "dated_market_snapshot":
+    # A market snapshot may omit its own quotation time, but it remains a
+    # retrieved market price (labeled "reference", not "realtime"). Preserve
+    # that observed price over yesterday's closing price.
+    if fund.get("quote_mode") in ("dated_market_snapshot", "undated_market_snapshot"):
         return fund
     updated = dict(fund)
     updated.update({
