@@ -18,21 +18,24 @@ from zoneinfo import ZoneInfo
 import akshare as ak
 import pandas as pd
 
+from analysis.etf_discovery import assets_yi, ranked_matches, matches, recent_day, theme
 from analysis.profitability import get_profitability_trend
 from analysis.valuation_history import get_valuation_history
 from tools.utils import utils
 
 
-# The listing of real ETFs is independent of the intraday quote service.
-# A verified reference code remains searchable even when every feed is offline;
-# reference entries NEVER contain a fabricated price or proof of live trading.
+# Fund identity, size and live quote are independent datasets. Neither
+# equity trading turnover nor outstanding shares alone are fund net assets.
 _CATALOG_TTL = 6 * 3600
 _FAILURE_RETRY = 300
+_SCALE_TTL = 20 * 60
 _catalog_cache: tuple[float, list[dict]] = (0.0, [])
 _catalog_lock = asyncio.Lock()
 _catalog_refresh_task: asyncio.Task | None = None
+_scale_cache: tuple[float, dict[str, dict]] = (0.0, {})
+_scale_lock = asyncio.Lock()
+_scale_refresh_task: asyncio.Task | None = None
 _holdings_cache: dict[str, tuple[float, dict]] = {}
-_REFERENCE_ETFS = (("517520", "黄金股ETF永赢"),)
 _EXCLUDED = re.compile(
     r"港股|恒生|纳斯达克|标普|日经|德国|法国|美国|日本|跨境|QDII|全球|"
     r"黄金|白银|原油|商品|国债|债券|货币|短融|可转债|REIT|不动产", re.I
@@ -79,22 +82,16 @@ def _spot_row(row: Any) -> dict:
     }
 
 
-def _reference_rows() -> list[dict]:
-    rows = []
-    for code, name in _REFERENCE_ETFS:
-        row = _spot_row({"代码": code, "名称": name})
-        row["catalog_source"] = "已核实的基金代码参考表（非实时行情）"
-        rows.append(row)
-    return rows
-
-
-def _catalog_entry(code: Any, name: Any, *, source: str, require_etf: bool) -> dict | None:
+def _catalog_entry(code: Any, name: Any, *, source: str,
+                   require_etf: bool = True) -> dict | None:
     digits = _digits(code)
     title = str(name or "").strip()
-    # ETF feeder funds are NOT exchange-traded ETF shares.
+    # Exclude OTC ETF feeder shares and similarly named LOFs.
     if not digits or digits[0] not in "15" or not title or title.lower() == "nan":
         return None
-    if "联接" in title or (require_etf and "ETF" not in title.upper()):
+    if "联接" in title or "LOF" in title.upper():
+        return None
+    if require_etf and "ETF" not in title.upper():
         return None
     row = _spot_row({"代码": digits, "名称": title})
     row["catalog_source"] = source
@@ -102,20 +99,20 @@ def _catalog_entry(code: Any, name: Any, *, source: str, require_etf: bool) -> d
 
 
 async def _catalog_from_source(fn_name: str, code_col: str, name_col: str,
-                               *, require_etf: bool, kwargs: dict) -> list[dict]:
+                               *, kwargs: dict) -> list[dict]:
     fn = getattr(ak, fn_name, None)
     if fn is None:
         return []
     try:
-        df = await asyncio.wait_for(asyncio.to_thread(fn, **kwargs), timeout=12)
+        df = await asyncio.wait_for(asyncio.to_thread(fn, **kwargs), timeout=16)
         if df is None or df.empty or not {code_col, name_col}.issubset(df.columns):
             return []
-        result = []
+        results = []
         for code, name in df[[code_col, name_col]].itertuples(index=False, name=None):
-            row = _catalog_entry(code, name, source=fn_name, require_etf=require_etf)
+            row = _catalog_entry(code, name, source=fn_name)
             if row:
-                result.append(row)
-        return result
+                results.append(row)
+        return results
     except Exception as exc:
         utils.logger.warning("[etf] catalog %s unavailable: %s", fn_name, exc)
         return []
@@ -124,19 +121,30 @@ async def _catalog_from_source(fn_name: str, code_col: str, name_col: str,
 async def _refresh_catalog() -> list[dict]:
     global _catalog_cache
     async with _catalog_lock:
-        # Neither listing API depends on the unreliable Eastmoney ETF quote feed.
-        ths, em = await asyncio.gather(
-            _catalog_from_source("fund_etf_spot_ths", "基金代码", "基金名称",
-                                 require_etf=False, kwargs={"date": ""}),
+        # Two different public fund directories plus a separate ETF-only feed;
+        # there is no manually-maintained "one ETF per theme" list.
+        sina, ths, eastmoney = await asyncio.gather(
+            _catalog_from_source("fund_etf_category_sina", "代码", "名称",
+                                 kwargs={"symbol": "ETF基金"}),
+            _catalog_from_source("fund_etf_category_ths", "基金代码", "基金名称",
+                                 kwargs={"symbol": "ETF", "date": ""}),
             _catalog_from_source("fund_name_em", "基金代码", "基金简称",
-                                 require_etf=True, kwargs={}),
+                                 kwargs={}),
         )
-        rows = {r["code"]: r for r in _reference_rows()}
-        for row in ths + em:
-            # Keep the verified display name for pinned codes for reliable search.
-            rows.setdefault(row["code"], row)
-        _catalog_cache = (time.monotonic() + (_CATALOG_TTL if (ths or em)
-                                             else _FAILURE_RETRY), list(rows.values()))
+        rows: dict[str, dict] = {}
+        # Fund full names from Eastmoney help match long index descriptors.
+        for row in sina + ths + eastmoney:
+            if row["code"] in rows:
+                old = rows[row["code"]]
+                if len(row["name"]) > len(old["name"]):
+                    rows[row["code"]] = row
+            else:
+                rows[row["code"]] = row
+        if rows:
+            _catalog_cache = (time.monotonic() + _CATALOG_TTL, list(rows.values()))
+        else:
+            # A failed refresh must not replace the last good listing.
+            _catalog_cache = (time.monotonic() + _FAILURE_RETRY, _catalog_cache[1])
         return _catalog_cache[1]
 
 
@@ -145,37 +153,104 @@ async def _catalog() -> list[dict]:
     if time.monotonic() >= _catalog_cache[0] and (
         _catalog_refresh_task is None or _catalog_refresh_task.done()
     ):
-        # Searching a code must not wait on an intraday market-data API.
         _catalog_refresh_task = asyncio.create_task(_refresh_catalog())
-    return _catalog_cache[1] or _reference_rows()
+    return _catalog_cache[1]
 
 
 async def warm_etf_catalog() -> None:
-    """Warm independent fund listings in the background at server startup."""
     await _catalog()
-    if _catalog_refresh_task is not None:
+    if _catalog_refresh_task:
         await _catalog_refresh_task
+    await _ensure_scale_refresh()
 
 
 async def _lookup_rows(query: str) -> list[dict]:
     rows = await _catalog()
-    code = _digits(query)
-    def matches(r: dict) -> bool:
-        return (r["code"] == code if code else query.casefold() in r["name"].casefold())
-    if any(matches(r) for r in rows):
-        return rows
-    # Give a cold catalogue a short opportunity to finish for unpinned funds.
-    task = _catalog_refresh_task
-    if task is not None and not task.done():
+    pending = _catalog_refresh_task
+    if pending is not None and not pending.done():
         try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=4)
+            # A category search must NEVER show a single warm-cache result
+            # while the complete fund directory is still loading.
+            await asyncio.wait_for(asyncio.shield(pending), timeout=8)
         except (asyncio.TimeoutError, Exception):
             pass
     return _catalog_cache[1] or rows
 
 
+def _parse_sina_scale(df: Any, now: date) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    if df is None or df.empty:
+        return out
+    required = {"基金代码", "最近总份额", "单位净值", "更新日期"}
+    if not required.issubset(df.columns):
+        return out
+    for _, row in df.iterrows():
+        code = _digits(row.get("基金代码"))
+        day = recent_day(row.get("更新日期"), 45, now)
+        size = assets_yi(row.get("最近总份额"), row.get("单位净值"))
+        if code and day and size is not None:
+            out[code] = {"scale_yi": size, "scale_as_of": day,
+                         "scale_source": "新浪基金总份额×单位净值",
+                         "scale_kind": "基金资产规模估算"}
+    return out
+
+
+def _parse_spot_scale(df: Any, now: date) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    if df is None or df.empty or not {"代码", "总市值", "数据日期"}.issubset(df.columns):
+        return out
+    for _, row in df.iterrows():
+        code = _digits(row.get("代码"))
+        day = recent_day(row.get("数据日期"), 7, now)
+        market_value = _num(row.get("总市值"))
+        if code and day and market_value is not None and market_value > 0:
+            out[code] = {"scale_yi": round(market_value / 1e8, 4),
+                         "scale_as_of": day,
+                         "scale_source": "东财ETF总市值（市价估算，非基金净资产）",
+                         "scale_kind": "二级市场市值近似"}
+    return out
+
+
+async def _scale_source(fn_name: str, kwargs: dict) -> Any:
+    fn = getattr(ak, fn_name, None)
+    if fn is None:
+        return None
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(fn, **kwargs), timeout=16)
+    except Exception as exc:
+        utils.logger.warning("[etf] size source %s unavailable: %s", fn_name, exc)
+        return None
+
+
+async def _refresh_sizes() -> dict[str, dict]:
+    global _scale_cache
+    async with _scale_lock:
+        sina, quote = await asyncio.gather(
+            _scale_source("fund_scale_open_sina", {"symbol": "股票型基金"}),
+            _scale_source("fund_etf_spot_em", {}),
+        )
+        now = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        market_proxy = _parse_spot_scale(quote, now)
+        net_assets = _parse_sina_scale(sina, now)
+        # Fresh fund NAV × shares is more faithful than exchange price × shares.
+        combined = {**market_proxy, **net_assets}
+        if combined:
+            _scale_cache = (time.monotonic() + _SCALE_TTL, combined)
+        else:
+            _scale_cache = (time.monotonic() + _FAILURE_RETRY, _scale_cache[1])
+        return _scale_cache[1]
+
+
+async def _ensure_scale_refresh() -> None:
+    global _scale_refresh_task
+    if time.monotonic() >= _scale_cache[0] and (
+        _scale_refresh_task is None or _scale_refresh_task.done()
+    ):
+        _scale_refresh_task = asyncio.create_task(_refresh_sizes())
+
+
 async def resolve_etf(raw: str) -> dict | None:
-    """Resolve fund identity independently from the availability of its quote."""
+    """Resolve one *unambiguous* fund; theme matches require user selection."""
     query = str(raw or "").strip()
     if not query:
         return None
@@ -186,22 +261,30 @@ async def resolve_etf(raw: str) -> dict | None:
     exact = [r for r in rows if r["name"].casefold() == query.casefold()]
     if len(exact) == 1:
         return exact[0]
-    partial = [r for r in rows if query.casefold() in r["name"].casefold()]
+    partial = [r for r in rows if matches(query, r)]
     return partial[0] if len(partial) == 1 else None
 
 
-async def search_etfs(query: str, limit: int = 8) -> list[dict]:
-    q = str(query or "").strip().casefold()
+async def search_etfs(query: str, limit: int = 40) -> list[dict]:
+    q = str(query or "").strip()
     if not q:
         return []
     rows = await _lookup_rows(q)
-    matched = [r for r in rows if q in r["name"].casefold()
-               or q in r["stock_code"].casefold() or q in r["code"]]
-    matched.sort(key=lambda r: (r["code"] != q and r["stock_code"].casefold() != q,
-                                not r["name"].casefold().startswith(q), len(r["name"])))
+    await _ensure_scale_refresh()
+    if _scale_refresh_task is not None and not _scale_refresh_task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(_scale_refresh_task), timeout=6)
+        except (asyncio.TimeoutError, Exception):
+            pass
+    sizes = _scale_cache[1]
+    enriched = [{**row, **sizes.get(row["code"], {})} for row in rows]
+    selected = ranked_matches(q, enriched, limit)
     return [{"code": r["stock_code"], "name": r["name"],
-             "market": r["stock_code"][:2], "asset_type": "etf"}
-            for r in matched[:max(1, min(limit, 15))]]
+             "market": r["stock_code"][:2], "asset_type": "etf",
+             "scale_yi": r.get("scale_yi"), "scale_as_of": r.get("scale_as_of"),
+             "scale_source": r.get("scale_source"),
+             "scale_kind": r.get("scale_kind")}
+            for r in selected]
 
 
 async def _fund_with_live_quote(spot: dict) -> dict:
