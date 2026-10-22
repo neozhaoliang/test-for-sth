@@ -899,7 +899,7 @@ _INDEX_HTML = """<!DOCTYPE html>
   <div class="deck-heading"><h2>开始研究</h2><p>输入证券代码或简称，生成完整研究报告</p></div>
 <div class="search-bar">
   <div class="stock-search-field">
-    <input id="stockCode" aria-label="股票或ETF代码与名称" role="combobox"
+    <input id="stockCode" aria-label="股票代码或名称" role="combobox"
       aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"
       aria-controls="stockSuggestions" autocomplete="off"
       placeholder="输入股票或ETF，如 中国海油 / 600938 / 沪深300ETF / 510300" />
