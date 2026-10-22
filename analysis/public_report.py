@@ -340,3 +340,46 @@ def public_stock_report(raw: Mapping[str, Any]) -> dict:
     # Convert to null at the public projection boundary without mutating the
     # private report. Missing values must never be guessed or converted to 0.
     return finite_json_numbers(out)
+
+
+# ETFs are NOT issuer reports: the stock-only public allowlist drops
+# asset_type, etf_data and ETF cycle sections entirely. Keep a separate
+# allowlist for public market/fund disclosures while still excluding all
+# internal corpus, prompt and reviewer fields by default.
+_ETF_PUBLIC_FIELDS = frozenset((
+    "asset_type", "stock_code", "stock_name", "research_mode", "as_of",
+    "etf_data", "summary", "section_labels", "generated_at",
+))
+_ETF_DATA_FIELDS = frozenset((
+    "asset_type", "scope", "fund", "portfolio", "portfolio_stats",
+    "etf_price_position", "macro_market", "industry_cycle",
+    "limitations", "collected_on",
+))
+_ETF_SUMMARY_FIELDS = frozenset((
+    "stance", "thesis_summary", "sections", "risk_notes",
+    "invalidation_condition", "generation_status",
+))
+
+
+def public_etf_report(raw: Mapping[str, Any]) -> dict:
+    """A separate, strict, idempotent public projection for ETFs.
+
+    No issuer-only metrics or private knowledge snippets can leak into ETF
+    responses. The crucial routing fields must survive each task poll.
+    """
+    data = raw.get("etf_data")
+    summary = raw.get("summary")
+    out = {
+        key: deepcopy(value)
+        for key, value in raw.items() if key in _ETF_PUBLIC_FIELDS
+    }
+    out["asset_type"] = "etf"
+    out["etf_data"] = (
+        {key: deepcopy(value) for key, value in data.items()
+         if key in _ETF_DATA_FIELDS} if isinstance(data, Mapping) else {}
+    )
+    out["summary"] = (
+        {key: deepcopy(value) for key, value in summary.items()
+         if key in _ETF_SUMMARY_FIELDS} if isinstance(summary, Mapping) else {}
+    )
+    return finite_json_numbers(out)
