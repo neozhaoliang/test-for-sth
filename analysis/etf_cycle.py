@@ -43,7 +43,7 @@ def earnings_breadth(holdings: list[dict]) -> dict:
     return out
 
 
-_RESOURCE_SECTORS = {"黄金产业股票", "煤炭", "原油石化", "有色铜铝", "钢铁", "基础化工"}
+_RESOURCE_SECTORS = {"黄金产业股票", "煤炭", "原油石化", "铜产业", "铝产业", "综合有色金属", "钢铁", "甲醇", "基础化工"}
 
 
 def assess_cycle(market: dict, holdings: list[dict]) -> dict:
