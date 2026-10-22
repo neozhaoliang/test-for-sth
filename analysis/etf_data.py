@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 import akshare as ak
 import pandas as pd
 
-from analysis.etf_discovery import assets_yi, ranked_matches, matches, recent_day, theme
+from analysis.etf_discovery import assets_yi, ranked_matches, matches, recent_day, theme, key
 from analysis.profitability import get_profitability_trend
 from analysis.valuation_history import get_valuation_history
 from tools.utils import utils
@@ -261,10 +261,20 @@ async def resolve_etf(raw: str) -> dict | None:
     code = _digits(query)
     if code:
         return next((r for r in rows if r["code"] == code), None)
+    partial = [r for r in rows if matches(query, r)]
+    # "沪深300ETF" is an index-family request even if an issuer happens
+    # to use exactly that short name. Never silently pick that issuer.
+    broad_query = key(query) in {
+        "黄金股", "黄金股etf", "黄金产业", "黄金产业etf",
+        "黄金产业股票", "黄金产业股票etf",
+        "沪深港黄金产业股票etf", "中证沪深港黄金产业股票etf",
+        "沪深300", "沪深300etf", "中证沪深300etf",
+    }
+    if broad_query and len(partial) > 1:
+        return None
     exact = [r for r in rows if r["name"].casefold() == query.casefold()]
     if len(exact) == 1:
         return exact[0]
-    partial = [r for r in rows if matches(query, r)]
     return partial[0] if len(partial) == 1 else None
 
 
