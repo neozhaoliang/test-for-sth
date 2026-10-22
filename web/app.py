@@ -45,9 +45,9 @@ from analysis.knowledge_base import (
 from analysis.realtime_price import resolve_stock_code
 from analysis.stock_suggest import search_stocks, warm_stock_catalog
 from analysis.report import generate_report
-from analysis.etf_data import resolve_etf, search_etfs, warm_etf_catalog
+from analysis.etf_data import resolve_etf, search_etfs, warm_etf_catalog, collect_etf_overview
 from analysis.etf_report import generate_etf_report
-from analysis.public_report import public_stock_report
+from analysis.public_report import public_stock_report, public_etf_report
 from web.intranet_access import IntranetAccessMiddleware, load_access_settings
 from analysis.json_safety import finite_json_numbers, nonfinite_number_paths
 from analysis.research_context import (
@@ -127,7 +127,8 @@ async def _run_analysis(
                 "[web.app] analysis %s non-finite numeric observations: %s",
                 task_id, bad_paths,
             )
-        result = raw_report if asset_type == "etf" else public_stock_report(raw_report)
+        result = (public_etf_report(raw_report) if asset_type == "etf"
+                  else public_stock_report(raw_report))
         # Validate BEFORE marking done, so a future unsupported payload type
         # becomes an ordinary failed task instead of repeated GET 500s.
         json.dumps(result, ensure_ascii=False, allow_nan=False)
@@ -212,11 +213,33 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         "status": "pending",
         "result": None,
         "error": None,
+        "asset_type": "etf" if etf else "stock",
         "request": research_request.model_dump(mode="json"),
     }
     asyncio.create_task(_run_analysis(task_id, stock_code, research_request,
                                       "etf" if etf else "stock"))
     return AnalyzeResponse(task_id=task_id)
+
+
+@app.get("/api/etfs/overview")
+async def get_etf_overview(
+    code: str = Query(..., min_length=6, max_length=16),
+) -> Dict:
+    """Price and latest published top-ten; no LLM, company charts or stock F10.
+
+    This endpoint also recovers older task results produced before ETF
+    asset_type/etf_data survived the public API projection.
+    """
+    fund = await resolve_etf(code)
+    if fund is None:
+        raise HTTPException(status_code=404, detail="未找到对应的场内ETF代码")
+    payload = await collect_etf_overview(fund)
+    return finite_json_numbers({
+        "asset_type": "etf",
+        "stock_name": fund["name"],
+        "stock_code": fund["stock_code"],
+        "etf_data": payload,
+    })
 
 
 @app.get("/api/stocks/suggest")
@@ -281,7 +304,10 @@ async def get_task(task_id: str) -> Dict:
     if isinstance(result, dict):
         # A second projection protects responses from reports cached before
         # the privacy change, even when the HTML does not display the data.
-        result = public_stock_report(result)
+        if result.get("asset_type") == "etf" or task.get("asset_type") == "etf":
+            result = public_etf_report(result)
+        else:
+            result = public_stock_report(result)
     # Detailed exceptions may contain provider payloads or a pasted source
     # excerpt. Keep diagnostic details in server logs only, not public JSON.
     public_error = None
@@ -4043,8 +4069,71 @@ function renderEtfResult(report) {
   document.getElementById('result').innerHTML=html;
 }
 
+let etfOverviewRenderToken = 0;
+
+async function refreshMissingEtfOverview(report, token) {
+  // ETF reports created by an older server version can be missing their fund
+  // payload due to a stock-only public projection. The ETF overview is
+  // independent of the LLM and must not use issuer valuation widgets.
+  const code=String(report.stock_code||'').trim();
+  if (!/^(SH|SZ)?[0-9]{6}$/i.test(code)) return;
+  try {
+    const response=await fetch('/api/etfs/overview?code='+encodeURIComponent(code), {
+      headers: {Accept: 'application/json'}, cache: 'no-store',
+    });
+    if (!response.ok) throw new Error('HTTP '+response.status);
+    const fresh=await response.json();
+    if (token!==etfOverviewRenderToken || fresh.asset_type!=='etf' ||
+        !fresh.etf_data) return;
+    const original=report.etf_data||{}, incoming=fresh.etf_data||{};
+    const combined={...original,...incoming,
+      // The lighter overview has no sector/macro data. Keep it from a full
+      // ETF report rather than erasing it on a holdings/quote refresh.
+      macro_market:original.macro_market||incoming.macro_market,
+      industry_cycle:original.industry_cycle||incoming.industry_cycle,
+    };
+    renderEtfResult({...report, asset_type:'etf',
+      stock_name:fresh.stock_name||report.stock_name,
+      stock_code:fresh.stock_code||report.stock_code,
+      etf_data:combined,
+    });
+  } catch (error) {
+    if (token===etfOverviewRenderToken && !(report.etf_data?.portfolio?.holdings||[]).length) {
+      // Even during an outage, render a truthful ETF-specific notice.
+      const holder=document.getElementById('etf-latest-top-ten');
+      if (holder) {
+        const notice=document.createElement('p');
+        notice.className='etf-source';
+        notice.textContent='最新持仓查询暂不可用，不能以个股图表或其他基金成分替代。';
+        holder.appendChild(notice);
+      }
+    }
+  }
+}
+
 function renderResult(report) {
-  if (report && report.asset_type === "etf") { renderEtfResult(report); return; }
+  etfOverviewRenderToken += 1;
+  if (isEtfInstrument(report)) {
+    const hasDedicatedData=!!report.etf_data;
+    const etfReport={...report, asset_type:'etf',
+      etf_data:report.etf_data||{},
+      // A legacy issuer-shaped report contains no reliable ETF research
+      // evidence; its generic buy/sell summary must not be relabelled as one.
+      summary:hasDedicatedData?report.summary:{
+        stance:'', thesis_summary:'这是旧版报告，缺少ETF专属分析数据。请重新分析以获取宏观、行业周期和重仓股研究。',
+        sections:{},
+      },
+    };
+    renderEtfResult(etfReport);
+    const fund=etfReport.etf_data?.fund||{};
+    const holdings=etfReport.etf_data?.portfolio?.holdings||[];
+    const price=etfReport.etf_data?.etf_price_position||{};
+    if (!holdings.length || !(numericOrNull(fund.latest_price)>0 ||
+                              numericOrNull(price.recent_close)>0)) {
+      refreshMissingEtfOverview(etfReport, etfOverviewRenderToken);
+    }
+    return;
+  }
   const el = document.getElementById('result');
   const isHistorical = report.research_mode === 'historical';
   // The top card holds the company name, small ticker, and the six key
