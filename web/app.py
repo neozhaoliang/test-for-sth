@@ -3842,7 +3842,7 @@ function renderVerdictMarketStrip(report) {
     const fund=report.etf_data?.fund||{};
     const fundPrice=numericOrNull(fund.latest_price);
     const displayPrice=fundPrice!==null?fundPrice:price;
-    const label=fundPrice!==null?'ETF现价':quoteLabel;
+    const label=fundPrice!==null?(fund.quote_label||'ETF行情参考价'):quoteLabel;
     const at=fund.quote_time||fund.data_date||quotedAt;
     return '<div class="verdict-market-strip verdict-market-strip-etf" '+
       'role="group" aria-label="ETF现价">'+
@@ -3887,9 +3887,20 @@ function renderEtfResult(report) {
   const heading=(title)=>'<h3>'+safe(title)+'</h3>';
   // An ETF is not a listed operating company. Never mount the six-company-
   // factor grid here, even when some constituent observations are present.
-  const latest=numericOrNull(fund.latest_price);
+  const observedQuote=numericOrNull(fund.latest_price);
+  const lastClose=numericOrNull(price.recent_close??price.price_close);
+  // The daily close can be shown even in old saved ETF payloads that did
+  // not enrich fund.latest_price. A dated CLOSE must not be called live.
+  const hasMarketQuote=observedQuote!==null&&observedQuote>0;
+  const latest=hasMarketQuote?observedQuote:lastClose;
+  const closeAsOf=price.recent_close_as_of||price.price_as_of||'日期暂缺';
   const latestText=latest!==null&&latest>0?latest.toFixed(3)+' 元':'暂缺';
-  const quoteAt=fund.quote_time||fund.data_date||'行情时间暂缺';
+  const quoteLabel=hasMarketQuote?(fund.quote_label||'ETF行情参考价'):
+    (latest!==null&&latest>0?'最近交易日收盘价':'ETF行情暂无数据');
+  const quoteAt=hasMarketQuote?(fund.quote_time||fund.data_date||
+    '报价时间暂缺'):(closeAsOf+' 收盘（非实时）');
+  const quoteDetail=hasMarketQuote?(fund.quote_source||''):
+    (price.recent_close_source||'基金历史交易日数据');
   let html='<section class="report-header-inline report-company-card report-etf-card" '+
     'role="group" aria-label="ETF基金与现价">'+
     '<div class="report-company-identity"><h2 id="report-top">'+
@@ -3897,7 +3908,8 @@ function renderEtfResult(report) {
       '<span class="report-stock-code">'+safe(report.stock_code||'')+'</span>'+
     '</div>'+
     '<div class="verdict-market-strip verdict-market-strip-etf" role="group" aria-label="ETF现价">'+
-      verdictMetric('ETF现价',latestText,quoteAt,latest!==null&&latest>0?'price':'missing')+
+      verdictMetric(quoteLabel,latestText,quoteAt,
+        latest!==null&&latest>0?'price':'missing',quoteDetail)+
     '</div></section>'+
     '<p class="etf-subtitle">ETF专项研究 · '+safe(data.scope||'')+
     ' · 数据截至 '+safe(report.as_of||'日期暂缺')+'</p>';
