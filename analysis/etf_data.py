@@ -826,7 +826,7 @@ async def collect_etf_data(spot: dict) -> dict:
     # Quote availability is separate from the historical 52-week analysis.
     # Fetch a dated independent daily close only if neither quote feed nor
     # the Eastmoney daily candle supplied a usable verified recent price.
-    if fund.get("quote_mode") != "dated_market_snapshot":
+    if fund.get("quote_mode") not in ("dated_market_snapshot", "undated_market_snapshot"):
         if not _valid_close_date(etf_price.get("recent_close_as_of"), today):
             external_close = await _sina_last_close(code, today)
             if external_close:
