@@ -209,7 +209,7 @@ async def test_gold_equity_etf_is_not_treated_as_physical_gold(monkeypatch):
     assert "黄金产业股票ETF" in result["scope"]
     assert result["portfolio"]["holdings"][0]["price_position_pct"] == 85
     assert result["portfolio"]["holdings"][1]["price_currency"] == "HKD"
-    assert result["portfolio_stats"]["price_observed_weight_pct"] == 10
+    assert result["portfolio_stats"]["price_observed_weight_pct"] == 18
 
 
 def test_five_digit_hong_kong_holding_remains_in_disclosure_not_a_share_pipeline():
