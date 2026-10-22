@@ -813,6 +813,37 @@ def _portfolio_stats(holdings: list[dict]) -> dict:
     }
 
 
+async def collect_etf_overview(spot: dict) -> dict:
+    """Lightweight, LLM-free ETF card for both new and legacy report display.
+
+    Quotation and latest published holdings are fetched independently. Never
+    fill an ETF's historical top ten from another fund or from an index basket.
+    """
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    code = spot["code"]
+    holdings, etf_price, fund = await asyncio.gather(
+        _holdings(code, today),
+        _etf_price(code, today),
+        _fund_with_live_quote(spot),
+    )
+    if fund.get("quote_mode") not in (
+        "dated_market_snapshot", "undated_market_snapshot"
+    ):
+        if not _valid_close_date(etf_price.get("recent_close_as_of"), today):
+            sina_close = await _sina_last_close(code, today)
+            if sina_close:
+                etf_price = {**etf_price, **sina_close}
+        fund = _with_recent_close(fund, etf_price, today)
+    return {
+        "asset_type": "etf",
+        "fund": fund,
+        "portfolio": holdings,
+        "portfolio_stats": _portfolio_stats(holdings.get("holdings") or []),
+        "etf_price_position": etf_price,
+        "collected_on": today.isoformat(),
+    }
+
+
 async def collect_etf_data(spot: dict) -> dict:
     """ETF-specific look-through, macro environment and dated cycle observations."""
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
