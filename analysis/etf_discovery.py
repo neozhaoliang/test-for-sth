@@ -47,9 +47,16 @@ def matches(query: str, fund: dict) -> bool:
         return code.startswith(q[-6:] if q.startswith(("sh", "sz")) else q)
     group = theme(query)
     if group == "黄金产业股票":
-        return bool(_GOLD_STOCK.search(name))
+        generic = {
+            "黄金股", "黄金股etf", "黄金产业", "黄金产业etf",
+            "黄金产业股票", "黄金产业股票etf",
+            "沪深港黄金产业股票etf", "中证沪深港黄金产业股票etf",
+        }
+        return (bool(_GOLD_STOCK.search(name)) if q in generic else q in name)
     if group == "沪深300":
-        return "沪深300" in name and not _CSI300_EXTRAS.search(name)
+        generic = {"沪深300", "沪深300etf", "中证沪深300etf"}
+        return (("沪深300" in name and not _CSI300_EXTRAS.search(name))
+                if q in generic else q in name)
     # ETF appears anywhere in a long product name and may precede the manager.
     return q in name or q.replace("etf", "") in name.replace("etf", "")
 
