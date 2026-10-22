@@ -16,7 +16,7 @@ from typing import Any
 
 def key(value: Any) -> str:
     raw = unicodedata.normalize("NFKC", str(value or "")).casefold()
-    return re.sub(r"[\\s·_()（）/\u3000-]+", "", raw)
+    return re.sub(r"[\s·_()（）/\u3000-]+", "", raw)
 
 
 _GOLD_STOCK = re.compile(r"黄金股|黄金产业|黄金矿业|金矿股|黄金股票")
@@ -43,7 +43,7 @@ def matches(query: str, fund: dict) -> bool:
     if not q:
         return False
     # Search by exact/prefix code does not expand to the whole index family.
-    if q.isdigit() or re.fullmatch(r"(?:sh|sz)\\d{1,6}", q):
+    if q.isdigit() or re.fullmatch(r"(?:sh|sz)\d{1,6}", q):
         return code.startswith(q[-6:] if q.startswith(("sh", "sz")) else q)
     group = theme(query)
     if group == "黄金产业股票":
@@ -80,7 +80,7 @@ def recent_day(value: Any, max_age_days: int = 30, today: date | None = None) ->
 def ranked_matches(query: str, rows: list[dict], limit: int = 40) -> list[dict]:
     selected = [r for r in rows if matches(query, r)]
     # Explicit code is resolved exactly/prefix-first, regardless of scale.
-    code_query = bool(re.fullmatch(r"(?:sh|sz)?\\d{1,6}", key(query)))
+    code_query = bool(re.fullmatch(r"(?:sh|sz)?\d{1,6}", key(query)))
     if code_query:
         selected.sort(key=lambda r: (r["code"] != key(query)[-6:],
                                      -float(r.get("scale_yi") or 0), r["code"]))
