@@ -45,9 +45,9 @@ from analysis.knowledge_base import (
 from analysis.realtime_price import resolve_stock_code
 from analysis.stock_suggest import search_stocks, warm_stock_catalog
 from analysis.report import generate_report
-from analysis.etf_data import resolve_etf, search_etfs, warm_etf_catalog
+from analysis.etf_data import resolve_etf, search_etfs, warm_etf_catalog, collect_etf_overview
 from analysis.etf_report import generate_etf_report
-from analysis.public_report import public_stock_report
+from analysis.public_report import public_stock_report, public_etf_report
 from web.intranet_access import IntranetAccessMiddleware, load_access_settings
 from analysis.json_safety import finite_json_numbers, nonfinite_number_paths
 from analysis.research_context import (
@@ -127,7 +127,8 @@ async def _run_analysis(
                 "[web.app] analysis %s non-finite numeric observations: %s",
                 task_id, bad_paths,
             )
-        result = raw_report if asset_type == "etf" else public_stock_report(raw_report)
+        result = (public_etf_report(raw_report) if asset_type == "etf"
+                  else public_stock_report(raw_report))
         # Validate BEFORE marking done, so a future unsupported payload type
         # becomes an ordinary failed task instead of repeated GET 500s.
         json.dumps(result, ensure_ascii=False, allow_nan=False)
@@ -212,11 +213,33 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         "status": "pending",
         "result": None,
         "error": None,
+        "asset_type": "etf" if etf else "stock",
         "request": research_request.model_dump(mode="json"),
     }
     asyncio.create_task(_run_analysis(task_id, stock_code, research_request,
                                       "etf" if etf else "stock"))
     return AnalyzeResponse(task_id=task_id)
+
+
+@app.get("/api/etfs/overview")
+async def get_etf_overview(
+    code: str = Query(..., min_length=6, max_length=16),
+) -> Dict:
+    """Price and latest published top-ten; no LLM, company charts or stock F10.
+
+    This endpoint also recovers older task results produced before ETF
+    asset_type/etf_data survived the public API projection.
+    """
+    fund = await resolve_etf(code)
+    if fund is None:
+        raise HTTPException(status_code=404, detail="未找到对应的场内ETF代码")
+    payload = await collect_etf_overview(fund)
+    return finite_json_numbers({
+        "asset_type": "etf",
+        "stock_name": fund["name"],
+        "stock_code": fund["stock_code"],
+        "etf_data": payload,
+    })
 
 
 @app.get("/api/stocks/suggest")
@@ -281,7 +304,10 @@ async def get_task(task_id: str) -> Dict:
     if isinstance(result, dict):
         # A second projection protects responses from reports cached before
         # the privacy change, even when the HTML does not display the data.
-        result = public_stock_report(result)
+        if result.get("asset_type") == "etf" or task.get("asset_type") == "etf":
+            result = public_etf_report(result)
+        else:
+            result = public_stock_report(result)
     # Detailed exceptions may contain provider payloads or a pasted source
     # excerpt. Keep diagnostic details in server logs only, not public JSON.
     public_error = None
