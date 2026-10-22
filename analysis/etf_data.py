@@ -531,23 +531,61 @@ def _parse_holdings(df: Any, today: date) -> dict | None:
 
 
 async def _holdings(code: str, today: date) -> dict:
+    """Newest actually published quarter; never hardcode one ETF's top ten.
+
+    AKShare supports date="" for the latest available year. The current
+    calendar year may not yet have been published, hence both responses
+    are parsed and compared by report quarter. An empty/error provider
+    yields an explicit failure rather than last year's holdings as "latest".
+    """
     cached = _holdings_cache.get(code)
     if cached and time.monotonic() - cached[0] < 1800:
         return cached[1]
-    for year in (today.year, today.year - 1):
+
+    async def one(year: str) -> dict | None:
         try:
             df = await asyncio.wait_for(
-                asyncio.to_thread(ak.fund_portfolio_hold_em,
-                                  symbol=code, date=str(year)),
-                timeout=22,
+                asyncio.to_thread(
+                    ak.fund_portfolio_hold_em, symbol=code, date=year
+                ), timeout=22
             )
-            result = _parse_holdings(df, today)
-            if result is not None:
-                _holdings_cache[code] = (time.monotonic(), result)
-                return result
+            return _parse_holdings(df, today)
         except Exception as exc:
-            utils.logger.warning("[etf] holdings %s year=%s unavailable: %s", code, year, exc)
-    return {"holdings": [], "as_of": None, "scope": "成分股权重未核实", "source": None}
+            utils.logger.warning("[etf] holdings %s year=%s unavailable: %s",
+                                 code, year or "latest", exc)
+            return None
+
+    # "latest" is a documented selector, not an artificial stock list.
+    # Validate report period because newer rows may arrive between fetches.
+    latest, current = await asyncio.gather(one(""), one(str(today.year)))
+    candidates = [r for r in (latest, current) if r and r.get("holdings")]
+    if not candidates:
+        old = await one(str(today.year - 1))
+        if old:
+            candidates.append(old)
+    if candidates:
+        result = max(candidates, key=lambda r: r.get("as_of") or "")
+        result = {
+            **result,
+            "disclosure_as_of": (
+                result["as_of"][:4] + "-" +
+                {"Q1": "03-31", "Q2": "06-30", "Q3": "09-30", "Q4": "12-31"}
+                .get(result["as_of"][-2:], "")
+            ),
+            "retrieved_on": today.isoformat(),
+            "holding_count": len(result["holdings"]),
+            "scope": "最新可取得的基金定期报告前十大重仓（非盘中实时成分）",
+            "source": "天天基金/东方财富：基金投资组合持仓披露",
+        }
+        _holdings_cache[code] = (time.monotonic(), result)
+        return result
+    return {
+        "holdings": [], "as_of": None, "disclosure_as_of": None,
+        "retrieved_on": today.isoformat(), "holding_count": 0,
+        "scope": "没有取得可核实的最新定期报告持仓",
+        "source": "天天基金/东方财富：基金投资组合持仓披露",
+        "error": "持仓数据源不可用；不以指数实时权重或过往静态样本冒充本基金最新前十",
+    }
 
 
 def _position_from_prices(df: Any, *, date_column: str, close_column: str) -> dict:
