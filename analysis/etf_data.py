@@ -19,6 +19,7 @@ import akshare as ak
 import pandas as pd
 
 from analysis.profitability import get_profitability_trend
+from analysis.valuation_history import get_valuation_history
 from tools.utils import utils
 
 _CACHE_TTL = 240
@@ -245,7 +246,36 @@ async def _etf_price(code: str, today: date) -> dict:
 
 
 async def _stock_valuation(code: str) -> dict:
-    """Latest observed per-issuer PE/PB, not a weighted ETF index multiple."""
+    """Issuer valuation and 3/5-year history, not an ETF index multiple."""
+    try:
+        history = await asyncio.wait_for(
+            get_valuation_history(code), timeout=33,
+        )
+        if history:
+            def percentile(rows):
+                for years in (5, 3, 10):
+                    item = next((x for x in rows
+                                 if x.get("years") == years
+                                 and x.get("observations", 0) >= 100), None)
+                    if item:
+                        return {
+                            "years": years,
+                            "percentile": item["percentile"],
+                            "observations": item["observations"],
+                        }
+                return None
+            return {
+                "pe_ttm": _num(history.get("current_pe_ttm")),
+                "pb": _num(history.get("current_pb")),
+                "pe_history_position": percentile(history.get("pe_percentiles") or []),
+                "pb_history_position": percentile(history.get("pb_percentiles") or []),
+                "valuation_observed_on": history.get("as_of"),
+                "valuation_source": history.get("source"),
+                "valuation_notes": history.get("notes") or [],
+            }
+    except Exception as exc:
+        utils.logger.warning("[etf] historical valuation %s: %s", code, exc)
+    # Optional fallback when the history provider has no data. It never fabricates a percentile.
     prefix = "SH" if code.startswith(("6", "9")) else (
         "BJ" if code.startswith(("4", "8")) else "SZ")
     try:
@@ -302,6 +332,13 @@ def _portfolio_stats(holdings: list[dict]) -> dict:
     depressed = [h for h in observed if h["price_position_pct"] <= 20]
     fin = [h for h in holdings if h.get("net_profit_growth_pct") is not None]
     vals = [h for h in holdings if h.get("pe_ttm") is not None and h.get("pb") is not None]
+    priced = [h for h in holdings if (
+        h.get("pe_history_position") or h.get("pb_history_position")
+    )]
+    valuation_high = [h for h in priced if any(
+        float((h.get(key) or {}).get("percentile") or 0) >= 80
+        for key in ("pe_history_position", "pb_history_position")
+    )]
     return {
         "top5_weight_pct": top5 if holdings else None,
         "top10_weight_pct": top10 if holdings else None,
@@ -310,6 +347,10 @@ def _portfolio_stats(holdings: list[dict]) -> dict:
         "low_position_weight_pct": round(sum(h["weight_pct"] for h in depressed), 2),
         "profit_observed_weight_pct": round(sum(h["weight_pct"] for h in fin), 2),
         "pe_pb_observed_weight_pct": round(sum(h["weight_pct"] for h in vals), 2),
+        "historical_valuation_observed_weight_pct": round(
+            sum(h["weight_pct"] for h in priced), 2),
+        "high_valuation_position_weight_pct": round(
+            sum(h["weight_pct"] for h in valuation_high), 2),
         "negative_profit_growth_weight_pct": round(
             sum(h["weight_pct"] for h in fin if h["net_profit_growth_pct"] < 0), 2),
         "price_high_rule": "近252交易日前复权收盘价区间位置≥80%（不等于估值贵）",
@@ -358,7 +399,7 @@ async def collect_etf_data(spot: dict) -> dict:
             "单次份额与成交额不能推出ETF资金净流入，更不能推出主动看好",
             "IOPV是盘中估值，不等于已确认的基金净值；注意报价时间",
             "成分股财务数据为披露期指标，不可视为今日盈利预测",
-            "已观察的前五大个股PE(TTM)/PB不是ETF整体估值，也不是历史分位",
+            "已观察的前五大个股PE(TTM)/PB不代表ETF整体估值；历史分位需观察期和披露日期",
         ],
         "collected_on": today.isoformat(),
     }
