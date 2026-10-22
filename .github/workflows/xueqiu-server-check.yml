@@ -6,6 +6,8 @@ on:
       - "Dockerfile"
       - ".dockerignore"
       - "tools/docker-entrypoint.sh"
+      - "tools/seed-image-data.sh"
+      - "data/**"
       - "tools/xueqiu_server_login.py"
       - "media_platform/xueqiu/**"
       - "config/base_config.py"
@@ -17,6 +19,8 @@ on:
       - "Dockerfile"
       - ".dockerignore"
       - "tools/docker-entrypoint.sh"
+      - "tools/seed-image-data.sh"
+      - "data/**"
       - "tools/xueqiu_server_login.py"
       - "media_platform/xueqiu/**"
       - "config/base_config.py"
@@ -38,6 +42,14 @@ jobs:
       - name: Validate shell entrypoint and Python modules
         run: |
           bash -n tools/docker-entrypoint.sh
+          bash -n tools/seed-image-data.sh
+          test -s data/knowledge_base/distilled_cache.jsonl
+          if grep -Fxq 'data/' .dockerignore || grep -Fxq 'data' .dockerignore; then
+            echo "data directory is excluded from build context" >&2
+            exit 1
+          fi
+          grep -q '/opt/image-data' Dockerfile
+
           python -m py_compile media_platform/xueqiu/client.py media_platform/xueqiu/core.py config/base_config.py tools/xueqiu_server_login.py
           test "$(head -n 1 Dockerfile)" = "FROM private-registry.sohucs.com/nvidia/cuda:11.8.0-cudnn-devel-python3.10-torch2.3.1-ubuntu22.04-ssh"
           grep -qx '.env' .dockerignore
@@ -53,6 +65,17 @@ jobs:
             # The command must only appear inside a historical warning comment.
             ! grep -qE '^RUN[[:space:]]+uv python install' Dockerfile
           fi
+      - name: Verify image seed populates empty volumes without overwriting user files
+        run: |
+          SEED_DIR="${RUNNER_TEMP}/image-data"
+          LIVE_DIR="${RUNNER_TEMP}/volume-data"
+          mkdir -p "$SEED_DIR/xueqiu/jsonl" "$LIVE_DIR"
+          printf 'seed-data\n' > "$SEED_DIR/xueqiu/jsonl/history.jsonl"
+          IMAGE_DATA_SEED_DIR="$SEED_DIR" RUNTIME_DATA_DIR="$LIVE_DIR" bash tools/seed-image-data.sh
+          test "$(cat "$LIVE_DIR/xueqiu/jsonl/history.jsonl")" = seed-data
+          printf 'user-modified\n' > "$LIVE_DIR/xueqiu/jsonl/history.jsonl"
+          IMAGE_DATA_SEED_DIR="$SEED_DIR" RUNTIME_DATA_DIR="$LIVE_DIR" bash tools/seed-image-data.sh
+          test "$(cat "$LIVE_DIR/xueqiu/jsonl/history.jsonl")" = user-modified
       - name: Install locked project dependencies
         run: |
           python -m pip install uv==0.10.0 pytest pytest-asyncio
