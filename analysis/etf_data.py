@@ -22,11 +22,22 @@ from analysis.profitability import get_profitability_trend
 from analysis.valuation_history import get_valuation_history
 from tools.utils import utils
 
-_CACHE_TTL = 240
+
+# The listing of real ETFs is independent of the intraday quote service.
+# A verified reference code remains searchable even when every feed is offline;
+# reference entries NEVER contain a fabricated price or proof of live trading.
+_CATALOG_TTL = 6 * 3600
+_FAILURE_RETRY = 300
 _catalog_cache: tuple[float, list[dict]] = (0.0, [])
 _catalog_lock = asyncio.Lock()
+_catalog_refresh_task: asyncio.Task | None = None
 _holdings_cache: dict[str, tuple[float, dict]] = {}
-_EXCLUDED = re.compile(r"港股|恒生|纳斯达克|标普|日经|德国|法国|美国|日本|跨境|QDII|全球|黄金|白银|原油|商品|国债|债券|货币|短融|可转债|REIT|不动产", re.I)
+_REFERENCE_ETFS = (("517520", "黄金股ETF永赢"),)
+_EXCLUDED = re.compile(
+    r"港股|恒生|纳斯达克|标普|日经|德国|法国|美国|日本|跨境|QDII|全球|"
+    r"黄金|白银|原油|商品|国债|债券|货币|短融|可转债|REIT|不动产", re.I
+)
+_GOLD_EQUITY = re.compile(r"黄金股|黄金产业|金矿股|黄金矿业", re.I)
 
 
 def _num(value: Any) -> float | None:
@@ -68,41 +79,114 @@ def _spot_row(row: Any) -> dict:
     }
 
 
-async def _catalog() -> list[dict]:
-    global _catalog_cache
-    if _catalog_cache[1] and time.monotonic() - _catalog_cache[0] < _CACHE_TTL:
-        return _catalog_cache[1]
-    async with _catalog_lock:
-        if _catalog_cache[1] and time.monotonic() - _catalog_cache[0] < _CACHE_TTL:
-            return _catalog_cache[1]
-        try:
-            df = await asyncio.wait_for(
-                asyncio.to_thread(ak.fund_etf_spot_em), timeout=28
-            )
-            rows = [_spot_row(row) for _, row in df.iterrows()] if df is not None else []
-            rows = [row for row in rows if row and row["name"]]
-            if rows:
-                _catalog_cache = (time.monotonic(), rows)
-                return rows
-        except Exception as exc:
-            utils.logger.warning("[etf] ETF spot unavailable: %s", exc)
-        # A stale quote must never be presented as a current tradeable price.
+def _reference_rows() -> list[dict]:
+    rows = []
+    for code, name in _REFERENCE_ETFS:
+        row = _spot_row({"代码": code, "名称": name})
+        row["catalog_source"] = "已核实的基金代码参考表（非实时行情）"
+        rows.append(row)
+    return rows
+
+
+def _catalog_entry(code: Any, name: Any, *, source: str, require_etf: bool) -> dict | None:
+    digits = _digits(code)
+    title = str(name or "").strip()
+    # ETF feeder funds are NOT exchange-traded ETF shares.
+    if not digits or digits[0] not in "15" or not title or title.lower() == "nan":
+        return None
+    if "联接" in title or (require_etf and "ETF" not in title.upper()):
+        return None
+    row = _spot_row({"代码": digits, "名称": title})
+    row["catalog_source"] = source
+    return row
+
+
+async def _catalog_from_source(fn_name: str, code_col: str, name_col: str,
+                               *, require_etf: bool, kwargs: dict) -> list[dict]:
+    fn = getattr(ak, fn_name, None)
+    if fn is None:
+        return []
+    try:
+        df = await asyncio.wait_for(asyncio.to_thread(fn, **kwargs), timeout=12)
+        if df is None or df.empty or not {code_col, name_col}.issubset(df.columns):
+            return []
+        result = []
+        for code, name in df[[code_col, name_col]].itertuples(index=False, name=None):
+            row = _catalog_entry(code, name, source=fn_name, require_etf=require_etf)
+            if row:
+                result.append(row)
+        return result
+    except Exception as exc:
+        utils.logger.warning("[etf] catalog %s unavailable: %s", fn_name, exc)
         return []
 
 
+async def _refresh_catalog() -> list[dict]:
+    global _catalog_cache
+    async with _catalog_lock:
+        # Neither listing API depends on the unreliable Eastmoney ETF quote feed.
+        ths, em = await asyncio.gather(
+            _catalog_from_source("fund_etf_spot_ths", "基金代码", "基金名称",
+                                 require_etf=False, kwargs={"date": ""}),
+            _catalog_from_source("fund_name_em", "基金代码", "基金简称",
+                                 require_etf=True, kwargs={}),
+        )
+        rows = {r["code"]: r for r in _reference_rows()}
+        for row in ths + em:
+            # Keep the verified display name for pinned codes for reliable search.
+            rows.setdefault(row["code"], row)
+        _catalog_cache = (time.monotonic() + (_CATALOG_TTL if (ths or em)
+                                             else _FAILURE_RETRY), list(rows.values()))
+        return _catalog_cache[1]
+
+
+async def _catalog() -> list[dict]:
+    global _catalog_refresh_task
+    if time.monotonic() >= _catalog_cache[0] and (
+        _catalog_refresh_task is None or _catalog_refresh_task.done()
+    ):
+        # Searching a code must not wait on an intraday market-data API.
+        _catalog_refresh_task = asyncio.create_task(_refresh_catalog())
+    return _catalog_cache[1] or _reference_rows()
+
+
+async def warm_etf_catalog() -> None:
+    """Warm independent fund listings in the background at server startup."""
+    await _catalog()
+    if _catalog_refresh_task is not None:
+        await _catalog_refresh_task
+
+
+async def _lookup_rows(query: str) -> list[dict]:
+    rows = await _catalog()
+    code = _digits(query)
+    def matches(r: dict) -> bool:
+        return (r["code"] == code if code else query.casefold() in r["name"].casefold())
+    if any(matches(r) for r in rows):
+        return rows
+    # Give a cold catalogue a short opportunity to finish for unpinned funds.
+    task = _catalog_refresh_task
+    if task is not None and not task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=4)
+        except (asyncio.TimeoutError, Exception):
+            pass
+    return _catalog_cache[1] or rows
+
+
 async def resolve_etf(raw: str) -> dict | None:
-    """Return a verified ETF; no guess based on 5/1 prefixes alone."""
+    """Resolve fund identity independently from the availability of its quote."""
     query = str(raw or "").strip()
     if not query:
         return None
-    rows = await _catalog()
+    rows = await _lookup_rows(query)
     code = _digits(query)
     if code:
         return next((r for r in rows if r["code"] == code), None)
-    exact = [r for r in rows if r["name"] == query]
+    exact = [r for r in rows if r["name"].casefold() == query.casefold()]
     if len(exact) == 1:
         return exact[0]
-    partial = [r for r in rows if query in r["name"]]
+    partial = [r for r in rows if query.casefold() in r["name"].casefold()]
     return partial[0] if len(partial) == 1 else None
 
 
@@ -110,7 +194,7 @@ async def search_etfs(query: str, limit: int = 8) -> list[dict]:
     q = str(query or "").strip().casefold()
     if not q:
         return []
-    rows = await _catalog()
+    rows = await _lookup_rows(q)
     matched = [r for r in rows if q in r["name"].casefold()
                or q in r["stock_code"].casefold() or q in r["code"]]
     matched.sort(key=lambda r: (r["code"] != q and r["stock_code"].casefold() != q,
@@ -118,6 +202,25 @@ async def search_etfs(query: str, limit: int = 8) -> list[dict]:
     return [{"code": r["stock_code"], "name": r["name"],
              "market": r["stock_code"][:2], "asset_type": "etf"}
             for r in matched[:max(1, min(limit, 15))]]
+
+
+async def _fund_with_live_quote(spot: dict) -> dict:
+    """Optional quote enrichment. Never invent a live price from fund NAV."""
+    try:
+        df = await asyncio.wait_for(asyncio.to_thread(ak.fund_etf_spot_em), timeout=10)
+        if df is not None and not df.empty and {"代码", "名称"}.issubset(df.columns):
+            matched = df[df["代码"].astype(str).str.strip() == spot["code"]]
+            if not matched.empty:
+                quote = _spot_row(matched.iloc[0])
+                return {**spot, **{k: v for k, v in quote.items()
+                                 if k not in ("code", "stock_code", "name")},
+                        "quote_source": "东方财富ETF实时行情"}
+    except Exception as exc:
+        utils.logger.warning("[etf] live quote %s unavailable: %s", spot["code"], exc)
+    return {**spot, "quote_source": "行情暂缺，基金代码来自独立名录",
+            "latest_price": None, "iopv": None, "iopv_premium_pct": None,
+            "price_change_pct": None, "turnover_yuan": None, "volume": None,
+            "data_date": "", "quote_time": ""}
 
 
 def _quarter(value: Any) -> tuple[int, int] | None:
@@ -139,7 +242,12 @@ def _parse_holdings(df: Any, today: date) -> dict | None:
         quarter = _quarter(row.get("季度"))
         if quarter is None or quarter > (today.year, (today.month - 1) // 3 + 1):
             continue
-        code = _digits(row.get("股票代码"))
+        raw_code = str(row.get("股票代码") or "").strip()
+        code = _digits(raw_code)
+        # Hong Kong holdings may use 4-5 digits. Keep them in the disclosure,
+        # but never pass them into the A-share price or earnings pipeline.
+        if not code and re.fullmatch(r"[0-9]{4,5}", raw_code):
+            code = raw_code.zfill(5)
         name = str(row.get("股票名称") or "").strip()
         weight = _num(row.get("占净值比例"))
         if not code or not name or weight is None or weight <= 0 or weight > 100:
@@ -363,8 +471,11 @@ async def collect_etf_data(spot: dict) -> dict:
     """Gather distinct ETF and constituent observations without company-only fields."""
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     code, name = spot["code"], spot["name"]
-    equity = not bool(_EXCLUDED.search(name))
-    holdings, etf_price = await asyncio.gather(_holdings(code, today), _etf_price(code, today))
+    gold_equity = bool(_GOLD_EQUITY.search(name))
+    equity = gold_equity or not bool(_EXCLUDED.search(name))
+    holdings, etf_price, fund = await asyncio.gather(
+        _holdings(code, today), _etf_price(code, today), _fund_with_live_quote(spot)
+    )
     original = holdings.get("holdings") or []
     if not equity:
         # Never run A-share financials on Hong Kong, bond or gold holdings.
@@ -388,13 +499,18 @@ async def collect_etf_data(spot: dict) -> dict:
     enriched = await asyncio.gather(*(enrich(h, i) for i, h in enumerate(original[:10])))
     return {
         "asset_type": "etf",
-        "scope": "A股股票ETF" if equity else "非A股股票ETF或混合资产ETF（限制适用个股透视）",
-        "fund": spot,
+        "scope": ("黄金产业股票ETF（仅对已披露且可核实的A股重仓做财务透视；"
+                  "港股等持仓不套用A股指标）" if gold_equity
+                  else "A股股票ETF" if equity
+                  else "非A股股票ETF或混合资产ETF（限制适用个股透视）"),
+        "fund": fund,
         "portfolio": {**holdings, "holdings": enriched},
         "portfolio_stats": _portfolio_stats(enriched),
         "etf_price_position": etf_price,
         "limitations": [
             "基金季报披露重仓股不等于今日全部指数成份股，亦不是申赎篮子",
+            "黄金股ETF持有黄金产业股票，并非实物黄金ETF；港股等非A股持仓不套用A股财务指标",
+            "若ETF行情接口失效，最新价与IOPV显示缺失；不可拿昨日净值冒充盘中价格",
             "股价52周位置只反映价格相对高低，不能代替估值PE/PB分位",
             "单次份额与成交额不能推出ETF资金净流入，更不能推出主动看好",
             "IOPV是盘中估值，不等于已确认的基金净值；注意报价时间",
