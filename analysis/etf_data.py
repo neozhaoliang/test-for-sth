@@ -158,10 +158,13 @@ async def _catalog() -> list[dict]:
 
 
 async def warm_etf_catalog() -> None:
+    # Start fund identity and size discovery together; do not wait for the
+    # entire fund listing before beginning slow independent size feeds.
     await _catalog()
-    if _catalog_refresh_task:
-        await _catalog_refresh_task
     await _ensure_scale_refresh()
+    tasks = [task for task in (_catalog_refresh_task, _scale_refresh_task) if task]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _lookup_rows(query: str) -> list[dict]:
