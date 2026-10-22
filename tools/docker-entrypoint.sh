@@ -3,6 +3,9 @@ set -Eeuo pipefail
 umask 077
 export DISPLAY="${DISPLAY:-:99}"
 mkdir -p /app/browser_data /app/data /app/logs /app/instance
+# Initialize a pre-existing empty Docker volume from the baked-in research data.
+# Never replace or merge non-empty user data during a container restart.
+bash /app/tools/seed-image-data.sh
 Xvfb "${DISPLAY}" -screen 0 1600x900x24 -nolisten tcp -ac > /app/logs/xvfb.log 2>&1 &
 xvfb_pid=$!
 sleep 2
