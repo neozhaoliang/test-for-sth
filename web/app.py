@@ -3873,7 +3873,7 @@ function renderEtfResult(report) {
   if(rows.length) {
     html+='<div class="etf-table-wrap"><table class="etf-table"><thead><tr>'+
       '<th>重仓股</th><th>基金净值占比</th><th>52周价格位置</th>'+
-      '<th>距52周高点</th><th>财报期</th><th>净利同比</th><th>ROE</th><th>PE(TTM)</th><th>PB</th>'+
+      '<th>距52周高点</th><th>财报期</th><th>净利同比</th><th>ROE</th><th>PE(TTM)</th><th>PB</th><th>PE历史分位</th><th>PB历史分位</th>'+
       '</tr></thead><tbody>';
     rows.forEach(h=>{
       const pos=numericOrNull(h.price_position_pct);
@@ -3887,7 +3887,9 @@ function renderEtfResult(report) {
         '<td>'+safe(fmt(h.net_profit_growth_pct,'%',1))+'</td>'+
         '<td>'+safe(fmt(h.roe_pct,'%',1))+'</td>'+ 
         '<td>'+safe(fmt(h.pe_ttm,' 倍',1))+'</td>'+ 
-        '<td>'+safe(fmt(h.pb,' 倍',1))+'</td></tr>';
+        '<td>'+safe(fmt(h.pb,' 倍',1))+'</td>'+ 
+        '<td>'+safe(h.pe_history_position?fmt(h.pe_history_position.percentile,'%',1):'暂无数据')+'</td>'+ 
+        '<td>'+safe(h.pb_history_position?fmt(h.pb_history_position.percentile,'%',1):'暂无数据')+'</td></tr>';
     });
     html+='</tbody></table></div>';
   } else html+='<p class="etf-unknown">未能取得有季度标记的基金持仓数据，不会猜测前十大重仓股。</p>';
@@ -3895,6 +3897,8 @@ function renderEtfResult(report) {
     '已核实价格位置的披露持仓权重：'+safe(fmt(stats.price_observed_weight_pct,'%',1))+
     '；取得盈利指标的披露持仓权重：'+safe(fmt(stats.profit_observed_weight_pct,'%',1))+
     '；取得PE/PB的披露持仓权重：'+safe(fmt(stats.pe_pb_observed_weight_pct,'%',1))+
+    '；有历史估值分位的权重：'+safe(fmt(stats.historical_valuation_observed_weight_pct,'%',1))+
+    '；其中处于至少一项估值80%高分位的权重：'+safe(fmt(stats.high_valuation_position_weight_pct,'%',1))+
     '。没有数据的权重不视为零风险。</p></section>';
   const keys=['holdings','high_positions','earnings_cycle','valuation','fund_structure','market_price'];
   const labels=report.section_labels||{};
