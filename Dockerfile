@@ -4,6 +4,20 @@ COPY . /app
 
 WORKDIR /app
 
+# The repository keeps its scraped JSONL and distilled summaries under data/.
+# Fail loudly if Docker build context omitted them (e.g. .dockerignore or wrong
+# working directory), rather than starting with a silently empty knowledge base.
+# Copy a seed snapshot OUTSIDE /app/data: an existing empty named Docker volume
+# mounted at /app/data masks whatever was baked into that image directory.
+RUN set -eu; \
+    if [ ! -d /app/data ] || [ -z "$(find /app/data -type f -name '*.jsonl' -print -quit)" ]; then \
+      echo '[Docker] Missing data/*.jsonl in build context; build from a full main checkout' >&2; \
+      exit 1; \
+    fi; \
+    mkdir -p /opt/image-data; \
+    cp -a /app/data/. /opt/image-data/; \
+    echo "[Docker] Bundled $(find /opt/image-data -type f -name '*.jsonl' | wc -l) JSONL files as image data seed."
+
 ENV https_proxy=http://10.18.120.190:7890
 ENV http_proxy=http://10.18.120.190:7890
 ENV LANG C.UTF-8
@@ -69,7 +83,7 @@ RUN groupadd --gid 10001 investment \
     && useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash investment \
     && mkdir -p /app/browser_data /app/data /app/logs /app/instance \
     && chmod 755 /app/tools/docker-entrypoint.sh \
-    && chown -R investment:investment /app/browser_data /app/data /app/logs /app/instance \
+    && chown -R investment:investment /app/browser_data /app/data /app/logs /app/instance /opt/image-data \
     && chmod 700 /app/browser_data
 ENV HOME=/home/investment
 USER investment
