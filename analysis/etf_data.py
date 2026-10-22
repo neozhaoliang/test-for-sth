@@ -19,6 +19,8 @@ import akshare as ak
 import pandas as pd
 
 from analysis.etf_discovery import assets_yi, ranked_matches, matches, recent_day, theme, key
+from analysis.etf_macro import get_etf_market_context
+from analysis.etf_cycle import assess_cycle
 from analysis.profitability import get_profitability_trend
 from analysis.valuation_history import get_valuation_history
 from tools.utils import utils
@@ -449,6 +451,26 @@ async def _etf_price(code: str, today: date) -> dict:
         return {}
 
 
+async def _hk_stock_price(code: str, today: date) -> dict:
+    """HK top holdings are still observable for price, never via A-share F10."""
+    try:
+        df = await asyncio.wait_for(
+            asyncio.to_thread(
+                ak.stock_hk_hist, symbol=code, period="daily",
+                start_date=(today - timedelta(days=430)).strftime("%Y%m%d"),
+                end_date=today.strftime("%Y%m%d"), adjust="qfq"
+            ), timeout=16
+        )
+        out = _position_from_prices(df, date_column="日期", close_column="收盘")
+        if out:
+            out["price_currency"] = "HKD"
+            out["price_source"] = "东方财富港股历史行情（前复权）"
+        return out
+    except Exception as exc:
+        utils.logger.warning("[etf] HK holding price %s: %s", code, exc)
+        return {}
+
+
 async def _stock_valuation(code: str) -> dict:
     """Issuer valuation and 3/5-year history, not an ETF index multiple."""
     try:
@@ -503,26 +525,46 @@ async def _stock_valuation(code: str) -> dict:
         return {}
 
 
+def _profit_period_change(periods: list[dict]) -> dict:
+    """Adjacent *reported cumulative-YoY* growth rates, not single-quarter QoQ."""
+    valid = sorted(
+        [p for p in periods if p.get("period") and _num(p.get("net_profit_growth_pct")) is not None],
+        key=lambda p: str(p.get("period")),
+    )
+    if not valid:
+        return {}
+    current = valid[-1]
+    previous = valid[-2] if len(valid) > 1 else None
+    growth = _num(current["net_profit_growth_pct"])
+    prior = _num(previous["net_profit_growth_pct"]) if previous else None
+    out = {
+        "financial_period": str(current["period"]),
+        "net_profit_growth_pct": growth,
+        "roe_pct": _num(current.get("roe_pct")),
+        "gross_margin_pct": _num(current.get("gross_margin_pct")),
+        "net_margin_pct": _num(current.get("net_margin_pct")),
+        "financial_history": [
+            {"period": str(p.get("period") or ""),
+             "net_profit_growth_pct": _num(p.get("net_profit_growth_pct")),
+             "roe_pct": _num(p.get("roe_pct"))}
+            for p in sorted(periods, key=lambda p: str(p.get("period") or ""))[-8:]
+        ],
+    }
+    if previous and growth is not None and prior is not None:
+        out.update({
+            "previous_financial_period": str(previous["period"]),
+            "previous_net_profit_growth_pct": prior,
+            "growth_change_pp": round(growth-prior, 2),
+            "growth_change_definition": "相邻两披露期累计口径净利同比增速变化（百分点），非单季度环比",
+        })
+    return out
+
+
 async def _stock_profit(code: str) -> dict:
     try:
         result = await asyncio.wait_for(get_profitability_trend(code), timeout=18)
         periods = (result or {}).get("periods") or []
-        if not periods:
-            return {}
-        latest = max(periods, key=lambda p: str(p.get("period") or ""))
-        return {
-            "financial_period": str(latest.get("period") or ""),
-            "net_profit_growth_pct": _num(latest.get("net_profit_growth_pct")),
-            "roe_pct": _num(latest.get("roe_pct")),
-            "gross_margin_pct": _num(latest.get("gross_margin_pct")),
-            "net_margin_pct": _num(latest.get("net_margin_pct")),
-            "financial_history": [
-                {"period": str(p.get("period") or ""),
-                 "net_profit_growth_pct": _num(p.get("net_profit_growth_pct")),
-                 "roe_pct": _num(p.get("roe_pct"))}
-                for p in sorted(periods, key=lambda p: str(p.get("period") or ""))[-6:]
-            ],
-        }
+        return _profit_period_change(periods)
     except Exception as exc:
         utils.logger.warning("[etf] issuer profitability %s: %s", code, exc)
         return {}
@@ -557,6 +599,10 @@ def _portfolio_stats(holdings: list[dict]) -> dict:
             sum(h["weight_pct"] for h in valuation_high), 2),
         "negative_profit_growth_weight_pct": round(
             sum(h["weight_pct"] for h in fin if h["net_profit_growth_pct"] < 0), 2),
+        "profit_and_price_lookthrough_count": len(holdings),
+        "hk_price_observed_weight_pct": round(
+            sum(h["weight_pct"] for h in observed if h.get("price_currency") == "HKD"), 2),
+        "financial_observed_count": len(fin),
         "price_high_rule": "近252交易日前复权收盘价区间位置≥80%（不等于估值贵）",
         "price_low_rule": "近252交易日前复权收盘价区间位置≤20%（不等于估值便宜）",
         "denominator": "全部ETF净值权重；仅统计有数据的披露重仓股，不外推未覆盖成分",
@@ -564,54 +610,64 @@ def _portfolio_stats(holdings: list[dict]) -> dict:
 
 
 async def collect_etf_data(spot: dict) -> dict:
-    """Gather distinct ETF and constituent observations without company-only fields."""
+    """ETF-specific look-through, macro environment and dated cycle observations."""
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     code, name = spot["code"], spot["name"]
     gold_equity = bool(_GOLD_EQUITY.search(name))
     equity = gold_equity or not bool(_EXCLUDED.search(name))
-    holdings, etf_price, fund = await asyncio.gather(
-        _holdings(code, today), _etf_price(code, today), _fund_with_live_quote(spot)
+    holdings, etf_price, fund, market = await asyncio.gather(
+        _holdings(code, today), _etf_price(code, today),
+        _fund_with_live_quote(spot), get_etf_market_context(name, today),
     )
     original = holdings.get("holdings") or []
     if not equity:
-        # Never run A-share financials on Hong Kong, bond or gold holdings.
         for holding in original:
             holding["not_an_a_share_lookthrough"] = True
 
-    sem = asyncio.Semaphore(4)
-    async def enrich(holding: dict, index: int) -> dict:
+    # F10/price calls for all ten disclosed heavy stocks. Underlying public
+    # data can fail independently; do not let one issuer block the full report.
+    sem = asyncio.Semaphore(5)
+    async def enrich(holding: dict) -> dict:
         row = dict(holding)
-        if equity and re.fullmatch(r"(?:[0369]\d{5}|[48]\d{5})", row["code"]):
-            async with sem:
-                row.update(await _stock_price(row["code"], today))
-                if index < 5:
-                    profit, valuation = await asyncio.gather(
-                        _stock_profit(row["code"]), _stock_valuation(row["code"])
-                    )
-                    row.update(profit)
-                    row.update(valuation)
+        code = row.get("code") or ""
+        async with sem:
+            if re.fullmatch(r"[0-9]{5}", code):
+                row.update(await _hk_stock_price(code, today))
+            elif equity and re.fullmatch(r"(?:[0369]\d{5}|[48]\d{5})", code):
+                price, profit, valuation = await asyncio.gather(
+                    _stock_price(code, today),
+                    _stock_profit(code),
+                    _stock_valuation(code),
+                )
+                row.update(price)
+                row.update(profit)
+                row.update(valuation)
         return row
 
-    enriched = await asyncio.gather(*(enrich(h, i) for i, h in enumerate(original[:10])))
+    enriched = await asyncio.gather(*(enrich(h) for h in original[:10]))
+    cycle = assess_cycle(market, enriched)
     return {
         "asset_type": "etf",
-        "scope": ("黄金产业股票ETF（仅对已披露且可核实的A股重仓做财务透视；"
-                  "港股等持仓不套用A股指标）" if gold_equity
+        "scope": ("黄金产业股票ETF（披露的A股/港股重仓价格可核查，"
+                  "个股财务透视仅涵盖A股）" if gold_equity
                   else "A股股票ETF" if equity
                   else "非A股股票ETF或混合资产ETF（限制适用个股透视）"),
         "fund": fund,
         "portfolio": {**holdings, "holdings": enriched},
         "portfolio_stats": _portfolio_stats(enriched),
         "etf_price_position": etf_price,
+        "macro_market": market,
+        "industry_cycle": cycle,
         "limitations": [
             "基金季报披露重仓股不等于今日全部指数成份股，亦不是申赎篮子",
-            "黄金股ETF持有黄金产业股票，并非实物黄金ETF；港股等非A股持仓不套用A股财务指标",
-            "若ETF行情接口失效，最新价与IOPV显示缺失；不可拿昨日净值冒充盘中价格",
-            "股价52周位置只反映价格相对高低，不能代替估值PE/PB分位",
-            "单次份额与成交额不能推出ETF资金净流入，更不能推出主动看好",
-            "IOPV是盘中估值，不等于已确认的基金净值；注意报价时间",
-            "成分股财务数据为披露期指标，不可视为今日盈利预测",
-            "已观察的前五大个股PE(TTM)/PB不代表ETF整体估值；历史分位需观察期和披露日期",
+            "黄金股ETF持有黄金产业股票，并非实物黄金ETF；港股不套用A股财务指标",
+            "黄金期货连续/国内金价与基金持仓是不同资产，价格驱动不等于利润兑现",
+            "股价52周位置不是PE/PB估值高低，更不能独立证明周期底部或顶部",
+            "Q1与H1的累计净利润同比增长率之差，不是独立单季度净利环比",
+            "利润增速、金价和宏观指标有各自观察日期；过期数据不得写成当日事实",
+            "单次成交额、份额无法推断ETF资金净申购或主动看好",
+            "ETF整体PE/PB及管理费必须来自可核实的指数或基金资料，不能平均前十大编造",
+            "未覆盖的持仓、库存产量单位成本不能凭想象补足",
         ],
         "collected_on": today.isoformat(),
     }
