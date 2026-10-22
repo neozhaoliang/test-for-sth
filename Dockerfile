@@ -17,7 +17,6 @@ deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-backports main restricted
 deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ jammy-security main restricted universe multiverse" > /etc/apt/sources.list
 
 RUN apt update
-
 RUN DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends \
     ca-certificates curl git xvfb xauth x11vnc novnc websockify \
     procps fonts-wqy-microhei nodejs \
@@ -25,10 +24,17 @@ RUN DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends \
     libsqlite3-dev libffi-dev liblzma-dev libncursesw5-dev libgdbm-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 从国内镜像下载 Python 3.11.17 源码，避免 uv 从 GitHub 下载解释器
+# Python >=3.11 is required, but the CUDA base uses Python 3.10.
+# Do NOT use "uv python install": it fetches python-build-standalone from
+# GitHub Releases, which is blocked/times out on the corporate build network.
+# Ubuntu 22.04's native python3.11 is an outdated 3.11.0 release candidate;
+# instead compile a pinned, signed-off official Python source release from a
+# Chinese mirror, verifying against the Python.org SHA-256 checksum.
+#
+# Override this at build time if your proxy permits a different mirror:
+# docker build --build-arg PYTHON_SOURCE_URL=https://mirror.nju.edu.cn/python/3.11.17/Python-3.11.17.tar.xz ...
 ARG PYTHON_SOURCE_URL=https://mirrors.aliyun.com/python-release/source/Python-3.11.17.tar.xz
 ARG PYTHON_SOURCE_SHA256=bfb74ad39efae27cda510f134ab408e00f9992c56851cfc0b1cdb5646da11599
-
 RUN curl --fail --location --show-error --silent --retry 4 \
         --connect-timeout 25 --max-time 300 \
         "${PYTHON_SOURCE_URL}" -o /tmp/Python-3.11.17.tar.xz \
@@ -39,12 +45,10 @@ RUN curl --fail --location --show-error --silent --retry 4 \
     && ./configure --prefix=/opt/python3.11 --with-ensurepip=install \
     && make -j2 \
     && make altinstall \
-    && /opt/python3.11/bin/python3.11 -c "import ssl, sqlite3, bz2, lzma, venv; print('Python OK:', ssl.OPENSSL_VERSION)" \
+    && /opt/python3.11/bin/python3.11 -c "import ssl, sqlite3, bz2, lzma, venv; print('Python and core modules OK:', ssl.OPENSSL_VERSION)" \
     && rm -rf /tmp/python-src /tmp/Python-3.11.17.tar.xz
 
-# 安装 uv，但禁止它自动下载 Python
 RUN python -m pip install 'uv==0.10.0'
-
 ENV UV_PYTHON_DOWNLOADS=never \
     UV_PYTHON_PREFERENCE=only-system \
     UV_LINK_MODE=copy \
@@ -55,13 +59,9 @@ ENV UV_PYTHON_DOWNLOADS=never \
     VNC_ENABLE=0 \
     NO_PROXY=localhost,127.0.0.1,::1 \
     no_proxy=localhost,127.0.0.1,::1
-
-# 明确使用刚安装的 Python 3.11，不允许 uv 下载解释器
 RUN uv sync --frozen --python /opt/python3.11/bin/python3.11 \
         --no-python-downloads --no-install-project \
     && /app/.venv/bin/python --version
-
-# 安装 Playwright Chromium 及其系统依赖
 RUN /app/.venv/bin/python -m playwright install-deps chromium \
     && /app/.venv/bin/python -m playwright install chromium
 
@@ -71,11 +71,8 @@ RUN groupadd --gid 10001 investment \
     && chmod 755 /app/tools/docker-entrypoint.sh \
     && chown -R investment:investment /app/browser_data /app/data /app/logs /app/instance \
     && chmod 700 /app/browser_data
-
 ENV HOME=/home/investment
-
 USER investment
 
 EXPOSE 8000 6080
-
 ENTRYPOINT ["/bin/bash", "/app/tools/docker-entrypoint.sh"]
