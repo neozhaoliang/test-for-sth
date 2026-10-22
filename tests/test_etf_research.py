@@ -117,3 +117,94 @@ async def test_missing_llm_does_not_fabricate_direction(monkeypatch):
     summary = await etf_report._write_etf_opinion({"portfolio": {"holdings": []}})
     assert summary["stance"] == ""
     assert summary["generation_status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_517520_and_gold_equity_name_are_searchable_without_any_market_quote(monkeypatch):
+    # Reference identity, never a claimed live trading price.
+    monkeypatch.setattr(etf_data, "_catalog",
+                        AsyncMock(return_value=etf_data._reference_rows()))
+    monkeypatch.setattr(etf_data, "_catalog_refresh_task", None)
+    for raw in ("517520", "SH517520", "黄金股ETF", "黄金股etf"):
+        fund = await etf_data.resolve_etf(raw)
+        assert fund["stock_code"] == "SH517520"
+        assert fund["latest_price"] is None
+        options = await etf_data.search_etfs(raw)
+        assert options[0]["code"] == "SH517520"
+        assert options[0]["asset_type"] == "etf"
+
+
+@pytest.mark.asyncio
+async def test_catalog_sources_work_independently_of_spot_quote(monkeypatch):
+    ths = pd.DataFrame([{"基金代码": "159915", "基金名称": "创业板ETF"}])
+    fund_names = pd.DataFrame([
+        {"基金代码": "517520", "基金简称": "黄金股ETF永赢"},
+        {"基金代码": "159001", "基金简称": "某指数ETF联接A"},
+        {"基金代码": "999999", "基金简称": "非ETF股票"},
+    ])
+    monkeypatch.setattr(etf_data.ak, "fund_etf_spot_ths",
+                        lambda **kwargs: ths, raising=False)
+    monkeypatch.setattr(etf_data.ak, "fund_name_em",
+                        lambda **kwargs: fund_names, raising=False)
+    monkeypatch.setattr(etf_data.ak, "fund_etf_spot_em",
+                        lambda: (_ for _ in ()).throw(RuntimeError("quote 502")))
+    await etf_data._refresh_catalog()
+    codes = {r["code"] for r in etf_data._catalog_cache[1]}
+    assert {"517520", "159915"} <= codes
+    assert "159001" not in codes
+    assert all(r["latest_price"] is None for r in etf_data._catalog_cache[1])
+    fund = await etf_data._fund_with_live_quote(etf_data._reference_rows()[0])
+    assert fund["latest_price"] is None
+    assert fund["quote_source"].startswith("行情暂缺")
+
+
+@pytest.mark.asyncio
+async def test_gold_equity_etf_is_not_treated_as_physical_gold(monkeypatch):
+    spot = etf_data._reference_rows()[0]
+    disclosure = {"holdings": [
+        {"code": "600519", "name": "A股样本", "weight_pct": 10},
+        {"code": "00700", "name": "港股样本", "weight_pct": 8},
+    ], "as_of": "2026-Q2"}
+    monkeypatch.setattr(etf_data, "_holdings", AsyncMock(return_value=disclosure))
+    monkeypatch.setattr(etf_data, "_etf_price", AsyncMock(return_value={}))
+    monkeypatch.setattr(etf_data, "_fund_with_live_quote",
+                        AsyncMock(return_value=spot))
+    monkeypatch.setattr(etf_data, "_stock_price",
+                        AsyncMock(return_value={"price_position_pct": 85}))
+    monkeypatch.setattr(etf_data, "_stock_profit",
+                        AsyncMock(return_value={"net_profit_growth_pct": 9}))
+    monkeypatch.setattr(etf_data, "_stock_valuation",
+                        AsyncMock(return_value={"pe_ttm": 22}))
+    result = await etf_data.collect_etf_data(spot)
+    assert "黄金产业股票ETF" in result["scope"]
+    assert result["portfolio"]["holdings"][0]["price_position_pct"] == 85
+    assert "price_position_pct" not in result["portfolio"]["holdings"][1]
+    assert result["portfolio_stats"]["price_observed_weight_pct"] == 10
+
+
+def test_five_digit_hong_kong_holding_remains_in_disclosure_not_a_share_pipeline():
+    frame = pd.DataFrame([
+        {"季度": "2026年2季度", "股票代码": "00700",
+         "股票名称": "港股样本", "占净值比例": 13},
+        {"季度": "2026年2季度", "股票代码": "600519",
+         "股票名称": "A股样本", "占净值比例": 12},
+    ])
+    parsed = etf_data._parse_holdings(frame, date(2026, 7, 3))
+    assert parsed["disclosed_count"] == 2
+    assert parsed["holdings"][0]["code"] == "00700"
+
+
+@pytest.mark.asyncio
+async def test_web_etf_suggestion_does_not_block_on_stock_market_loader(monkeypatch):
+    from web import app as web_app
+    stock_search = AsyncMock(side_effect=AssertionError("ETF search must skip stock quote"))
+    monkeypatch.setattr(web_app, "search_stocks", stock_search)
+    monkeypatch.setattr(web_app, "search_etfs",
+                        AsyncMock(return_value=[
+                            {"code": "SH517520", "name": "黄金股ETF永赢",
+                             "market": "SH", "asset_type": "etf"}
+                        ]))
+    for name in ("517520", "黄金股etf"):
+        response = await web_app.suggest_stocks(q=name, limit=8)
+        assert response["items"][0]["code"] == "SH517520"
+    stock_search.assert_not_called()
