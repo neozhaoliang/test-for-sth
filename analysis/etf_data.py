@@ -193,7 +193,8 @@ def _position_from_prices(df: Any, *, date_column: str, close_column: str) -> di
     frame[close_column] = pd.to_numeric(frame[close_column], errors="coerce")
     frame = frame.dropna().sort_values(date_column)
     frame = frame[frame[close_column] > 0].tail(252)
-    if len(frame) < 20:
+    if len(frame) < 200:
+        # Fewer than 200 sessions is not a defensible one-year price window.
         return {}
     closes = frame[close_column]
     first = float(closes.iloc[0])
@@ -243,6 +244,31 @@ async def _etf_price(code: str, today: date) -> dict:
         return {}
 
 
+async def _stock_valuation(code: str) -> dict:
+    """Latest observed per-issuer PE/PB, not a weighted ETF index multiple."""
+    prefix = "SH" if code.startswith(("6", "9")) else (
+        "BJ" if code.startswith(("4", "8")) else "SZ")
+    try:
+        df = await asyncio.wait_for(
+            asyncio.to_thread(ak.stock_individual_spot_xq, symbol=prefix + code),
+            timeout=12,
+        )
+        if df is None or df.empty:
+            return {}
+        row = df.iloc[0]
+        pe = _num(row.get("市盈率(TTM)"))
+        pb = _num(row.get("市净率"))
+        return {
+            "pe_ttm": round(pe, 2) if pe is not None and pe > 0 else None,
+            "pb": round(pb, 2) if pb is not None and pb > 0 else None,
+            "valuation_observed_on": datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat(),
+            "valuation_source": "雪球个股行情：PE(TTM)/PB，非历史分位",
+        }
+    except Exception as exc:
+        utils.logger.warning("[etf] issuer valuation %s: %s", code, exc)
+        return {}
+
+
 async def _stock_profit(code: str) -> dict:
     try:
         result = await asyncio.wait_for(get_profitability_trend(code), timeout=18)
@@ -256,6 +282,12 @@ async def _stock_profit(code: str) -> dict:
             "roe_pct": _num(latest.get("roe_pct")),
             "gross_margin_pct": _num(latest.get("gross_margin_pct")),
             "net_margin_pct": _num(latest.get("net_margin_pct")),
+            "financial_history": [
+                {"period": str(p.get("period") or ""),
+                 "net_profit_growth_pct": _num(p.get("net_profit_growth_pct")),
+                 "roe_pct": _num(p.get("roe_pct"))}
+                for p in sorted(periods, key=lambda p: str(p.get("period") or ""))[-6:]
+            ],
         }
     except Exception as exc:
         utils.logger.warning("[etf] issuer profitability %s: %s", code, exc)
@@ -269,6 +301,7 @@ def _portfolio_stats(holdings: list[dict]) -> dict:
     high = [h for h in observed if h["price_position_pct"] >= 80]
     depressed = [h for h in observed if h["price_position_pct"] <= 20]
     fin = [h for h in holdings if h.get("net_profit_growth_pct") is not None]
+    vals = [h for h in holdings if h.get("pe_ttm") is not None and h.get("pb") is not None]
     return {
         "top5_weight_pct": top5 if holdings else None,
         "top10_weight_pct": top10 if holdings else None,
@@ -276,6 +309,7 @@ def _portfolio_stats(holdings: list[dict]) -> dict:
         "high_position_weight_pct": round(sum(h["weight_pct"] for h in high), 2),
         "low_position_weight_pct": round(sum(h["weight_pct"] for h in depressed), 2),
         "profit_observed_weight_pct": round(sum(h["weight_pct"] for h in fin), 2),
+        "pe_pb_observed_weight_pct": round(sum(h["weight_pct"] for h in vals), 2),
         "negative_profit_growth_weight_pct": round(
             sum(h["weight_pct"] for h in fin if h["net_profit_growth_pct"] < 0), 2),
         "price_high_rule": "近252交易日前复权收盘价区间位置≥80%（不等于估值贵）",
@@ -303,7 +337,11 @@ async def collect_etf_data(spot: dict) -> dict:
             async with sem:
                 row.update(await _stock_price(row["code"], today))
                 if index < 5:
-                    row.update(await _stock_profit(row["code"]))
+                    profit, valuation = await asyncio.gather(
+                        _stock_profit(row["code"]), _stock_valuation(row["code"])
+                    )
+                    row.update(profit)
+                    row.update(valuation)
         return row
 
     enriched = await asyncio.gather(*(enrich(h, i) for i, h in enumerate(original[:10])))
@@ -320,6 +358,7 @@ async def collect_etf_data(spot: dict) -> dict:
             "单次份额与成交额不能推出ETF资金净流入，更不能推出主动看好",
             "IOPV是盘中估值，不等于已确认的基金净值；注意报价时间",
             "成分股财务数据为披露期指标，不可视为今日盈利预测",
+            "已观察的前五大个股PE(TTM)/PB不是ETF整体估值，也不是历史分位",
         ],
         "collected_on": today.isoformat(),
     }
