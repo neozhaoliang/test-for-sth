@@ -124,6 +124,8 @@ jobs:
             analysis/report_synthesis.py \
             analysis/report_social.py \
             analysis/report.py \
+            analysis/etf_data.py \
+            analysis/etf_report.py \
             analysis/knowledge_base.py \
             analysis/knowledge_context.py \
             analysis/fundamentals.py \
@@ -215,6 +217,7 @@ jobs:
             tests/test_roe_discount_valuation.py \
             tests/test_research_desk_theme.py \
             tests/test_stock_suggest.py \
+            tests/test_etf_research.py \
             tests/test_company_valuation_knowledge.py \
             tests/test_public_report_privacy.py \
             tests/test_json_response_safety.py \
