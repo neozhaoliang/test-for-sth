@@ -170,6 +170,8 @@ async def test_catalog_sources_work_independently_of_spot_quote(monkeypatch):
                         lambda **kwargs: fund_names, raising=False)
     monkeypatch.setattr(etf_data.ak, "fund_etf_spot_em",
                         lambda: (_ for _ in ()).throw(RuntimeError("quote 502")))
+    monkeypatch.setattr(etf_data.ak, "fund_etf_category_sina",
+                        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("Sina off")))
     await etf_data._refresh_catalog()
     codes = {r["code"] for r in etf_data._catalog_cache[1]}
     assert {"517520", "159915", "159562"} <= codes
