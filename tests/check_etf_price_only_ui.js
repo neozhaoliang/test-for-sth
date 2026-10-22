@@ -7,7 +7,7 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '../web/app.py'), 'utf8');
 const from = source.indexOf('function verdictMetric(');
-const to = source.indexOf('function renderResult(', from);
+const to = source.indexOf("document.getElementById('submitBtn').addEventListener", from);
 assert(from >= 0 && to > from, 'header render functions must exist');
 
 const sink = {innerHTML: ''};
@@ -31,7 +31,7 @@ const context = {
   stanceLabel() { return '中性'; },
 };
 const renderers = vm.runInNewContext(source.slice(from, to) +
-  '\n({renderVerdictMarketStrip,renderEtfResult,isEtfInstrument})', context);
+  '\n({renderVerdictMarketStrip,renderEtfResult,isEtfInstrument,renderResult})', context);
 
 function metricCount(html) {
   return (html.match(/class="verdict-market-metric /g) || []).length;
@@ -108,3 +108,61 @@ etf.etf_data.etf_price_position = {};
 renderers.renderEtfResult(etf);
 assert(sink.innerHTML.includes('暂缺'));
 console.log('ETF price-only and latest top-ten checks passed: current, dated close, 10 holdings, legacy and stock.');
+
+
+// This is the *original production failure*: /api/tasks stripped asset_type
+// and etf_data, causing an ETF's narrative to be rendered as a stock chart.
+// Old payloads must render ETF-only content and independently rehydrate.
+(async () => {
+  const oldProjected = {
+    stock_code: 'SH517520',
+    stock_name: '黄金股ETF永赢',
+    summary: {stance: 'neutral', thesis_summary: '旧个股模板的无效结论'},
+  };
+  let requested = '';
+  context.fetch = async url => {
+    requested = url;
+    return {
+      ok: true,
+      json: async () => ({
+        asset_type: 'etf', stock_code: 'SH517520',
+        stock_name: '黄金股ETF永赢',
+        etf_data: {
+          fund: {
+            latest_price: 1.716,
+            quote_label: '最近交易日收盘价',
+            quote_time: '2026-10-22 收盘（非实时）',
+          },
+          portfolio: {
+            disclosure_as_of: '2026-06-30', as_of: '2026-Q2',
+            source: '公开定期报告',
+            holdings: Array.from({length: 10}, (_, i) => ({
+              code: '600' + String(100 + i),
+              name: '真实披露重仓' + (i + 1),
+              weight_pct: 9 - i * 0.5,
+            })),
+          },
+          portfolio_stats: {top10_weight_pct: 67.5},
+          etf_price_position: {},
+        },
+      }),
+    };
+  };
+  renderers.renderResult(oldProjected);
+  assert(sink.innerHTML.includes('ETF基金与现价'),
+    'legacy stock-shaped ETF must route to ETF card, not issuer card');
+  assert(sink.innerHTML.includes('最新披露前十大重仓股'));
+  assert(!sink.innerHTML.includes('数据概览与维度图谱'));
+  assert(!sink.innerHTML.includes('盈利质量的变化'));
+  assert(!sink.innerHTML.includes('历史估值区间'));
+  assert(!sink.innerHTML.includes('旧个股模板的无效结论'),
+    'invalid legacy stock opinion must not masquerade as ETF research');
+  await new Promise(resolve => setImmediate(resolve));
+  assert(requested.includes('/api/etfs/overview?code=SH517520'),
+    'legacy task must obtain independent ETF latest disclosures');
+  assert(sink.innerHTML.includes('1.716 元'));
+  assert(sink.innerHTML.includes('2026-06-30'));
+  assert(sink.innerHTML.includes('600109'));
+  assert(!sink.innerHTML.includes('市净率 PB'));
+  console.log('Legacy ETF task projection UI recovery passed: price, ten holdings, no issuer charts.');
+})().catch(error => { console.error(error); process.exitCode=1; });
