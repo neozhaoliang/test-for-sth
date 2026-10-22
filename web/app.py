@@ -3842,7 +3842,7 @@ function renderVerdictMarketStrip(report) {
     const fund=report.etf_data?.fund||{};
     const fundPrice=numericOrNull(fund.latest_price);
     const displayPrice=fundPrice!==null?fundPrice:price;
-    const label=fundPrice!==null?(fund.quote_label||'ETF行情参考价'):quoteLabel;
+    const label=fundPrice!==null?(fund.quote_label||'ETF现价'):quoteLabel;
     const at=fund.quote_time||fund.data_date||quotedAt;
     return '<div class="verdict-market-strip verdict-market-strip-etf" '+
       'role="group" aria-label="ETF现价">'+
@@ -3895,7 +3895,7 @@ function renderEtfResult(report) {
   const latest=hasMarketQuote?observedQuote:lastClose;
   const closeAsOf=price.recent_close_as_of||price.price_as_of||'日期暂缺';
   const latestText=latest!==null&&latest>0?latest.toFixed(3)+' 元':'暂缺';
-  const quoteLabel=hasMarketQuote?(fund.quote_label||'ETF行情参考价'):
+  const quoteLabel=hasMarketQuote?(fund.quote_label||'ETF现价'):
     (latest!==null&&latest>0?'最近交易日收盘价':'ETF行情暂无数据');
   const quoteAt=hasMarketQuote?(fund.quote_time||fund.data_date||
     '报价时间暂缺'):(closeAsOf+' 收盘（非实时）');
