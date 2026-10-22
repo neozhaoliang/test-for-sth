@@ -1081,7 +1081,7 @@ async function submitAnalysis() {
   if (submitting) return;
   const stockCode = document.getElementById('stockCode').value.trim();
   if (!stockCode) {
-    showAnalysisError('请输入股票或ETF名称或代码');
+    showAnalysisError('请输入股票名称或代码（也支持ETF）');
     return;
   }
   const mode = document.getElementById('researchMode').value;
@@ -3873,7 +3873,7 @@ function renderEtfResult(report) {
   if(rows.length) {
     html+='<div class="etf-table-wrap"><table class="etf-table"><thead><tr>'+
       '<th>重仓股</th><th>基金净值占比</th><th>52周价格位置</th>'+
-      '<th>距52周高点</th><th>财报期</th><th>净利同比</th><th>ROE</th>'+
+      '<th>距52周高点</th><th>财报期</th><th>净利同比</th><th>ROE</th><th>PE(TTM)</th><th>PB</th>'+
       '</tr></thead><tbody>';
     rows.forEach(h=>{
       const pos=numericOrNull(h.price_position_pct);
@@ -3885,13 +3885,16 @@ function renderEtfResult(report) {
         '<td>'+safe(fmt(h.below_52w_high_pct,'%',1))+'</td>'+
         '<td>'+safe(h.financial_period||'暂无')+'</td>'+
         '<td>'+safe(fmt(h.net_profit_growth_pct,'%',1))+'</td>'+
-        '<td>'+safe(fmt(h.roe_pct,'%',1))+'</td></tr>';
+        '<td>'+safe(fmt(h.roe_pct,'%',1))+'</td>'+ 
+        '<td>'+safe(fmt(h.pe_ttm,' 倍',1))+'</td>'+ 
+        '<td>'+safe(fmt(h.pb,' 倍',1))+'</td></tr>';
     });
     html+='</tbody></table></div>';
   } else html+='<p class="etf-unknown">未能取得有季度标记的基金持仓数据，不会猜测前十大重仓股。</p>';
   html+='<p class="etf-source">高位=近252交易日前复权收盘价在区间80%以上，绝不等于估值高。'+
     '已核实价格位置的披露持仓权重：'+safe(fmt(stats.price_observed_weight_pct,'%',1))+
     '；取得盈利指标的披露持仓权重：'+safe(fmt(stats.profit_observed_weight_pct,'%',1))+
+    '；取得PE/PB的披露持仓权重：'+safe(fmt(stats.pe_pb_observed_weight_pct,'%',1))+
     '。没有数据的权重不视为零风险。</p></section>';
   const keys=['holdings','high_positions','earnings_cycle','valuation','fund_structure','market_price'];
   const labels=report.section_labels||{};
