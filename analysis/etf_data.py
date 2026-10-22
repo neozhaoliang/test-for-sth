@@ -302,23 +302,181 @@ async def search_etfs(query: str, limit: int = 40) -> list[dict]:
             for r in selected]
 
 
-async def _fund_with_live_quote(spot: dict) -> dict:
-    """Optional quote enrichment. Never invent a live price from fund NAV."""
+def _trade_day(value: Any) -> date | None:
+    """Recognize documented yyyy-mm-dd, yyyymmdd and Unix-second quote stamps."""
+    if value is None or str(value).strip() in ("", "None", "nan", "-"):
+        return None
+    if isinstance(value, (datetime, date)):
+        return value.date() if isinstance(value, datetime) else value
+    raw = str(value).strip()
+    if re.fullmatch(r"\d{10}(?:\.\d+)?", raw):
+        try:
+            return datetime.fromtimestamp(float(raw), ZoneInfo("Asia/Shanghai")).date()
+        except (ValueError, OverflowError, OSError):
+            return None
     try:
-        df = await asyncio.wait_for(asyncio.to_thread(ak.fund_etf_spot_em), timeout=10)
-        if df is not None and not df.empty and {"代码", "名称"}.issubset(df.columns):
-            matched = df[df["代码"].astype(str).str.strip() == spot["code"]]
-            if not matched.empty:
-                quote = _spot_row(matched.iloc[0])
-                return {**spot, **{k: v for k, v in quote.items()
-                                 if k not in ("code", "stock_code", "name")},
-                        "quote_source": "东方财富ETF实时行情"}
-    except Exception as exc:
-        utils.logger.warning("[etf] live quote %s unavailable: %s", spot["code"], exc)
+        return date.fromisoformat(raw[:10]) if "-" in raw else (
+            datetime.strptime(raw[:8], "%Y%m%d").date()
+            if re.fullmatch(r"\d{8}", raw) else None
+        )
+    except ValueError:
+        return None
+
+
+def _valid_close_date(value: Any, today: date) -> date | None:
+    d = _trade_day(value)
+    # Chinese public holidays can be long, but an old price cannot be live.
+    return d if d is not None and 0 <= (today - d).days <= 15 else None
+
+
+def _sina_quote_row(row: Any) -> dict:
+    """Sina ETF list uses sh/sz-prefixed codes and provides no quote timestamp."""
+    return {
+        "latest_price": _num(row.get("最新价")),
+        "price_change_pct": _num(row.get("涨跌幅")),
+        "turnover_yuan": _num(row.get("成交额")),
+        "volume": _num(row.get("成交量")),
+    }
+
+
+def _select_spot_row(df: Any, code: str) -> Any | None:
+    if df is None or getattr(df, "empty", True) or "代码" not in df.columns:
+        return None
+    for _, row in df.iterrows():
+        if _digits(row.get("代码")) == code:
+            return row
+    return None
+
+
+def _market_quote(spot: dict, row: Any, *, source: str, today: date) -> dict | None:
+    """An undated spot is explicitly *not* verified as the current quote."""
+    if row is None:
+        return None
+    parsed = (_spot_row(row) if source == "东方财富ETF实时行情"
+              else _sina_quote_row(row))
+    price = _num(parsed.get("latest_price"))
+    if price is None or price <= 0:
+        return None
+    day = _trade_day(parsed.get("data_date") or parsed.get("quote_time"))
+    if day and not _valid_close_date(day, today):
+        return None
+    observed = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M")
+    parsed["quote_source"] = source
+    parsed["quote_fetch_time"] = observed
+    if day == today:
+        parsed["quote_mode"] = "dated_market_snapshot"
+        parsed["quote_label"] = "ETF最新行情"
+        parsed["quote_time"] = (str(parsed.get("quote_time") or "").strip()
+                                or day.isoformat())
+    elif day:
+        parsed["quote_mode"] = "previous_market_snapshot"
+        parsed["quote_label"] = "最近有日期的市场报价"
+        parsed["quote_time"] = day.isoformat() + "（非实时）"
+    else:
+        parsed["quote_mode"] = "undated_market_snapshot"
+        parsed["quote_label"] = "ETF行情参考价"
+        parsed["quote_time"] = "来源未提供报价日期；抓取于" + observed
+    return {**spot, **{k: v for k, v in parsed.items()
+                       if k not in ("code", "stock_code", "name")}}
+
+
+async def _fund_with_live_quote(spot: dict) -> dict:
+    """Two independent ETF market feeds; missing never means ETF has no price."""
+    async def load(fn, **kwargs):
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(fn, **kwargs), timeout=12
+            )
+        except Exception as exc:
+            utils.logger.warning("[etf] quote source %s failed for %s: %s",
+                                 getattr(fn, "__name__", "unknown"), spot["code"], exc)
+            return None
+
+    east, sina = await asyncio.gather(
+        load(ak.fund_etf_spot_em),
+        load(ak.fund_etf_category_sina, symbol="ETF基金"),
+    )
+    for df, provider in (
+        (east, "东方财富ETF实时行情"),
+        (sina, "新浪ETF场内行情"),
+    ):
+        match = _select_spot_row(df, spot["code"])
+        quote = _market_quote(spot, match, source=provider,
+                              today=datetime.now(ZoneInfo("Asia/Shanghai")).date())
+        if quote:
+            return quote
     return {**spot, "quote_source": "行情暂缺，基金代码来自独立名录",
+            "quote_mode": "missing", "quote_label": "ETF报价暂无数据",
             "latest_price": None, "iopv": None, "iopv_premium_pct": None,
             "price_change_pct": None, "turnover_yuan": None, "volume": None,
             "data_date": "", "quote_time": ""}
+
+
+def _latest_daily_close(df: Any, *, date_column: str,
+                        close_column: str, today: date) -> dict:
+    """Last dated close does not require 200 trading sessions of history."""
+    if (df is None or getattr(df, "empty", True) or
+            date_column not in df.columns or close_column not in df.columns):
+        return {}
+    frame = df[[date_column, close_column]].copy()
+    frame[date_column] = pd.to_datetime(frame[date_column], errors="coerce")
+    frame[close_column] = pd.to_numeric(frame[close_column], errors="coerce")
+    frame = frame.dropna().sort_values(date_column)
+    frame = frame[(frame[close_column] > 0) &
+                  (frame[date_column].dt.date <= today)]
+    if frame.empty:
+        return {}
+    last = frame.iloc[-1]
+    day = _valid_close_date(last[date_column].date(), today)
+    if day is None:
+        return {}
+    return {"recent_close": round(float(last[close_column]), 4),
+            "recent_close_as_of": day.isoformat()}
+
+
+def _with_recent_close(fund: dict, etf_price: dict, today: date) -> dict:
+    """Use an as-of-dated exchange close when the live spot is unverified."""
+    price = _num((etf_price or {}).get("recent_close"))
+    date_text = (etf_price or {}).get("recent_close_as_of")
+    day = _valid_close_date(date_text, today)
+    if price is None or price <= 0 or day is None:
+        return fund
+    # Never downgrade a dated current trading quote to a daily close.
+    if fund.get("quote_mode") == "dated_market_snapshot":
+        return fund
+    updated = dict(fund)
+    updated.update({
+        "latest_price": price,
+        "quote_mode": "last_verified_daily_close",
+        "quote_label": "最近交易日收盘价",
+        "quote_time": day.isoformat() + " 收盘（非实时）",
+        "quote_source": (etf_price.get("recent_close_source") or
+                         "ETF交易所日行情"),
+        "data_date": day.isoformat(),
+        "iopv": None,
+        "iopv_premium_pct": None,
+        "price_change_pct": None,
+    })
+    return updated
+
+
+async def _sina_last_close(code: str, today: date) -> dict:
+    """Independent Sina daily tape when Eastmoney daily candles are unavailable."""
+    try:
+        df = await asyncio.wait_for(
+            asyncio.to_thread(ak.fund_etf_hist_sina,
+                              symbol=_etf_code(code).lower()),
+            timeout=12,
+        )
+        close = _latest_daily_close(
+            df, date_column="date", close_column="close", today=today
+        )
+        if close:
+            close["recent_close_source"] = "新浪ETF历史日行情（未复权）"
+        return close
+    except Exception as exc:
+        utils.logger.warning("[etf] Sina ETF close %s unavailable: %s", code, exc)
+        return {}
 
 
 def _quarter(value: Any) -> tuple[int, int] | None:
@@ -445,7 +603,13 @@ async def _etf_price(code: str, today: date) -> dict:
                 end_date=today.strftime("%Y%m%d"), adjust="qfq"),
             timeout=18,
         )
-        return _position_from_prices(df, date_column="日期", close_column="收盘")
+        position = _position_from_prices(df, date_column="日期", close_column="收盘")
+        latest = _latest_daily_close(
+            df, date_column="日期", close_column="收盘", today=today
+        )
+        if latest:
+            latest["recent_close_source"] = "东方财富ETF历史日行情（前复权收盘）"
+        return {**position, **latest}
     except Exception as exc:
         utils.logger.warning("[etf] ETF history %s: %s", code, exc)
         return {}
@@ -619,6 +783,15 @@ async def collect_etf_data(spot: dict) -> dict:
         _holdings(code, today), _etf_price(code, today),
         _fund_with_live_quote(spot), get_etf_market_context(name, today),
     )
+    # Quote availability is separate from the historical 52-week analysis.
+    # Fetch a dated independent daily close only if neither quote feed nor
+    # the Eastmoney daily candle supplied a usable verified recent price.
+    if fund.get("quote_mode") != "dated_market_snapshot":
+        if not _valid_close_date(etf_price.get("recent_close_as_of"), today):
+            external_close = await _sina_last_close(code, today)
+            if external_close:
+                etf_price = {**etf_price, **external_close}
+        fund = _with_recent_close(fund, etf_price, today)
     original = holdings.get("holdings") or []
     if not equity:
         for holding in original:
@@ -659,6 +832,8 @@ async def collect_etf_data(spot: dict) -> dict:
         "macro_market": market,
         "industry_cycle": cycle,
         "limitations": [
+            "最近交易日收盘价与盘中最新行情分别标注，不将前一交易日收盘冒充实时价",
+            "行情参考价若无源报价日期仅视为未经时点核实的快照；过期日线不用于现价展示",
             "基金季报披露重仓股不等于今日全部指数成份股，亦不是申赎篮子",
             "黄金股ETF持有黄金产业股票，并非实物黄金ETF；港股不套用A股财务指标",
             "黄金期货连续/国内金价与基金持仓是不同资产，价格驱动不等于利润兑现",
