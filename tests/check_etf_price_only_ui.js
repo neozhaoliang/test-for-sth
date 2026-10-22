@@ -1,0 +1,93 @@
+/* ETF/issuer header regression test; runs without a browser or API access. */
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const source = fs.readFileSync(path.join(__dirname, '../web/app.py'), 'utf8');
+const from = source.indexOf('function verdictMetric(');
+const to = source.indexOf('function renderResult(', from);
+assert(from >= 0 && to > from, 'header render functions must exist');
+
+const sink = {innerHTML: ''};
+const context = {
+  document: {getElementById(id) {
+    assert.equal(id, 'result');
+    return sink;
+  }},
+  escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, c =>
+      ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+  },
+  numericOrNull(value) {
+    if (value == null || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  },
+  verdictPercentileRow(rows) {
+    return rows?.find(r => r && typeof r.percentile === 'number') || null;
+  },
+  stanceLabel() { return '中性'; },
+};
+const renderers = vm.runInNewContext(source.slice(from, to) +
+  '\n({renderVerdictMarketStrip,renderEtfResult,isEtfInstrument})', context);
+
+function metricCount(html) {
+  return (html.match(/class="verdict-market-metric /g) || []).length;
+}
+
+const stock = {
+  stock_name: '贵州茅台', stock_code: 'SH600519',
+  realtime_quote: {latest_price: 1698, quote_time: '2026-10-22'},
+  valuation: {pb: 7.2, roe_pct: 28},
+  fundamentals: {facts: {cash_to_profit_ratio: 1.1}},
+  valuation_history: {
+    pe_percentiles: [{years: 5, percentile: 50}],
+    pb_percentiles: [{years: 5, percentile: 55}],
+  },
+};
+const stockHeader = renderers.renderVerdictMarketStrip(stock);
+assert.equal(metricCount(stockHeader), 6, 'normal stocks retain all six metrics');
+assert(stockHeader.includes('市净率 PB'));
+assert(stockHeader.includes('F10 披露ROE'));
+
+const legacyEtf = {
+  stock_name: '黄金股ETF永赢', stock_code: 'SH517520',
+  realtime_quote: {latest_price: 1.567, quote_time: '2026-10-22'},
+};
+const legacyHeader = renderers.renderVerdictMarketStrip(legacyEtf);
+assert.equal(renderers.isEtfInstrument(legacyEtf), true);
+assert.equal(metricCount(legacyHeader), 1);
+assert(legacyHeader.includes('1.567 元'));
+for (const field of ['市净率 PB', 'F10 披露ROE', '现金流/归母净利', '历史分位']) {
+  assert(!legacyHeader.includes(field), 'legacy ETF must omit ' + field);
+}
+
+const etf = {
+  asset_type: 'etf', stock_name: '黄金股ETF永赢',
+  stock_code: 'SH517520', as_of: '2026-10-22',
+  etf_data: {
+    fund: {latest_price: 1.567, quote_time: '2026-10-22 14:20'},
+    scope: '黄金产业股票ETF',
+    portfolio: {holdings: [], as_of: '2026-Q2'},
+    portfolio_stats: {},
+  },
+  summary: {stance: 'neutral', thesis_summary: '基金研究摘要', sections: {}},
+};
+renderers.renderEtfResult(etf);
+assert.equal(metricCount(sink.innerHTML), 1,
+  'new ETF report should have one quote box, not a six-column issuer strip');
+assert(sink.innerHTML.includes('ETF现价'));
+assert(sink.innerHTML.includes('1.567 元'));
+assert(sink.innerHTML.includes('重仓股透视'));
+for (const field of ['市净率 PB', 'F10 披露ROE',
+  '现金流/归母净利', 'IOPV参考溢价', 'ETF一年价格区间位置']) {
+  assert(!sink.innerHTML.includes(field), 'ETF headline must omit ' + field);
+}
+
+etf.etf_data.fund.latest_price = null;
+renderers.renderEtfResult(etf);
+assert.equal(metricCount(sink.innerHTML), 1);
+assert(sink.innerHTML.includes('暂缺'));
+console.log('ETF price-only headline checks passed: current, missing, legacy and stock.');

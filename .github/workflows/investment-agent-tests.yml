@@ -125,6 +125,8 @@ jobs:
             analysis/report_social.py \
             analysis/report.py \
             analysis/etf_discovery.py \
+            analysis/etf_macro.py \
+            analysis/etf_cycle.py \
             analysis/etf_data.py \
             analysis/etf_report.py \
             analysis/knowledge_base.py \
@@ -188,6 +190,7 @@ jobs:
           node tests/check_style_returns_ui.js /tmp/investment-webui.js
           node --check web/stock_autocomplete.js
           node tests/check_stock_autocomplete_ui.js
+          node tests/check_etf_price_only_ui.js
 
       - name: Verify ROE growth discount interactive valuation
         run: |
@@ -219,6 +222,7 @@ jobs:
             tests/test_research_desk_theme.py \
             tests/test_stock_suggest.py \
             tests/test_etf_discovery.py \
+            tests/test_etf_macro_cycle.py \
             tests/test_etf_research.py \
             tests/test_company_valuation_knowledge.py \
             tests/test_public_report_privacy.py \

@@ -3817,6 +3817,12 @@ function verdictMetric(label, value, date, tone, detail) {
     (date?'<span class="verdict-market-date">'+escapeHtml(String(date))+'</span>':'')+
     '</div>';
 }
+function isEtfInstrument(report) {
+  // Legacy reports may not have asset_type. An ETF in a stock-shaped
+  // response must not display issuer-only PB, F10 ROE or cash-flow KPIs.
+  return !!report && (report.asset_type === 'etf' || !!report.etf_data ||
+    /ETF/i.test(String(report.stock_name||'')));
+}
 function renderVerdictMarketStrip(report) {
   const quote=report.realtime_quote||{};
   const valuation=report.valuation||{};
@@ -3832,6 +3838,19 @@ function renderVerdictMarketStrip(report) {
   const quotedAt=quote.quote_time||quote.date||quote.timestamp||report.as_of||'报价日期暂缺';
   const quoteLabel=isHistorical?'截止日收盘价':
     (quote.quote_mode==='verified_previous_close'?'最近核验收盘价':'参考股价');
+  if (isEtfInstrument(report)) {
+    const fund=report.etf_data?.fund||{};
+    const fundPrice=numericOrNull(fund.latest_price);
+    const displayPrice=fundPrice!==null?fundPrice:price;
+    const label=fundPrice!==null?'ETF现价':quoteLabel;
+    const at=fund.quote_time||fund.data_date||quotedAt;
+    return '<div class="verdict-market-strip verdict-market-strip-etf" '+
+      'role="group" aria-label="ETF现价">'+
+      verdictMetric(label,displayPrice!==null&&displayPrice>0?
+        displayPrice.toFixed(3)+' 元':'暂缺',
+        at,displayPrice!==null&&displayPrice>0?'price':'missing')+
+      '</div>';
+  }
   const items=[
     verdictMetric(quoteLabel,price!==null&&price>0?price.toFixed(2)+' 元':'暂缺',
       quotedAt,price!==null&&price>0?'price':'missing'),
@@ -3865,35 +3884,77 @@ function renderEtfResult(report) {
   const fmt=(value,suffix='',digits=1)=>{
     const n=numericOrNull(value);return n===null?'暂无数据':n.toFixed(digits)+suffix;
   };
-  const metric=(label,value,period='')=>'<div class="etf-metric"><span>'+safe(label)+
-    '</span><strong>'+safe(value)+'</strong>'+
-    (period?'<small class="etf-source">'+safe(period)+'</small>':'')+'</div>';
   const heading=(title)=>'<h3>'+safe(title)+'</h3>';
-  let html='<section class="etf-main-card" id="report-top">'+
-    '<div class="etf-subtitle">ETF专项研究 · '+safe(report.stock_code||'')+
-    ' · 数据截至 '+safe(report.as_of||'日期暂缺')+'</div>'+
-    '<h2>'+safe(report.stock_name||'')+'</h2>'+
-    '<div class="etf-subtitle">'+safe(data.scope||'')+'</div>'+
-    '<div class="etf-metric-row">'+
-      metric('ETF最新报价',fmt(fund.latest_price,' 元',3),fund.quote_time)+
-      metric('IOPV参考溢价',fmt(fund.iopv_premium_pct,'%',2),'基于报价与IOPV计算；非最终净值')+
-      metric('前5大披露持仓',fmt(stats.top5_weight_pct,'%',1),portfolio.as_of||'')+
-      metric('前10大披露持仓',fmt(stats.top10_weight_pct,'%',1),portfolio.as_of||'')+
-      metric('高位重仓可观察权重',fmt(stats.high_position_weight_pct,'%',1),'按52周价格位置≥80%')+
-      metric('ETF一年价格区间位置',fmt(price.price_position_pct,'%',1),price.price_as_of||'')+
-    '</div></section>';
+  // An ETF is not a listed operating company. Never mount the six-company-
+  // factor grid here, even when some constituent observations are present.
+  const latest=numericOrNull(fund.latest_price);
+  const latestText=latest!==null&&latest>0?latest.toFixed(3)+' 元':'暂缺';
+  const quoteAt=fund.quote_time||fund.data_date||'行情时间暂缺';
+  let html='<section class="report-header-inline report-company-card report-etf-card" '+
+    'role="group" aria-label="ETF基金与现价">'+
+    '<div class="report-company-identity"><h2 id="report-top">'+
+      safe(report.stock_name||'ETF名称暂缺')+'</h2>'+
+      '<span class="report-stock-code">'+safe(report.stock_code||'')+'</span>'+
+    '</div>'+
+    '<div class="verdict-market-strip verdict-market-strip-etf" role="group" aria-label="ETF现价">'+
+      verdictMetric('ETF现价',latestText,quoteAt,latest!==null&&latest>0?'price':'missing')+
+    '</div></section>'+
+    '<p class="etf-subtitle">ETF专项研究 · '+safe(data.scope||'')+
+    ' · 数据截至 '+safe(report.as_of||'日期暂缺')+'</p>';
   html+='<section class="etf-block" id="report-verdict">'+heading('投资结论')+
     (summary.stance?'<span class="stance-badge stance-'+safe(summary.stance)+'">'+
       safe(stanceLabel(summary.stance))+'</span>':
       '<span class="etf-unknown">研究判断暂未生成</span>')+
     '<div class="etf-prose">'+safe(summary.thesis_summary||'暂无结论')+'</div></section>';
-  html+='<section class="etf-block" id="etf-holdings">'+heading('重仓股透视')+
+  const macro=data.macro_market||{}, observations=macro.observations||{};
+  const cycle=data.industry_cycle||{}, breadth=cycle.earnings_breadth||{};
+  const macroFields=[
+    'gold_cny','gold_usd','us_real_yield_10y','us_treasury_10y',
+    'china_treasury_10y','china_lpr1y','china_m2_yoy','china_pmi',
+    'china_official_gold_reserves','sector_commodity'
+  ];
+  html+='<section class="etf-block" id="etf-macro-evidence">'+
+    heading('宏观、流动性与产品价格：最新可核实数据');
+  const known=macroFields.filter(key=>observations[key]);
+  if(known.length) {
+    html+='<div class="etf-table-wrap"><table class="etf-table"><thead><tr>'+
+      '<th>指标</th><th>最新</th><th>1个月</th><th>3个月</th><th>1年</th><th>日期</th>'+
+      '</tr></thead><tbody>';
+    known.forEach(key=>{
+      const o=observations[key], prices=['gold_cny','gold_usd','sector_commodity'].includes(key);
+      const change=period=>numericOrNull(o[period])===null?'—':fmt(o[period],'%',2);
+      html+='<tr><td><b>'+safe(o.name||key)+'</b></td>'+
+        '<td>'+safe(fmt(o.value,' '+(o.unit||''),2))+'</td>'+
+        '<td>'+safe(prices?change('return_1m_pct'):'—')+'</td>'+
+        '<td>'+safe(prices?change('return_3m_pct'):'—')+'</td>'+
+        '<td>'+safe(prices?change('return_1y_pct'):'—')+'</td>'+
+        '<td>'+safe(o.as_of||'日期缺失')+'</td></tr>';
+    });
+    html+='</tbody></table></div><p class="etf-source">数据来源：'+
+      known.map(key=>observations[key]).map(o=>safe(o.name)+': '+safe(o.source||'未标')).join('；')+
+      '。数据时点各不相同，缺失期间不做推算。</p>';
+  } else html+='<p class="etf-unknown">宏观与产品价格暂无有效近期观测，不能把ETF价格走势当作金价或行业产品价格。</p>';
+  html+='</section>';
+  html+='<section class="etf-block" id="etf-cycle-evidence">'+
+    heading('行业周期与前十大盈利广度')+
+    '<div class="etf-prose"><b>'+safe(cycle.stage||'周期待确认')+'</b> · '+
+      safe(cycle.confidence||'证据不足')+'</div>'+
+    '<div class="etf-metric-row">'+
+      '<div class="etf-metric"><span>已观察净利同比的权重</span><strong>'+
+        safe(fmt(breadth.sample_weight_pct,'%',1))+'</strong></div>'+
+      '<div class="etf-metric"><span>同比增速改善权重</span><strong>'+
+        safe(fmt(breadth.accelerating_growth_weight_pct,'%',1))+'</strong></div>'+
+      '<div class="etf-metric"><span>同比增速回落权重</span><strong>'+
+        safe(fmt(breadth.decelerating_growth_weight_pct,'%',1))+'</strong></div>'+
+    '</div><div class="etf-prose">'+safe((cycle.evidence||[]).join('；'))+
+    '</div><p class="etf-source">'+safe(breadth.definition||'')+'</p></section>';
+  html+='<section class="etf-block" id="etf-holdings">'+heading('前十大重仓股透视')+
     '<p class="etf-source">'+safe(portfolio.scope||'')+' · '+safe(portfolio.as_of||'披露期暂缺')+
     ' · '+safe(portfolio.source||'来源暂缺')+'</p>';
   if(rows.length) {
     html+='<div class="etf-table-wrap"><table class="etf-table"><thead><tr>'+
       '<th>重仓股</th><th>基金净值占比</th><th>52周价格位置</th>'+
-      '<th>距52周高点</th><th>财报期</th><th>净利同比</th><th>ROE</th><th>PE(TTM)</th><th>PB</th><th>PE历史分位</th><th>PB历史分位</th>'+
+      '<th>距52周高点</th><th>近一年涨跌</th><th>价格日期</th><th>财报期</th><th>净利同比</th><th>同比增速变动</th><th>ROE</th><th>PE(TTM)</th><th>PB</th><th>PE历史分位</th><th>PB历史分位</th>'+
       '</tr></thead><tbody>';
     rows.forEach(h=>{
       const pos=numericOrNull(h.price_position_pct);
@@ -3903,8 +3964,11 @@ function renderEtfResult(report) {
       html+='<tr><td><b>'+safe(h.name)+'</b> <small>'+safe(h.code)+'</small></td>'+
         '<td>'+safe(fmt(h.weight_pct,'%',2))+'</td><td>'+meter+'</td>'+
         '<td>'+safe(fmt(h.below_52w_high_pct,'%',1))+'</td>'+
+        '<td>'+safe(fmt(h.period_return_pct,'%',1))+'</td>'+
+        '<td>'+safe(h.price_as_of||'未核实')+'</td>'+
         '<td>'+safe(h.financial_period||'暂无')+'</td>'+
         '<td>'+safe(fmt(h.net_profit_growth_pct,'%',1))+'</td>'+
+        '<td>'+safe(fmt(h.growth_change_pp,'个百分点',1))+'</td>'+
         '<td>'+safe(fmt(h.roe_pct,'%',1))+'</td>'+ 
         '<td>'+safe(fmt(h.pe_ttm,' 倍',1))+'</td>'+ 
         '<td>'+safe(fmt(h.pb,' 倍',1))+'</td>'+ 
@@ -3920,7 +3984,8 @@ function renderEtfResult(report) {
     '；有历史估值分位的权重：'+safe(fmt(stats.historical_valuation_observed_weight_pct,'%',1))+
     '；其中处于至少一项估值80%高分位的权重：'+safe(fmt(stats.high_valuation_position_weight_pct,'%',1))+
     '。没有数据的权重不视为零风险。</p></section>';
-  const keys=['holdings','high_positions','earnings_cycle','valuation','fund_structure','market_price'];
+  const keys=['macro_liquidity','commodity_market','industry_cycle',
+    'holdings','high_positions','earnings_cycle','valuation','fund_structure','market_price'];
   const labels=report.section_labels||{};
   const sections=summary.sections||{};
   for(const key of keys) {
