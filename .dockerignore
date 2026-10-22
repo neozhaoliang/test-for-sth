@@ -1,10 +1,10 @@
-# Never bake credentials, personal browser profiles or private research into an image.
+# Build an image WITH the versioned research data/ directory.
+# Never package credentials or saved authenticated browser sessions.
 .git
 .env
 .env.*
 !.env.example
 browser_data/
-data/
 logs/
 instance/
 .venv/
@@ -19,6 +19,11 @@ tmp/
 *.tar
 *.sqlite3
 *.db
+# Include SQLite snapshots when they live under the requested data/ tree.
+!data/*.sqlite3
+!data/*.db
+!data/**/*.sqlite3
+!data/**/*.db
 dist/
 build/
 .idea/
