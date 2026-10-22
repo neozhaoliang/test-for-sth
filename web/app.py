@@ -153,6 +153,12 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     if etf:
         stock_code = etf["stock_code"]
     elif looks_like_etf:
+        alternatives = await search_etfs(raw_input, 60)
+        if len(alternatives) > 1:
+            raise HTTPException(
+                status_code=409,
+                detail=f"找到{len(alternatives)}只相关ETF，请从搜索下拉列表选择具体基金代码",
+            )
         raise HTTPException(status_code=404, detail=f"未找到可核实的ETF行情: {raw_input}")
     else:
         stock_code = await resolve_stock_code(raw_input)
@@ -216,20 +222,20 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
 @app.get("/api/stocks/suggest")
 async def suggest_stocks(
     q: str = Query(default="", max_length=80),
-    limit: int = Query(default=8, ge=1, le=15),
+    limit: int = Query(default=8, ge=1, le=60),
 ) -> Dict:
     """A-share equity and exchange-traded fund suggestions (both code and name)."""
     normalized = q.strip().casefold()
-    # Do not block explicit ETF searches behind a separate whole-market
-    # A-share quote download (which can be slow or unavailable).
+    digits = normalized.removeprefix("sh").removeprefix("sz")
+    # Theme and full ETF-name searches take precedence over stock autocomplete.
     etf_first = ("etf" in normalized or "基金" in normalized or
-                 (len(normalized.removeprefix("sh").removeprefix("sz")) == 6
-                  and normalized.removeprefix("sh").removeprefix("sz").isdigit()
-                  and normalized.removeprefix("sh").removeprefix("sz")[0] in "15"))
+                 "沪深300" in normalized or "黄金股" in normalized or
+                 "黄金产业" in normalized or
+                 (len(digits) == 6 and digits.isdigit() and digits[0] in "15"))
     fund_task = asyncio.create_task(search_etfs(q, limit))
     stock_task = None if etf_first else asyncio.create_task(search_stocks(q, limit))
     try:
-        funds = await asyncio.wait_for(fund_task, timeout=5.0)
+        funds = await asyncio.wait_for(fund_task, timeout=18.0)
     except Exception as exc:
         utils.logger.warning("[web.app] ETF suggestions unavailable: %s", exc)
         funds = []
@@ -240,16 +246,15 @@ async def suggest_stocks(
         except Exception as exc:
             utils.logger.warning("[web.app] stock suggestions unavailable: %s", exc)
     stock_items = [{**item, "asset_type": "stock"} for item in equity.get("items", [])]
-    combined = stock_items + funds
-    query = q.strip().lower()
-    combined.sort(key=lambda item: (
-        str(item["code"]).lower() != query
-        and str(item["code"])[-6:].lower() != query
-        and str(item["name"]).lower() != query,
-        not str(item["name"]).lower().startswith(query),
-        len(str(item["name"])),
-    ))
-    return {"items": combined[:limit], "source": "stock+etf" if funds else equity.get("source")}
+    # Preserve size order across ETF issuers. Stock ranking is only meaningful
+    # for mixed queries where there is no explicit ETF theme.
+    combined = funds + stock_items if etf_first else stock_items + funds
+    return {
+        "items": combined[:limit],
+        "source": "stock+etf" if funds else equity.get("source"),
+        "etf_count": len(funds),
+        "etf_sort": "fund_assets_desc_unknown_last",
+    }
 
 
 @app.get("/api/research/time-capabilities")
