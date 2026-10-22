@@ -3842,7 +3842,7 @@ function renderVerdictMarketStrip(report) {
     const fund=report.etf_data?.fund||{};
     const fundPrice=numericOrNull(fund.latest_price);
     const displayPrice=fundPrice!==null?fundPrice:price;
-    const label=fundPrice!==null?'ETF现价':quoteLabel;
+    const label=fundPrice!==null?(fund.quote_label||'ETF现价'):quoteLabel;
     const at=fund.quote_time||fund.data_date||quotedAt;
     return '<div class="verdict-market-strip verdict-market-strip-etf" '+
       'role="group" aria-label="ETF现价">'+
@@ -3887,9 +3887,20 @@ function renderEtfResult(report) {
   const heading=(title)=>'<h3>'+safe(title)+'</h3>';
   // An ETF is not a listed operating company. Never mount the six-company-
   // factor grid here, even when some constituent observations are present.
-  const latest=numericOrNull(fund.latest_price);
+  const observedQuote=numericOrNull(fund.latest_price);
+  const lastClose=numericOrNull(price.recent_close??price.price_close);
+  // The daily close can be shown even in old saved ETF payloads that did
+  // not enrich fund.latest_price. A dated CLOSE must not be called live.
+  const hasMarketQuote=observedQuote!==null&&observedQuote>0;
+  const latest=hasMarketQuote?observedQuote:lastClose;
+  const closeAsOf=price.recent_close_as_of||price.price_as_of||'日期暂缺';
   const latestText=latest!==null&&latest>0?latest.toFixed(3)+' 元':'暂缺';
-  const quoteAt=fund.quote_time||fund.data_date||'行情时间暂缺';
+  const quoteLabel=hasMarketQuote?(fund.quote_label||'ETF现价'):
+    (latest!==null&&latest>0?'最近交易日收盘价':'ETF行情暂无数据');
+  const quoteAt=hasMarketQuote?(fund.quote_time||fund.data_date||
+    '报价时间暂缺'):(closeAsOf+' 收盘（非实时）');
+  const quoteDetail=hasMarketQuote?(fund.quote_source||''):
+    (price.recent_close_source||'基金历史交易日数据');
   let html='<section class="report-header-inline report-company-card report-etf-card" '+
     'role="group" aria-label="ETF基金与现价">'+
     '<div class="report-company-identity"><h2 id="report-top">'+
@@ -3897,10 +3908,39 @@ function renderEtfResult(report) {
       '<span class="report-stock-code">'+safe(report.stock_code||'')+'</span>'+
     '</div>'+
     '<div class="verdict-market-strip verdict-market-strip-etf" role="group" aria-label="ETF现价">'+
-      verdictMetric('ETF现价',latestText,quoteAt,latest!==null&&latest>0?'price':'missing')+
+      verdictMetric(quoteLabel,latestText,quoteAt,
+        latest!==null&&latest>0?'price':'missing',quoteDetail)+
     '</div></section>'+
     '<p class="etf-subtitle">ETF专项研究 · '+safe(data.scope||'')+
     ' · 数据截至 '+safe(report.as_of||'日期暂缺')+'</p>';
+  // Show the latest published fund top ten immediately after the identity,
+  // independently of all discretionary/LLM-generated analysis sections.
+  const disclosure=portfolio.disclosure_as_of||portfolio.as_of||'报告期未核实';
+  html+='<section class="etf-block etf-top-holdings" id="etf-latest-top-ten">'+
+    heading('最新披露前十大重仓股')+
+    '<p class="etf-source">持仓截止日：'+safe(disclosure)+
+    ' · '+safe(portfolio.source||'持仓来源暂缺')+
+    (portfolio.retrieved_on?' · 查询日期：'+safe(portfolio.retrieved_on):'')+
+    '。属于定期报告持仓，并非当日实时指数权重。</p>';
+  if(rows.length) {
+    html+='<div class="etf-table-wrap"><table class="etf-table"><thead><tr>'+
+      '<th>排名</th><th>股票</th><th>代码</th><th>占基金净值</th>'+
+      '</tr></thead><tbody>';
+    rows.slice(0,10).forEach((h,i)=>{
+      html+='<tr><td>'+safe(i+1)+'</td><td><b>'+safe(h.name||'未知名称')+
+        '</b></td><td>'+safe(h.code||'')+'</td>'+
+        '<td>'+safe(fmt(h.weight_pct,'%',2))+'</td></tr>';
+    });
+    html+='</tbody></table></div>'+
+      '<p class="etf-source">前十大合计占基金净值：'+
+      safe(fmt(stats.top10_weight_pct,'%',2))+
+      (rows.length<10?'；目前只核实'+safe(rows.length)+'只，不补猜其余持仓。':'')+
+      '</p>';
+  } else {
+    html+='<p class="etf-unknown">未取得可核实的最新一期持仓。'+
+      '可到基金公司正式定期报告或基金档案核对；不使用静态示例冒充最新前十。</p>';
+  }
+  html+='</section>';
   html+='<section class="etf-block" id="report-verdict">'+heading('投资结论')+
     (summary.stance?'<span class="stance-badge stance-'+safe(summary.stance)+'">'+
       safe(stanceLabel(summary.stance))+'</span>':
@@ -3948,7 +3988,7 @@ function renderEtfResult(report) {
         safe(fmt(breadth.decelerating_growth_weight_pct,'%',1))+'</strong></div>'+
     '</div><div class="etf-prose">'+safe((cycle.evidence||[]).join('；'))+
     '</div><p class="etf-source">'+safe(breadth.definition||'')+'</p></section>';
-  html+='<section class="etf-block" id="etf-holdings">'+heading('前十大重仓股透视')+
+  html+='<section class="etf-block" id="etf-holdings">'+heading('十大重仓股价格、业绩与估值穿透')+
     '<p class="etf-source">'+safe(portfolio.scope||'')+' · '+safe(portfolio.as_of||'披露期暂缺')+
     ' · '+safe(portfolio.source||'来源暂缺')+'</p>';
   if(rows.length) {

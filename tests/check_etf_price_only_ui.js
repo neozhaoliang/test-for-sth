@@ -80,14 +80,31 @@ assert.equal(metricCount(sink.innerHTML), 1,
   'new ETF report should have one quote box, not a six-column issuer strip');
 assert(sink.innerHTML.includes('ETF现价'));
 assert(sink.innerHTML.includes('1.567 元'));
-assert(sink.innerHTML.includes('重仓股透视'));
+assert(sink.innerHTML.includes('最新披露前十大重仓股'));
 for (const field of ['市净率 PB', 'F10 披露ROE',
   '现金流/归母净利', 'IOPV参考溢价', 'ETF一年价格区间位置']) {
   assert(!sink.innerHTML.includes(field), 'ETF headline must omit ' + field);
 }
 
 etf.etf_data.fund.latest_price = null;
+etf.etf_data.etf_price_position = {
+  recent_close: 1.716, recent_close_as_of: '2026-10-21',
+};
+etf.etf_data.portfolio.disclosure_as_of = '2026-06-30';
+etf.etf_data.portfolio.holdings = Array.from({length: 10}, (_, i) => ({
+  code: '600' + String(100 + i), name: '持仓' + (i + 1),
+  weight_pct: 10 - i * 0.5,
+}));
 renderers.renderEtfResult(etf);
 assert.equal(metricCount(sink.innerHTML), 1);
+assert(sink.innerHTML.includes('最近交易日收盘价'));
+assert(sink.innerHTML.includes('1.716 元'));
+assert(sink.innerHTML.includes('2026-06-30'));
+assert(sink.innerHTML.indexOf('etf-latest-top-ten') <
+  sink.innerHTML.indexOf('report-verdict'), 'top ten must precede narrative');
+assert((sink.innerHTML.match(/持仓[0-9]+/g) || []).length >= 10);
+assert(sink.innerHTML.includes('600109'), 'must include tenth holding');
+etf.etf_data.etf_price_position = {};
+renderers.renderEtfResult(etf);
 assert(sink.innerHTML.includes('暂缺'));
-console.log('ETF price-only headline checks passed: current, missing, legacy and stock.');
+console.log('ETF price-only and latest top-ten checks passed: current, dated close, 10 holdings, legacy and stock.');
