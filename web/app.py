@@ -3817,6 +3817,12 @@ function verdictMetric(label, value, date, tone, detail) {
     (date?'<span class="verdict-market-date">'+escapeHtml(String(date))+'</span>':'')+
     '</div>';
 }
+function isEtfInstrument(report) {
+  // Legacy reports may not have asset_type. An ETF in a stock-shaped
+  // response must not display issuer-only PB, F10 ROE or cash-flow KPIs.
+  return !!report && (report.asset_type === 'etf' || !!report.etf_data ||
+    /ETF/i.test(String(report.stock_name||'')));
+}
 function renderVerdictMarketStrip(report) {
   const quote=report.realtime_quote||{};
   const valuation=report.valuation||{};
@@ -3832,6 +3838,19 @@ function renderVerdictMarketStrip(report) {
   const quotedAt=quote.quote_time||quote.date||quote.timestamp||report.as_of||'报价日期暂缺';
   const quoteLabel=isHistorical?'截止日收盘价':
     (quote.quote_mode==='verified_previous_close'?'最近核验收盘价':'参考股价');
+  if (isEtfInstrument(report)) {
+    const fund=report.etf_data?.fund||{};
+    const fundPrice=numericOrNull(fund.latest_price);
+    const displayPrice=fundPrice!==null?fundPrice:price;
+    const label=fundPrice!==null?'ETF现价':quoteLabel;
+    const at=fund.quote_time||fund.data_date||quotedAt;
+    return '<div class="verdict-market-strip verdict-market-strip-etf" '+
+      'role="group" aria-label="ETF现价">'+
+      verdictMetric(label,displayPrice!==null&&displayPrice>0?
+        displayPrice.toFixed(3)+' 元':'暂缺',
+        at,displayPrice!==null&&displayPrice>0?'price':'missing')+
+      '</div>';
+  }
   const items=[
     verdictMetric(quoteLabel,price!==null&&price>0?price.toFixed(2)+' 元':'暂缺',
       quotedAt,price!==null&&price>0?'price':'missing'),
@@ -3865,23 +3884,23 @@ function renderEtfResult(report) {
   const fmt=(value,suffix='',digits=1)=>{
     const n=numericOrNull(value);return n===null?'暂无数据':n.toFixed(digits)+suffix;
   };
-  const metric=(label,value,period='')=>'<div class="etf-metric"><span>'+safe(label)+
-    '</span><strong>'+safe(value)+'</strong>'+
-    (period?'<small class="etf-source">'+safe(period)+'</small>':'')+'</div>';
   const heading=(title)=>'<h3>'+safe(title)+'</h3>';
-  let html='<section class="etf-main-card" id="report-top">'+
-    '<div class="etf-subtitle">ETF专项研究 · '+safe(report.stock_code||'')+
-    ' · 数据截至 '+safe(report.as_of||'日期暂缺')+'</div>'+
-    '<h2>'+safe(report.stock_name||'')+'</h2>'+
-    '<div class="etf-subtitle">'+safe(data.scope||'')+'</div>'+
-    '<div class="etf-metric-row">'+
-      metric('ETF最新报价',fmt(fund.latest_price,' 元',3),fund.quote_time)+
-      metric('IOPV参考溢价',fmt(fund.iopv_premium_pct,'%',2),'基于报价与IOPV计算；非最终净值')+
-      metric('前5大披露持仓',fmt(stats.top5_weight_pct,'%',1),portfolio.as_of||'')+
-      metric('前10大披露持仓',fmt(stats.top10_weight_pct,'%',1),portfolio.as_of||'')+
-      metric('高位重仓可观察权重',fmt(stats.high_position_weight_pct,'%',1),'按52周价格位置≥80%')+
-      metric('ETF一年价格区间位置',fmt(price.price_position_pct,'%',1),price.price_as_of||'')+
-    '</div></section>';
+  // An ETF is not a listed operating company. Never mount the six-company-
+  // factor grid here, even when some constituent observations are present.
+  const latest=numericOrNull(fund.latest_price);
+  const latestText=latest!==null&&latest>0?latest.toFixed(3)+' 元':'暂缺';
+  const quoteAt=fund.quote_time||fund.data_date||'行情时间暂缺';
+  let html='<section class="report-header-inline report-company-card report-etf-card" '+
+    'role="group" aria-label="ETF基金与现价">'+
+    '<div class="report-company-identity"><h2 id="report-top">'+
+      safe(report.stock_name||'ETF名称暂缺')+'</h2>'+
+      '<span class="report-stock-code">'+safe(report.stock_code||'')+'</span>'+
+    '</div>'+
+    '<div class="verdict-market-strip verdict-market-strip-etf" role="group" aria-label="ETF现价">'+
+      verdictMetric('ETF现价',latestText,quoteAt,latest!==null&&latest>0?'price':'missing')+
+    '</div></section>'+
+    '<p class="etf-subtitle">ETF专项研究 · '+safe(data.scope||'')+
+    ' · 数据截至 '+safe(report.as_of||'日期暂缺')+'</p>';
   html+='<section class="etf-block" id="report-verdict">'+heading('投资结论')+
     (summary.stance?'<span class="stance-badge stance-'+safe(summary.stance)+'">'+
       safe(stanceLabel(summary.stance))+'</span>':

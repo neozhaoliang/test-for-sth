@@ -282,6 +282,20 @@ body, input, select, textarea, button { font-family:inherit; }
   border-radius:13px;
   background:linear-gradient(100deg,#f6f9ff,#fbfdff);
 }
+/* ETF headline has a single quote, never five empty issuer KPIs. */
+#result .report-company-card .verdict-market-strip.verdict-market-strip-etf {
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  width:min(100%,320px);
+}
+#result .report-company-card .verdict-market-strip-etf .verdict-market-metric {
+  border:0;
+}
+#result .report-etf-card + .etf-subtitle {
+  margin:10px 0 18px;
+  color:#73829b;
+  font-size:12px;
+}
 #result .report-company-card .verdict-market-metric {
   --kpi-ink:#2d598e;
   display:flex;

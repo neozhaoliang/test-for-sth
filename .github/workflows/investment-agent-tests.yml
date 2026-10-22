@@ -188,6 +188,7 @@ jobs:
           node tests/check_style_returns_ui.js /tmp/investment-webui.js
           node --check web/stock_autocomplete.js
           node tests/check_stock_autocomplete_ui.js
+          node tests/check_etf_price_only_ui.js
 
       - name: Verify ROE growth discount interactive valuation
         run: |
