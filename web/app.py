@@ -3913,6 +3913,34 @@ function renderEtfResult(report) {
     '</div></section>'+
     '<p class="etf-subtitle">ETF专项研究 · '+safe(data.scope||'')+
     ' · 数据截至 '+safe(report.as_of||'日期暂缺')+'</p>';
+  // Show the latest published fund top ten immediately after the identity,
+  // independently of all discretionary/LLM-generated analysis sections.
+  const disclosure=portfolio.disclosure_as_of||portfolio.as_of||'报告期未核实';
+  html+='<section class="etf-block etf-top-holdings" id="etf-latest-top-ten">'+
+    heading('最新披露前十大重仓股')+
+    '<p class="etf-source">持仓截止日：'+safe(disclosure)+
+    ' · '+safe(portfolio.source||'持仓来源暂缺')+
+    (portfolio.retrieved_on?' · 查询日期：'+safe(portfolio.retrieved_on):'')+
+    '。属于定期报告持仓，并非当日实时指数权重。</p>';
+  if(rows.length) {
+    html+='<div class="etf-table-wrap"><table class="etf-table"><thead><tr>'+
+      '<th>排名</th><th>股票</th><th>代码</th><th>占基金净值</th>'+
+      '</tr></thead><tbody>';
+    rows.slice(0,10).forEach((h,i)=>{
+      html+='<tr><td>'+safe(i+1)+'</td><td><b>'+safe(h.name||'未知名称')+
+        '</b></td><td>'+safe(h.code||'')+'</td>'+
+        '<td>'+safe(fmt(h.weight_pct,'%',2))+'</td></tr>';
+    });
+    html+='</tbody></table></div>'+
+      '<p class="etf-source">前十大合计占基金净值：'+
+      safe(fmt(stats.top10_weight_pct,'%',2))+
+      (rows.length<10?'；目前只核实'+safe(rows.length)+'只，不补猜其余持仓。':'')+
+      '</p>';
+  } else {
+    html+='<p class="etf-unknown">未取得可核实的最新一期持仓。'+
+      '可到基金公司正式定期报告或基金档案核对；不使用静态示例冒充最新前十。</p>';
+  }
+  html+='</section>';
   html+='<section class="etf-block" id="report-verdict">'+heading('投资结论')+
     (summary.stance?'<span class="stance-badge stance-'+safe(summary.stance)+'">'+
       safe(stanceLabel(summary.stance))+'</span>':
@@ -3960,7 +3988,7 @@ function renderEtfResult(report) {
         safe(fmt(breadth.decelerating_growth_weight_pct,'%',1))+'</strong></div>'+
     '</div><div class="etf-prose">'+safe((cycle.evidence||[]).join('；'))+
     '</div><p class="etf-source">'+safe(breadth.definition||'')+'</p></section>';
-  html+='<section class="etf-block" id="etf-holdings">'+heading('前十大重仓股透视')+
+  html+='<section class="etf-block" id="etf-holdings">'+heading('十大重仓股价格、业绩与估值穿透')+
     '<p class="etf-source">'+safe(portfolio.scope||'')+' · '+safe(portfolio.as_of||'披露期暂缺')+
     ' · '+safe(portfolio.source||'来源暂缺')+'</p>';
   if(rows.length) {
