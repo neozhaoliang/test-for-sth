@@ -120,29 +120,51 @@ async def test_missing_llm_does_not_fabricate_direction(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_517520_and_gold_equity_name_are_searchable_without_any_market_quote(monkeypatch):
-    # Reference identity, never a claimed live trading price.
-    monkeypatch.setattr(etf_data, "_catalog",
-                        AsyncMock(return_value=etf_data._reference_rows()))
+async def test_theme_search_lists_multiple_gold_equity_funds_not_one_pinned_code(monkeypatch):
+    rows = [
+        etf_data._catalog_entry("517520", "黄金股ETF永赢", source="fund_name_em"),
+        etf_data._catalog_entry("159562", "华夏中证沪深港黄金产业股票ETF",
+                                source="fund_name_em"),
+        etf_data._catalog_entry("517400", "国泰中证沪深港黄金产业股票ETF",
+                                source="fund_name_em"),
+        etf_data._catalog_entry("518880", "黄金ETF华安", source="fund_name_em"),
+    ]
+    monkeypatch.setattr(etf_data, "_catalog", AsyncMock(return_value=rows))
     monkeypatch.setattr(etf_data, "_catalog_refresh_task", None)
-    for raw in ("517520", "SH517520", "黄金股ETF", "黄金股etf"):
-        fund = await etf_data.resolve_etf(raw)
-        assert fund["stock_code"] == "SH517520"
-        assert fund["latest_price"] is None
-        options = await etf_data.search_etfs(raw)
-        assert options[0]["code"] == "SH517520"
-        assert options[0]["asset_type"] == "etf"
+    monkeypatch.setattr(etf_data, "_scale_refresh_task", None)
+    monkeypatch.setattr(etf_data, "_scale_cache", (
+        float("inf"), {
+            "517520": {"scale_yi": 123.4},
+            "159562": {"scale_yi": 64.2},
+            "517400": {"scale_yi": 15.1},
+            "518880": {"scale_yi": 300},
+        }))
+    for name in ("黄金股ETF", "黄金股etf"):
+        # Ambiguous theme can no longer silently resolve to one company.
+        assert await etf_data.resolve_etf(name) is None
+        options = await etf_data.search_etfs(name, 40)
+        assert [x["code"] for x in options] == [
+            "SH517520", "SZ159562", "SH517400"]
+        assert options[0]["scale_yi"] == 123.4
+    fund = await etf_data.resolve_etf("517520")
+    assert fund["stock_code"] == "SH517520"
+    assert fund["latest_price"] is None
 
 
 @pytest.mark.asyncio
 async def test_catalog_sources_work_independently_of_spot_quote(monkeypatch):
-    ths = pd.DataFrame([{"基金代码": "159915", "基金名称": "创业板ETF"}])
+    ths = pd.DataFrame([
+        {"基金代码": "159915", "基金名称": "创业板ETF"},
+        {"基金代码": "159562", "基金名称": "华夏中证沪深港黄金产业股票ETF"},
+    ])
     fund_names = pd.DataFrame([
         {"基金代码": "517520", "基金简称": "黄金股ETF永赢"},
         {"基金代码": "159001", "基金简称": "某指数ETF联接A"},
         {"基金代码": "999999", "基金简称": "非ETF股票"},
     ])
-    monkeypatch.setattr(etf_data.ak, "fund_etf_spot_ths",
+    monkeypatch.setattr(etf_data.ak, "fund_etf_category_sina",
+                        lambda **kwargs: None, raising=False)
+    monkeypatch.setattr(etf_data.ak, "fund_etf_category_ths",
                         lambda **kwargs: ths, raising=False)
     monkeypatch.setattr(etf_data.ak, "fund_name_em",
                         lambda **kwargs: fund_names, raising=False)
@@ -150,17 +172,18 @@ async def test_catalog_sources_work_independently_of_spot_quote(monkeypatch):
                         lambda: (_ for _ in ()).throw(RuntimeError("quote 502")))
     await etf_data._refresh_catalog()
     codes = {r["code"] for r in etf_data._catalog_cache[1]}
-    assert {"517520", "159915"} <= codes
+    assert {"517520", "159915", "159562"} <= codes
     assert "159001" not in codes
     assert all(r["latest_price"] is None for r in etf_data._catalog_cache[1])
-    fund = await etf_data._fund_with_live_quote(etf_data._reference_rows()[0])
+    fund = await etf_data._fund_with_live_quote(
+        etf_data._catalog_entry("517520", "黄金股ETF永赢", source="fund_name_em"))
     assert fund["latest_price"] is None
     assert fund["quote_source"].startswith("行情暂缺")
 
 
 @pytest.mark.asyncio
 async def test_gold_equity_etf_is_not_treated_as_physical_gold(monkeypatch):
-    spot = etf_data._reference_rows()[0]
+    spot = etf_data._catalog_entry("517520", "黄金股ETF永赢", source="fund_name_em")
     disclosure = {"holdings": [
         {"code": "600519", "name": "A股样本", "weight_pct": 10},
         {"code": "00700", "name": "港股样本", "weight_pct": 8},

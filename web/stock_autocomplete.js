@@ -76,6 +76,14 @@
       return;
     }
     const fragment = document.createDocumentFragment();
+    const funds = items.filter(item => item.asset_type === 'etf');
+    if (funds.length > 1) {
+      const hint = document.createElement('div');
+      hint.className = 'stock-suggest-message stock-suggest-hint';
+      hint.textContent = '找到 ' + funds.length +
+        ' 只 ETF；按规模从大到小排列，规模缺失的排在后面。点击具体基金继续分析。';
+      fragment.appendChild(hint);
+    }
     items.forEach((item, index) => {
       const option = document.createElement('button');
       option.type = 'button';
@@ -89,7 +97,27 @@
       const code = document.createElement('span');
       code.className = 'stock-suggest-code';
       code.textContent = String(item.code || '');
-      option.append(name, code);
+      if (item.asset_type === 'etf') {
+        const left = document.createElement('span');
+        left.className = 'stock-suggest-info';
+        const scale = document.createElement('span');
+        scale.className = 'stock-suggest-meta';
+        const size = Number(item.scale_yi);
+        if (item.scale_yi !== null && item.scale_yi !== undefined &&
+            Number.isFinite(size) && size > 0) {
+          const proxy = item.scale_kind === '二级市场市值近似';
+          scale.textContent = (proxy ? '市值近似 ' : '规模估算 ') +
+            size.toFixed(2) + ' 亿元' +
+            (item.scale_as_of ? ' · ' + item.scale_as_of : '') +
+            (proxy ? ' · 非基金净资产' : '');
+        } else {
+          scale.textContent = '规模暂无可核实数据';
+        }
+        left.append(name, scale);
+        option.append(left, code);
+      } else {
+        option.append(name, code);
+      }
       // mousedown prevents blur before click; normal keyboard tab works too.
       option.addEventListener('mousedown', event => event.preventDefault());
       option.addEventListener('click', () => choose(index));
@@ -111,8 +139,9 @@
     pending = new AbortController();
     const controller = pending;
     try {
+      const maxResults = /etf/i.test(query) || /沪深300|黄金股|黄金产业/.test(query) ? 60 : 8;
       const res = await fetch('/api/stocks/suggest?q=' +
-        encodeURIComponent(query) + '&limit=8', {
+        encodeURIComponent(query) + '&limit=' + maxResults, {
           signal: controller.signal,
           headers: {Accept: 'application/json'},
         });
@@ -121,7 +150,7 @@
       const items = Array.isArray(payload.items) ? payload.items.filter(
         item => item && /^[A-Z]{2}[0-9]{6}$/.test(item.code) &&
           typeof item.name === 'string'
-      ).slice(0, 8) : [];
+      ).slice(0, maxResults) : [];
       if (cache.size > 80) cache.clear();
       cache.set(key, items);
       if (ticket === serial && input.value.trim() === query)
@@ -147,7 +176,7 @@
     lastQuery = query;
     timer = setTimeout(() => {
       timer = null;
-      message('正在查找股票…');
+      message('正在查找股票与ETF…');
       search(query, ticket);
     }, WAIT_MS);
   }
