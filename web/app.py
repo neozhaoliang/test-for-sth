@@ -45,6 +45,8 @@ from analysis.knowledge_base import (
 from analysis.realtime_price import resolve_stock_code
 from analysis.stock_suggest import search_stocks, warm_stock_catalog
 from analysis.report import generate_report
+from analysis.etf_data import resolve_etf, search_etfs
+from analysis.etf_report import generate_etf_report
 from analysis.public_report import public_stock_report
 from web.intranet_access import IntranetAccessMiddleware, load_access_settings
 from analysis.json_safety import finite_json_numbers, nonfinite_number_paths
@@ -88,6 +90,7 @@ async def _preload_knowledge_base() -> None:
     # 不阻塞服务启动, 提炼完成的条目逐批进入缓存
     asyncio.create_task(ensure_knowledge_base_loaded())
     asyncio.create_task(warm_stock_catalog())
+    asyncio.create_task(search_etfs("ETF", 1))
 
 
 class AnalyzeRequest(BaseModel):
@@ -105,11 +108,18 @@ async def _run_analysis(
     task_id: str,
     stock_code: str,
     research_request: ResearchRequest,
+    asset_type: str = "stock",
 ) -> None:
     _tasks[task_id]["status"] = "running"
     try:
-        report = await generate_report(stock_code, request=research_request)
-        raw_report = report.model_dump()
+        if asset_type == "etf":
+            spot = await resolve_etf(stock_code)
+            if spot is None:
+                raise RuntimeError("ETF实时行情暂时无法核实，请稍后重试")
+            raw_report = await generate_etf_report(spot, research_request)
+        else:
+            report = await generate_report(stock_code, request=research_request)
+            raw_report = report.model_dump()
         bad_paths = nonfinite_number_paths(raw_report)
         if bad_paths:
             # Log only field paths; no confidential input data or numbers.
@@ -117,7 +127,7 @@ async def _run_analysis(
                 "[web.app] analysis %s non-finite numeric observations: %s",
                 task_id, bad_paths,
             )
-        result = public_stock_report(raw_report)
+        result = raw_report if asset_type == "etf" else public_stock_report(raw_report)
         # Validate BEFORE marking done, so a future unsupported payload type
         # becomes an ordinary failed task instead of repeated GET 500s.
         json.dumps(result, ensure_ascii=False, allow_nan=False)
@@ -135,9 +145,22 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     if not raw_input:
         raise HTTPException(status_code=400, detail="stock_code 不能为空")
 
-    stock_code = await resolve_stock_code(raw_input)
+    normalized = raw_input.upper().removeprefix("SH").removeprefix("SZ")
+    looks_like_etf = ((len(normalized) == 6 and normalized.isdigit()
+                       and normalized[0] in "15")
+                      or "ETF" in raw_input.upper() or "基金" in raw_input)
+    etf = await resolve_etf(raw_input) if looks_like_etf else None
+    if etf:
+        stock_code = etf["stock_code"]
+    elif looks_like_etf:
+        raise HTTPException(status_code=404, detail=f"未找到可核实的ETF行情: {raw_input}")
+    else:
+        stock_code = await resolve_stock_code(raw_input)
+        if not stock_code:
+            etf = await resolve_etf(raw_input)
+            stock_code = etf["stock_code"] if etf else None
     if not stock_code:
-        raise HTTPException(status_code=404, detail=f"未找到股票: {raw_input}")
+        raise HTTPException(status_code=404, detail=f"未找到股票或ETF: {raw_input}")
 
     try:
         research_request = ResearchRequest(
@@ -146,6 +169,10 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
             as_of=req.as_of,
             save_snapshot=req.save_snapshot,
         )
+        if etf and req.mode != "live":
+            raise NotImplementedError("ETF历史研究需要历史成分及披露日校验，当前只开放Live模式。")
+        if etf and req.save_snapshot:
+            raise NotImplementedError("ETF标准快照尚未支持，请取消保存快照后提交。")
         assert_request_supported(research_request)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -181,7 +208,8 @@ async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         "error": None,
         "request": research_request.model_dump(mode="json"),
     }
-    asyncio.create_task(_run_analysis(task_id, stock_code, research_request))
+    asyncio.create_task(_run_analysis(task_id, stock_code, research_request,
+                                      "etf" if etf else "stock"))
     return AnalyzeResponse(task_id=task_id)
 
 
@@ -190,8 +218,23 @@ async def suggest_stocks(
     q: str = Query(default="", max_length=80),
     limit: int = Query(default=8, ge=1, le=15),
 ) -> Dict:
-    """Autocomplete listed A-share names/codes; bounded, public-only response."""
-    return await search_stocks(q, limit)
+    """A-share equity and exchange-traded fund suggestions (both code and name)."""
+    equity, = await asyncio.gather(search_stocks(q, limit))
+    try:
+        funds = await asyncio.wait_for(search_etfs(q, limit), timeout=6.0)
+    except Exception:
+        funds = []
+    stock_items = [{**item, "asset_type": "stock"} for item in equity.get("items", [])]
+    combined = stock_items + funds
+    query = q.strip().lower()
+    combined.sort(key=lambda item: (
+        str(item["code"]).lower() != query
+        and str(item["code"])[-6:].lower() != query
+        and str(item["name"]).lower() != query,
+        not str(item["name"]).lower().startswith(query),
+        len(str(item["name"])),
+    ))
+    return {"items": combined[:limit], "source": "stock+etf" if funds else equity.get("source")}
 
 
 @app.get("/api/research/time-capabilities")
@@ -532,7 +575,7 @@ _INDEX_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>股票投资助手 · Research Desk</title>
+<title>股票与ETF投资助手 · Research Desk</title>
 <style>
   body { font-family: -apple-system, "Microsoft YaHei", sans-serif; max-width: 800px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
   header { margin-bottom: 24px; }
@@ -817,6 +860,24 @@ _INDEX_HTML = """<!DOCTYPE html>
     .market-structure-values,.market-structure-missing { grid-column:1; }
   }
   @media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto !important; transition:none !important; } }
+
+  .etf-main-card,.etf-block { background:#fff; border:1px solid var(--line); border-radius:18px;
+    padding:22px 26px; margin:14px 0; box-shadow:var(--shadow); }
+  .etf-main-card h2 {margin:0 0 6px;font-size:25px}
+  .etf-subtitle,.etf-source {font-size:12px;color:var(--muted);line-height:1.65}
+  .etf-metric-row {display:flex;gap:10px;flex-wrap:wrap;margin:15px 0}
+  .etf-metric {flex:1 1 135px;background:#f5f7fe;border-radius:11px;padding:10px 14px}
+  .etf-metric span {display:block;color:#596982;font-size:12px}
+  .etf-metric strong {display:block;font-size:21px;font-variant-numeric:tabular-nums}
+  .etf-prose {white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.85;color:#344762}
+  .etf-table-wrap {overflow-x:auto}
+  .etf-table {width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+  .etf-table th,.etf-table td {text-align:left;padding:9px 10px;border-bottom:1px solid #e7eaf2;white-space:nowrap}
+  .etf-table th {font-size:12px;color:#62718b;background:#f7f9fd}
+  .etf-position {display:inline-flex;align-items:center;gap:7px}
+  .etf-position-meter {display:inline-block;width:58px;height:8px;background:#e7ebf3;border-radius:8px;overflow:hidden}
+  .etf-position-meter > i {display:block;height:8px;background:#5864c8}
+  .etf-unknown {color:#8792a5}
 </style>
 <link rel="stylesheet" href="/assets/research_desk.css">
 </head>
@@ -825,7 +886,7 @@ _INDEX_HTML = """<!DOCTYPE html>
 <header class="hero-header">
   <div class="hero-copy">
     <span class="eyebrow">EVIDENCE-FIRST · INVESTMENT RESEARCH</span>
-    <h1>股票投资助手 <span>/ Research Desk</span></h1>
+    <h1>股票与ETF投资助手 <span>/ Research Desk</span></h1>
     <p>从真实经营与财务数据出发，研究公司价值、现金流、周期与风险。区分已核实的事实、主观判断和估值假设。</p>
   </div>
   <div class="hero-aside" aria-label="研究原则">
@@ -834,14 +895,14 @@ _INDEX_HTML = """<!DOCTYPE html>
     <small>长期视角 · 证据约束 · 情景推演</small>
   </div>
 </header>
-<section class="control-deck" aria-label="股票研究入口">
+<section class="control-deck" aria-label="股票与ETF研究入口">
   <div class="deck-heading"><h2>开始研究</h2><p>输入证券代码或简称，生成完整研究报告</p></div>
 <div class="search-bar">
   <div class="stock-search-field">
     <input id="stockCode" aria-label="股票代码或名称" role="combobox"
       aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false"
       aria-controls="stockSuggestions" autocomplete="off"
-      placeholder="输入股票名称或代码，如 中国海油 / 600938" />
+      placeholder="输入股票或ETF，如 中国海油 / 600938 / 沪深300ETF / 510300" />
     <div id="stockSuggestions" class="stock-suggestions"
       role="listbox" aria-label="股票匹配结果" hidden></div>
   </div>
@@ -1020,7 +1081,7 @@ async function submitAnalysis() {
   if (submitting) return;
   const stockCode = document.getElementById('stockCode').value.trim();
   if (!stockCode) {
-    showAnalysisError('请输入股票名称或代码');
+    showAnalysisError('请输入股票名称或代码（也支持ETF）');
     return;
   }
   const mode = document.getElementById('researchMode').value;
@@ -3775,7 +3836,90 @@ function renderVerdictMarketStrip(report) {
     items.join('')+'</div>';
 }
 
+
+function renderEtfResult(report) {
+  const data=report.etf_data||{}, fund=data.fund||{}, portfolio=data.portfolio||{};
+  const stats=data.portfolio_stats||{}, price=data.etf_price_position||{}, summary=report.summary||{};
+  const rows=Array.isArray(portfolio.holdings)?portfolio.holdings:[];
+  const safe=value=>escapeHtml(String(value===undefined||value===null?'':value));
+  const fmt=(value,suffix='',digits=1)=>{
+    const n=numericOrNull(value);return n===null?'暂无数据':n.toFixed(digits)+suffix;
+  };
+  const metric=(label,value,period='')=>'<div class="etf-metric"><span>'+safe(label)+
+    '</span><strong>'+safe(value)+'</strong>'+
+    (period?'<small class="etf-source">'+safe(period)+'</small>':'')+'</div>';
+  const heading=(title)=>'<h3>'+safe(title)+'</h3>';
+  let html='<section class="etf-main-card" id="report-top">'+
+    '<div class="etf-subtitle">ETF专项研究 · '+safe(report.stock_code||'')+
+    ' · 数据截至 '+safe(report.as_of||'日期暂缺')+'</div>'+
+    '<h2>'+safe(report.stock_name||'')+'</h2>'+
+    '<div class="etf-subtitle">'+safe(data.scope||'')+'</div>'+
+    '<div class="etf-metric-row">'+
+      metric('ETF最新报价',fmt(fund.latest_price,' 元',3),fund.quote_time)+
+      metric('IOPV参考溢价',fmt(fund.iopv_premium_pct,'%',2),'基于报价与IOPV计算；非最终净值')+
+      metric('前5大披露持仓',fmt(stats.top5_weight_pct,'%',1),portfolio.as_of||'')+
+      metric('前10大披露持仓',fmt(stats.top10_weight_pct,'%',1),portfolio.as_of||'')+
+      metric('高位重仓可观察权重',fmt(stats.high_position_weight_pct,'%',1),'按52周价格位置≥80%')+
+      metric('ETF一年价格区间位置',fmt(price.price_position_pct,'%',1),price.price_as_of||'')+
+    '</div></section>';
+  html+='<section class="etf-block" id="report-verdict">'+heading('投资结论')+
+    (summary.stance?'<span class="stance-badge stance-'+safe(summary.stance)+'">'+
+      safe(stanceLabel(summary.stance))+'</span>':
+      '<span class="etf-unknown">研究判断暂未生成</span>')+
+    '<div class="etf-prose">'+safe(summary.thesis_summary||'暂无结论')+'</div></section>';
+  html+='<section class="etf-block" id="etf-holdings">'+heading('重仓股透视')+
+    '<p class="etf-source">'+safe(portfolio.scope||'')+' · '+safe(portfolio.as_of||'披露期暂缺')+
+    ' · '+safe(portfolio.source||'来源暂缺')+'</p>';
+  if(rows.length) {
+    html+='<div class="etf-table-wrap"><table class="etf-table"><thead><tr>'+
+      '<th>重仓股</th><th>基金净值占比</th><th>52周价格位置</th>'+
+      '<th>距52周高点</th><th>财报期</th><th>净利同比</th><th>ROE</th><th>PE(TTM)</th><th>PB</th><th>PE历史分位</th><th>PB历史分位</th>'+
+      '</tr></thead><tbody>';
+    rows.forEach(h=>{
+      const pos=numericOrNull(h.price_position_pct);
+      const meter=pos===null?'<span class="etf-unknown">未核实</span>':
+        '<span class="etf-position"><span class="etf-position-meter"><i style="width:'+
+        Math.max(0,Math.min(pos,100))+'%"></i></span>'+fmt(pos,'%',0)+'</span>';
+      html+='<tr><td><b>'+safe(h.name)+'</b> <small>'+safe(h.code)+'</small></td>'+
+        '<td>'+safe(fmt(h.weight_pct,'%',2))+'</td><td>'+meter+'</td>'+
+        '<td>'+safe(fmt(h.below_52w_high_pct,'%',1))+'</td>'+
+        '<td>'+safe(h.financial_period||'暂无')+'</td>'+
+        '<td>'+safe(fmt(h.net_profit_growth_pct,'%',1))+'</td>'+
+        '<td>'+safe(fmt(h.roe_pct,'%',1))+'</td>'+ 
+        '<td>'+safe(fmt(h.pe_ttm,' 倍',1))+'</td>'+ 
+        '<td>'+safe(fmt(h.pb,' 倍',1))+'</td>'+ 
+        '<td>'+safe(h.pe_history_position?fmt(h.pe_history_position.percentile,'%',1):'暂无数据')+'</td>'+ 
+        '<td>'+safe(h.pb_history_position?fmt(h.pb_history_position.percentile,'%',1):'暂无数据')+'</td></tr>';
+    });
+    html+='</tbody></table></div>';
+  } else html+='<p class="etf-unknown">未能取得有季度标记的基金持仓数据，不会猜测前十大重仓股。</p>';
+  html+='<p class="etf-source">高位=近252交易日前复权收盘价在区间80%以上，绝不等于估值高。'+
+    '已核实价格位置的披露持仓权重：'+safe(fmt(stats.price_observed_weight_pct,'%',1))+
+    '；取得盈利指标的披露持仓权重：'+safe(fmt(stats.profit_observed_weight_pct,'%',1))+
+    '；取得PE/PB的披露持仓权重：'+safe(fmt(stats.pe_pb_observed_weight_pct,'%',1))+
+    '；有历史估值分位的权重：'+safe(fmt(stats.historical_valuation_observed_weight_pct,'%',1))+
+    '；其中处于至少一项估值80%高分位的权重：'+safe(fmt(stats.high_valuation_position_weight_pct,'%',1))+
+    '。没有数据的权重不视为零风险。</p></section>';
+  const keys=['holdings','high_positions','earnings_cycle','valuation','fund_structure','market_price'];
+  const labels=report.section_labels||{};
+  const sections=summary.sections||{};
+  for(const key of keys) {
+    if(!sections[key])continue;
+    html+='<section class="etf-block">'+heading(labels[key]||key)+
+      '<div class="etf-prose">'+safe(sections[key])+'</div></section>';
+  }
+  if(summary.risk_notes)html+='<section class="etf-block">'+heading('主要风险')+
+    '<div class="etf-prose">'+safe(summary.risk_notes)+'</div></section>';
+  if(summary.invalidation_condition)html+='<section class="etf-block">'+heading('什么会改变判断')+
+    '<div class="etf-prose">'+safe(summary.invalidation_condition)+'</div></section>';
+  html+='<section class="etf-block"><p class="etf-source">'+
+    (data.limitations||[]).map(safe).join(' · ')+
+    '</p></section>';
+  document.getElementById('result').innerHTML=html;
+}
+
 function renderResult(report) {
+  if (report && report.asset_type === "etf") { renderEtfResult(report); return; }
   const el = document.getElementById('result');
   const isHistorical = report.research_mode === 'historical';
   // The top card holds the company name, small ticker, and the six key
