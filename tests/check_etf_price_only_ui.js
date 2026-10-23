@@ -80,7 +80,10 @@ const etf = {
   },
   summary: {stance: 'neutral', thesis_summary: '基金研究摘要', sections: {}},
 };
+etf.summary.sections.holdings = '不应重复展示的持仓名单唯一测试标记';
 renderers.renderEtfResult(etf);
+assert(!sink.innerHTML.includes('不应重复展示的持仓名单唯一测试标记'),
+  'do not repeat the top-ten table holdings in an additional prose section');
 assert.equal(metricCount(sink.innerHTML), 1,
   'new ETF report should have one quote box, not a six-column issuer strip');
 assert(sink.innerHTML.includes('ETF现价'));
