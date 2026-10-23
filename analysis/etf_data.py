@@ -718,10 +718,18 @@ async def _hk_stock_price(code: str, today: date) -> dict:
             failure_notes.append(api + ":" + type(exc).__name__)
             utils.logger.warning("[etf] HK holding price %s %s: %s",
                                  code, api, exc)
+    # Two independent HTTP endpoints provide dated K-lines outside AKShare.
+    # This addresses broker-site CDN outages and stale Sina updates.
+    from analysis.etf_hk_market import get_hk_web_price
+    web_price = await get_hk_web_price(code, today)
+    if web_price:
+        return web_price
     return {
-        "price_lookup_status": "港股日线双数据源均未取得有效近期价格",
-        "price_lookup_sources": ["stock_hk_hist", "stock_hk_daily"],
-        # No 0-valued prices or imaginary valuation percentiles.
+        "price_lookup_status": "东财/新浪/腾讯/Yahoo均未返回有效近期日线",
+        "price_lookup_sources": [
+            "stock_hk_hist", "stock_hk_daily", "Tencent HK", "Yahoo HK"
+        ],
+        # Missing is not a numeric zero and never authorizes an inference.
     }
 
 
@@ -755,7 +763,9 @@ def _hk_financial_from_frame(df: Any, today: date) -> dict:
     frame = pd.DataFrame(df)
     cols = frame.columns.tolist()
     period_col = next(
-        (col for col in cols if str(col).strip() in ("周期", "报告期", "报告日期", "日期")), None
+        (col for col in cols if str(col).strip() in (
+            "周期", "报告期", "报告日期", "日期", "报告时间",
+            "REPORT_DATE", "REPORT_PERIOD")), None
     )
     if period_col is None:
         return {}
@@ -769,6 +779,8 @@ def _hk_financial_from_frame(df: Any, today: date) -> dict:
     )
     roe_col = (
         _hk_indicator_column(cols, include=("净资产收益率",),
+                            exclude=("同比", "增长"))
+        or _hk_indicator_column(cols, include=("股东权益回报率",),
                             exclude=("同比", "增长"))
         or _hk_indicator_column(cols, include=("ROE",), exclude=("同比",))
     )
@@ -790,6 +802,7 @@ def _hk_financial_from_frame(df: Any, today: date) -> dict:
     result = {
         "financial_period": latest["period"],
         "financial_source": "东方财富港股财务分析（报告期）",
+        "financial_evidence_kind": "报告期港股真实财务字段",
         "financial_history": rows[-8:],
         "net_profit_growth_pct": latest.get("net_profit_growth_pct"),
         "roe_pct": latest.get("roe_pct"),
