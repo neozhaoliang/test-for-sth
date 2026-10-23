@@ -88,9 +88,16 @@ assert.equal(metricCount(sink.innerHTML), 3,
   'ETF report must show price, IOPV reference premium and turnover beside the name');
 assert(sink.innerHTML.includes('ETF现价'));
 assert(sink.innerHTML.includes('1.567 元'));
-assert(sink.innerHTML.includes('暂无IOPV'),
+assert(sink.innerHTML.includes('溢价率'));
+assert(sink.innerHTML.includes('暂无数据'),
   'premium must remain unknown without comparable IOPV');
+assert(!sink.innerHTML.includes('缺少可比较的IOPV'));
+assert(!sink.innerHTML.includes('来源未提供报价日期'));
+assert(!sink.innerHTML.includes('二级市场成交'));
 assert(sink.innerHTML.includes('成交额'));
+assert(sink.innerHTML.includes('近12个月分红率'));
+assert(sink.innerHTML.includes('可供分配利润'));
+assert(sink.innerHTML.includes('最近每份分红'));
 assert(sink.innerHTML.includes('class="etf-hero-row"'));
 assert(etfCss.includes('grid-template-columns:minmax(250px,1fr) minmax(410px,1.28fr)'),
   'ETFs display fund name left and price/IOPV/turnover KPI cards right');
@@ -152,7 +159,8 @@ etf.etf_data.fund.iopv = 1.58;
 etf.etf_data.fund.iopv_premium_pct = -0.82;
 etf.etf_data.fund.turnover_yuan = 148040000;
 renderers.renderEtfResult(etf);
-assert(sink.innerHTML.includes('IOPV参考折价'));
+assert(sink.innerHTML.includes('溢价率'));
+assert(!sink.innerHTML.includes('IOPV参考折价'));
 assert(sink.innerHTML.includes('-0.82%'));
 assert(sink.innerHTML.includes('1.48 亿元'));
 assert.equal(metricCount(sink.innerHTML),3);
@@ -191,7 +199,8 @@ assert.equal(metricCount(sink.innerHTML), 3);
 assert(sink.innerHTML.includes('最近交易日收盘价'));
 assert(sink.innerHTML.includes('指数被动高位承接风险'));
 assert(sink.innerHTML.includes('高估值分位'));
-assert(sink.innerHTML.includes('指数编制和季度调样公告'));
+assert(!sink.innerHTML.includes('指数编制和季度调样公告'));
+assert(!sink.innerHTML.includes('基金名称提示，非合同核实'));
 assert.equal((sink.innerHTML.match(/class="etf-whole-report-card"/g)||[]).length,1);
 assert(sink.innerHTML.trim().endsWith('</article>'));
 assert(sink.innerHTML.includes('1.716 元'));
