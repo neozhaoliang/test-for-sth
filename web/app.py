@@ -4051,9 +4051,72 @@ function renderEtfResult(report) {
       '、'+safe(crowd.turnover_source||'场内ETF日成交')+
       '。只统计基金证券自身的融资交易，不将成分股融资余额加总。</p></section>';
   }
+  const broad=data.broad_market||{}, broadProfile=broad.profile||{};
+  const isBroad=!!broadProfile.index_code;
+  if (isBroad) {
+    const tape=broad.benchmark_price||{}, pval=broad.index_valuation||{};
+    const inclusion=broad.constituent_changes||{}, additions=inclusion.recent_entries||[];
+    const num=v=>numericOrNull(v);
+    const stat=(label,value,unit='',digits=1)=>{
+      const n=num(value);
+      return '<div class="etf-metric"><span>'+safe(label)+'</span><strong>'+
+        safe(n===null?'未核实':n.toFixed(digits)+unit)+'</strong></div>';
+    };
+    html+='<section class="etf-block etf-broad-market" id="etf-broad-market">'+
+      heading(safe(broadProfile.family||'宽基指数')+'：年内行情、量能与市场情绪')+
+      '<div class="etf-metric-row etf-broad-metrics">'+
+      stat('指数年初以来',tape.ytd_pct,'%',2)+
+      stat('最近20交易日',tape.return_20d_pct,'%',2)+
+      stat('最近60交易日',tape.return_60d_pct,'%',2)+
+      stat('年内最大回撤',tape.ytd_max_drawdown_pct,'%',2)+
+      stat('52周价格位置',tape.price_position_52w_pct,'%',1)+
+      stat('近5日/前20日指数成交额',tape.recent5_vs_prior20_amount_ratio,' 倍',2)+
+      stat('指数PE(TTM)',pval.pe_ttm,' 倍',1)+
+      stat('指数PE近3年分位',pval.pe_3y_percentile_pct,'%',1)+
+      '</div>'+
+      '<p class="etf-prose">'+safe(broad.sentiment_observation||'指数风险偏好暂缺有效量价证据。')+'</p>'+
+      '<p class="etf-source">跟踪指数 '+safe(broadProfile.index_code||'')+
+        ' · 指数行情日期：'+safe(tape.as_of||'尚未取得')+
+        ' · 指数PE日期：'+safe(pval.as_of||'尚未取得')+
+        '。指数成交额与ETF自身成交额不同，均不等于基金净申购。</p>'+
+      '<div class="etf-analysis-subsection">'+heading('宏观政策与流动性观察');
+    const macroObs=(data.macro_market||{}).observations||{};
+    const macroKeys=['china_lpr1y','china_m2_yoy','china_pmi',
+                     'china_treasury_10y','us_real_yield_10y'];
+    const macroList=macroKeys.filter(k=>macroObs[k]);
+    if(macroList.length) {
+      html+='<div class="etf-metric-row etf-broad-metrics">'+macroList.map(k=>{
+        const o=macroObs[k];
+        const n=num(o.value);
+        return '<div class="etf-metric" title="'+safe((o.source||'')+' · '+(o.as_of||''))+'">'+
+          '<span>'+safe(o.name||k)+'</span><strong>'+
+          safe(n===null?'未核实':n.toFixed(2)+(o.unit||''))+
+          '</strong></div>';
+      }).join('')+'</div>'+
+      '<p class="etf-source">以上是有日期的宏观指标，不等于已确认的新增政策公告。</p>';
+    } else html+='<p class="etf-unknown">当前未获得有效的宏观政策量化观测，不推断政策利好。</p>';
+    html+='</div><div class="etf-analysis-subsection">'+heading('指数调样与高位纳入观察');
+    const observations=additions.slice(0,8);
+    if(observations.length) {
+      html+='<div class="etf-table-wrap"><table class="etf-table"><thead><tr>'+
+        '<th>近期纳入</th><th>生效日期</th><th>纳入前60交易日</th><th>观察</th>'+
+        '</tr></thead><tbody>';
+      observations.forEach(o=>{
+        const change=num(o.pre_inclusion_60d_return_pct);
+        html+='<tr><td><b>'+safe(o.name||o.code)+'</b> '+safe(o.code||'')+'</td>'+
+          '<td>'+safe(o.included_on||'未核实')+'</td>'+
+          '<td>'+safe(change===null?'未核实':(change>0?'+':'')+change.toFixed(1)+'%')+'</td>'+
+          '<td>'+safe(o.momentum_flag?'纳入前上涨较快':'暂未确认高位纳入')+'</td></tr>';
+      });
+      html+='</tbody></table></div>';
+    } else html+='<p class="etf-unknown">未取得可靠的近期成份股纳入记录，不能据此断言没有调样。</p>';
+    html+='<p class="etf-source">指数纳入日期不等于ETF的实际成交日；纳入前上涨也不能单独证明泡沫。'
+      +'近60日涨幅仅对取得纳入前连续日线的股票计算。</p></div></section>';
+  }
   const risk=data.holding_risk||{}, strategy=risk.management_style||{};
   html+='<section class="etf-block etf-unified-evidence" id="etf-unified-evidence">'+
-    heading('重仓股、宏观与估值风险分析');
+    heading(isBroad?'重仓结构与估值风险':'重仓股、宏观与估值风险分析');
+  if(!isBroad) {
   html+='<div class="etf-analysis-subsection etf-manager-risk" id="etf-management-risk">'+
     heading(risk.risk_type||'指数调样与主动管理的高位风险')+
     '<div class="etf-prose">'+safe(risk.risk_summary||
@@ -4099,6 +4162,7 @@ function renderEtfResult(report) {
     // appear as investor-facing narrative or small print.
   }
   html+='</div>';
+  }
   const macro=data.macro_market||{}, observations=macro.observations||{};
   const cycle=data.industry_cycle||{}, breadth=cycle.earnings_breadth||{};
   const macroFields=[
@@ -4106,6 +4170,7 @@ function renderEtfResult(report) {
     'china_treasury_10y','china_lpr1y','china_m2_yoy','china_pmi',
     'china_official_gold_reserves','sector_commodity'
   ];
+  if(!isBroad) {
   html+='<div class="etf-analysis-subsection" id="etf-macro-evidence">'+
     heading('宏观、流动性与产品价格：最新可核实数据');
   const known=macroFields.filter(key=>observations[key]);
@@ -4145,7 +4210,9 @@ function renderEtfResult(report) {
         '</strong></div>'+
     '</div><div class="etf-prose">'+safe((cycle.evidence||[]).join('；'))+
     '</div></div>';
-  html+='<div class="etf-analysis-subsection" id="etf-holdings">'+heading('十大重仓股价格、业绩与估值穿透')+
+  }
+  html+='<div class="etf-analysis-subsection" id="etf-holdings">'+
+    heading(isBroad?'前十大持仓财务与估值（仅披露部分）':'十大重仓股价格、业绩与估值穿透')+
     '<p class="etf-source">'+safe(portfolio.scope||'')+' · '+safe(portfolio.as_of||'披露期暂缺')+
     ' · '+safe(portfolio.source||'来源暂缺')+'</p>';
   if(rows.length) {
