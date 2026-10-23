@@ -3969,7 +3969,7 @@ function renderEtfResult(report) {
   html+='<section class="etf-block etf-unified-evidence" id="etf-unified-evidence">'+
     heading('重仓股、宏观与估值风险分析');
   html+='<div class="etf-analysis-subsection etf-manager-risk" id="etf-management-risk">'+
-    heading('指数调样 / 主动经理高位追涨风险')+
+    heading(risk.risk_type||'指数调样与主动管理的高位风险')+
     '<p class="etf-source">'+safe(strategy.label||'尚未核实管理方式')+
     ' · '+safe(strategy.source||'先核实基金合同及投资策略')+'</p>'+
     '<div class="etf-prose">'+safe(risk.risk_summary||
