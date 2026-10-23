@@ -128,6 +128,7 @@ jobs:
             analysis/trading_crowding.py \
             analysis/etf_hk_market.py \
             analysis/etf_holding_risk.py \
+            analysis/etf_distribution.py \
             analysis/etf_macro.py \
             analysis/etf_cycle.py \
             analysis/etf_data.py \
@@ -233,6 +234,7 @@ jobs:
             tests/test_etf_hk_multi_source.py \
             tests/test_etf_hk_data_recovery.py \
             tests/test_etf_holding_risk.py \
+            tests/test_etf_distribution.py \
             tests/test_etf_macro_cycle.py \
             tests/test_etf_research.py \
             tests/test_company_valuation_knowledge.py \
