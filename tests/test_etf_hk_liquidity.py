@@ -46,6 +46,13 @@ def test_hkma_real_dates_and_units_no_fake_low():
     assert out["aggregate_balance_hkd_million"] == 46000
     assert out["hibor_1m_change_bp"] > 0
     assert out["aggregate_balance_change_pct"] < 0
+    assert out["hibor_90d_percentile_pct"] >= 80
+    assert out["balance_90d_percentile_pct"] <= 20
+    watch = etf_hk_liquidity.assess_hk_liquidity(
+        out, {"fed_target_change_60d_bp":25}, {}, {}
+    )
+    assert watch["recent_funding_extreme_watch"] is True
+    assert watch["liquidity_bottom_confirmed"] is False
     assert etf_hk_liquidity.hkma_liquidity_snapshot(
         _hkma_records(), as_of=date(2026, 11, 23)
     )["status"] == "stale"
