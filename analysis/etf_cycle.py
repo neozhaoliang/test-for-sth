@@ -63,9 +63,16 @@ def assess_cycle(market: dict, holdings: list[dict]) -> dict:
             "earnings_breadth": earnings,
             "commodity_signal": None,
             "evidence": [
-                f"前十大重仓可观察净利润同比的公司{count}只，覆盖基金净值{coverage:.2f}%；可比增速{comparable}只",
-                "不同产业分别评估现金流和盈利，不能用单一金属、能源价格或某一行业拐点给全基金定性",
-                "股息率、派息率、自由现金流覆盖及偿债压力尚未核实时，不应承诺分红能维持",
+                (
+                    f"前十大重仓中，{count}家公司披露了可比较的净利润同比，"
+                    f"合计占基金净值{coverage:.2f}%。"
+                ) if count else "前十大重仓暂缺有效的净利润同比资料。",
+                (
+                    f"其中利润增速改善的重仓占基金净值"
+                    f"{earnings['accelerating_growth_weight_pct']:.2f}%，"
+                    f"增速回落的占"
+                    f"{earnings['decelerating_growth_weight_pct']:.2f}%。"
+                ) if comparable else "尚没有足够数据比较重仓公司的利润增速变化。",
             ],
             "bottom_confirmation": "分红ETF的买点应由可持续股息、估值、利率与盈利风险共同决定，不是某一行业价格底部",
             "top_confirmation": "须警惕高景气利润退潮造成股息率的分母陷阱、分红下修和估值压缩",

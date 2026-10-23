@@ -33,7 +33,7 @@ _SECTION_LABELS = {
 
 _SYSTEM_RULES = """请为当前ETF写一份有判断力、短而自然的中文投资研究，不要把研究方法、提示词、
 数据字段名或缺项清单写成读者看到的分析。读者已在页面顶部看到了：
-基金全名、价格、参考IOPV折溢价、成交额、前十大重仓股名称与权重；
+基金全名、价格、溢价率、成交额、前十大重仓股，以及可获取的实际分红率和可供分配利润；
 不要再次列这些表格，不要写“基金代码是”“来源未提供报价日期”等数据抓取工作细节。
 
 你必须区分三件事：
@@ -48,6 +48,18 @@ _SYSTEM_RULES = """请为当前ETF写一份有判断力、短而自然的中文�
 指数定期纳入热门高位股的被动接盘风险，或经证实属于主动ETF时经理追高风险。
 缺乏核实的交易记录时不能推断基金经理动机，也不能把季度权重变化写成加仓事实。
 没有足够证据的方向直接留空，不要堆砌“需要核实、尚未提供、不能判断”。
+
+段落严格分工，不准换个说法重复同一条证据：
+- high_positions：只分析个股的股价位置、PE/PB估值分位及价格回撤，不再谈派息覆盖或ETF融资；
+- earnings_cycle：只分析净利润增速、分红覆盖和未来派息可持续性，不再谈股票价格位置；
+- valuation：只有新增独立的基金层面估值或投资回报测算时才填写，不能重述high_positions，
+  也不能重复顶部已展示的历史基金现金分红率；无新增事实就留空；
+- commodity_market 与 industry_cycle：跨行业高股息ETF若已在earnings_cycle里论述产业
+  盈利分化，以上两个字段留空。除非存在真实、互不重复的产品价格与周期证据；
+- risk_notes：仅放此前所有章节都没有提过的独立风险；否则留空；
+- thesis_summary：只给投资态度及最关键因果判断，不要再次照抄后面章节所有数字。
+每个上市公司同一季度同一指标只出现一次；融资余额和成交额在上方专属段落已有图表，
+在上述所有章节不再重复引用融资余额或成交额的数值。
 
 筹码与交易拥挤度必须参考trading_crowding中的有日期数据：
 ETF只分析该基金证券自身融资余额、融资变化和成交额相对历史的放大倍数；
@@ -97,6 +109,10 @@ _GOLD_RULES = """
 _DIVIDEND_RULES = """
 这是跨行业高股息策略，核心问题不是短线金属价格，而是
 已披露持仓的盈利能否持续覆盖派息、自由现金流和资本开支。
+如distribution里有正式基金可供分配利润、实际近12个月现金分红及价格分红率，
+则区分基金层面的可分配利润、实际现金分红率与成分股当前股息率；
+对这三者的差异作经营性解释，绝不把历史基金派息等同于未来收益承诺，
+也不把可供分配利润写成已经收到的现金股息。
 真正分析航运、能源、银行等**确有持仓**行业的不同利润周期，
 重点识别景气高位利润退潮、股息率陷阱、派息下降和估值风险。
 港股/QDII的汇率、税费仅在有证据时提及，不需要重复基金合同核验要求。
@@ -201,6 +217,40 @@ def _text(value: Any, limit: int = 6000) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _strip_crowding_sentences(text: str) -> str:
+    """The separate ETF crowding panel already owns financing/trading facts."""
+    sentences = re.split(r"(?<=[。！？；])", text)
+    return "".join(
+        sentence for sentence in sentences
+        if not re.search(r"融资|成交额|净申购|换手率|交易拥挤|融资盘", sentence)
+    ).strip()
+
+
+def _compact_etf_sections(
+    sections: dict, profile: str, *, has_crowding: bool = False,
+) -> dict:
+    """Prevent overlapping narrative blocks, independent of LLM compliance."""
+    result = {
+        key: (_text(sections.get(key), 2400) if key not in
+              ("holdings", "fund_structure", "market_price") else "")
+        for key in _SECTION_NAMES
+    }
+    if has_crowding:
+        for key in ("commodity_market", "industry_cycle", "high_positions",
+                    "earnings_cycle", "valuation"):
+            result[key] = _strip_crowding_sentences(result[key])
+    if profile == "跨行业高股息":
+        # Keep the richer quantitative price/valuation and profit/payout
+        # narratives; a second generic valuation or cycle explanation tends
+        # to repeat the same constituent figures and conclusions.
+        if result["high_positions"]:
+            result["valuation"] = ""
+        if result["earnings_cycle"]:
+            result["industry_cycle"] = ""
+            result["commodity_market"] = ""
+    return result
+
+
 async def _write_etf_opinion(data: dict) -> dict:
     profile = _profile_for_data(data)
     current = data.get("fund") or {}
@@ -251,13 +301,18 @@ async def _write_etf_opinion(data: dict) -> dict:
     sections = parsed.get("sections")
     if not isinstance(sections, dict):
         sections = {}
+    clean_sections = _compact_etf_sections(
+        sections, profile, has_crowding=bool(data.get('trading_crowding'))
+    )
+    repeated_risk = (profile == "跨行业高股息" and
+                     (clean_sections["high_positions"] or
+                      clean_sections["earnings_cycle"]))
     return {
         "stance": parsed["stance"],
         "thesis_summary": _text(parsed.get("thesis_summary")),
-        "sections": {key: (_text(sections.get(key), 2400) if key not in
-                    ("holdings", "fund_structure", "market_price") else "")
-                     for key in _SECTION_NAMES},
-        "risk_notes": _text(parsed.get("risk_notes"), 1600),
+        "sections": clean_sections,
+        "risk_notes": ("" if repeated_risk else
+                       _text(parsed.get("risk_notes"), 1600)),
         "invalidation_condition": _text(parsed.get("invalidation_condition"), 1600),
         "generation_status": "complete",
     }

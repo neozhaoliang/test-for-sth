@@ -3833,10 +3833,11 @@ function renderReportToc(reportHtml) {
 // The six source-backed quote/valuation facts sit directly under the
 // company name in the top identity card, before the report contents.
 // Historical snapshots use the values supplied for the as-of date.
-function verdictMetric(label, value, date, tone, detail) {
+function verdictMetric(label, value, date, tone, detail, tooltip) {
   const safeTone=['price','valuation','profit','cash','low','mid','high','missing'].includes(tone)?
     tone:'mid';
-  return '<div class="verdict-market-metric verdict-market-'+safeTone+'">'+
+  return '<div class="verdict-market-metric verdict-market-'+safeTone+'"'+
+    (tooltip?' title="'+escapeHtml(String(tooltip))+'"':'')+'>'+
     '<span class="verdict-market-label">'+escapeHtml(String(label))+'</span>'+
     '<span class="verdict-market-value">'+escapeHtml(String(value))+'</span>'+
     (detail?'<span class="verdict-market-context">'+escapeHtml(String(detail))+'</span>':'')+
@@ -3934,10 +3935,8 @@ function renderEtfResult(report) {
   const hasPremium=hasMarketQuote && iopv!==null && iopv>0 &&
     premium!==null && Number.isFinite(premium);
   const premiumText=hasPremium?
-    (premium>0?'+':'')+premium.toFixed(2)+'%':'暂无IOPV';
-  const premiumLabel=hasPremium?
-    (premium>0?'IOPV参考溢价':premium<0?'IOPV参考折价':'IOPV参考溢折价'):
-    'IOPV参考溢折价';
+    (premium>0?'+':'')+premium.toFixed(2)+'%':'暂无数据';
+  const premiumLabel='溢价率';
   const turnover=numericOrNull(fund.turnover_yuan);
   const turnoverText=turnover===null||turnover<0?'暂无数据':
     (turnover>=1e8?(turnover/1e8).toFixed(2)+' 亿元':
@@ -3954,15 +3953,54 @@ function renderEtfResult(report) {
         '<span class="report-stock-code">'+safe(report.stock_code||'')+'</span>'+
       '</div>'+
       '<div class="verdict-market-strip verdict-market-strip-etf" role="group" aria-label="ETF行情和流动性">'+
-        verdictMetric(quoteLabel,latestText,quoteAt,
-          latest!==null&&latest>0?'price':'missing',quoteDetail)+
-        verdictMetric(premiumLabel,premiumText,
-          hasPremium?'相对IOPV，非官方净值溢折价':'缺少可比较的IOPV',
-          hasPremium?'valuation':'missing','数据仅供参考')+
-        verdictMetric('成交额',turnoverText,turnoverAt,
-          turnover!==null&&turnover>=0?'cash':'missing','二级市场成交')+
+        verdictMetric(quoteLabel,latestText,'',
+          latest!==null&&latest>0?'price':'missing','',
+          [quoteAt,quoteDetail].filter(Boolean).join(' · '))+
+        verdictMetric(premiumLabel,premiumText,'',
+          hasPremium?'valuation':'missing','',
+          hasPremium?'相对IOPV的行情参考溢价率':'未取得可比较的实时IOPV')+
+        verdictMetric('成交额',turnoverText,'',
+          turnover!==null&&turnover>=0?'cash':'missing','',turnoverAt)+
       '</div>'+
     '</div>';
+  // Visible KPI cards contain only a title and value. Source dates remain
+  // attached to the report data and are available on hover.
+  const dist=data.distribution||{};
+  const cashYield=numericOrNull(dist.dividend_yield_ttm_pct);
+  const distributable=numericOrNull(dist.distributable_profit_yuan);
+  const lastDividend=numericOrNull(dist.latest_dividend_per_share);
+  const yieldTitle='近12个月实际现金分红 / 行情参考价；'+
+    String(dist.dividend_yield_price_date||'价格日期以行情记录为准');
+  const profitTitle='截至 '+String(dist.distributable_profit_as_of||'报告期未核实')+
+    ' · '+String(dist.distributable_profit_source||'数据来源未核实');
+  const paidTtm=numericOrNull(dist.dividend_ttm_per_share);
+  // Show fund-level cash-distribution metrics only if the FUND has
+  // confirmed cash dividends in the trailing year. Do not infer a payout
+  // from its "high dividend" name or its constituent stocks' dividend yields.
+  if (paidTtm!==null && paidTtm>0) {
+    const dividendMetrics=[];
+    if (cashYield!==null && cashYield>0) {
+      dividendMetrics.push(
+        '<div class="etf-distribution-item" title="'+safe(yieldTitle)+'">'+
+        '<span>近12个月分红率</span><strong>'+
+        safe(cashYield.toFixed(2)+'%')+'</strong></div>');
+    }
+    if (distributable!==null && distributable>=0) {
+      dividendMetrics.push(
+        '<div class="etf-distribution-item" title="'+safe(profitTitle)+'">'+
+        '<span>可供分配利润</span><strong>'+
+        safe((distributable/1e8).toFixed(2)+' 亿元')+'</strong></div>');
+    }
+    if (lastDividend!==null && lastDividend>0) {
+      dividendMetrics.push(
+        '<div class="etf-distribution-item">'+
+        '<span>最近每份分红</span><strong>'+
+        safe(lastDividend.toFixed(4)+' 元')+'</strong></div>');
+    }
+    if(dividendMetrics.length) html+='<div class="etf-distribution-row" '+
+      'role="group" aria-label="ETF已实施分红">'+
+      dividendMetrics.join('')+'</div>';
+  }
   // Place the top-ten disclosure inside the same visual card as the ETF identity,
   // independently of all discretionary/LLM-generated analysis sections.
   const disclosure=portfolio.disclosure_as_of||portfolio.as_of||'报告期未核实';
@@ -4018,8 +4056,6 @@ function renderEtfResult(report) {
     heading('重仓股、宏观与估值风险分析');
   html+='<div class="etf-analysis-subsection etf-manager-risk" id="etf-management-risk">'+
     heading(risk.risk_type||'指数调样与主动管理的高位风险')+
-    '<p class="etf-source">'+safe(strategy.label||'尚未核实管理方式')+
-    ' · '+safe(strategy.source||'先核实基金合同及投资策略')+'</p>'+
     '<div class="etf-prose">'+safe(risk.risk_summary||
     '需要先核实基金的主动或指数管理方式，以及重仓股是否处于股价和估值高位。')+'</div>';
   if (Object.keys(risk).length) {
@@ -4059,10 +4095,8 @@ function renderEtfResult(report) {
     } else {
       html+='<p class="etf-source">尚无可核实的高位重仓证据；缺乏估值数据不代表没有泡沫风险。</p>';
     }
-    if (Array.isArray(risk.verification_needed)&&risk.verification_needed.length) {
-      html+='<p class="etf-source">需要核对：'+risk.verification_needed.map(safe).join('；')+'</p>';
-    }
-    html+='<p class="etf-source">'+safe(risk.limitations||'')+'</p>';
+    // Internal verification checklists and methodology limitations must not
+    // appear as investor-facing narrative or small print.
   }
   html+='</div>';
   const macro=data.macro_market||{}, observations=macro.observations||{};
@@ -4110,7 +4144,7 @@ function renderEtfResult(report) {
         safe(Number(breadth.comparable_count||0)>0?fmt(breadth.decelerating_growth_weight_pct,'%',1):'尚无法判断')+
         '</strong></div>'+
     '</div><div class="etf-prose">'+safe((cycle.evidence||[]).join('；'))+
-    '</div><p class="etf-source">'+safe(breadth.definition||'')+'</p></div>';
+    '</div></div>';
   html+='<div class="etf-analysis-subsection" id="etf-holdings">'+heading('十大重仓股价格、业绩与估值穿透')+
     '<p class="etf-source">'+safe(portfolio.scope||'')+' · '+safe(portfolio.as_of||'披露期暂缺')+
     ' · '+safe(portfolio.source||'来源暂缺')+'</p>';
@@ -4161,13 +4195,45 @@ function renderEtfResult(report) {
     'high_positions','earnings_cycle','valuation'];
   const labels=report.section_labels||{};
   const sections=summary.sections||{};
-  for(const key of keys) {
-    if(!sections[key])continue;
+  const isDividendStrategy=/高股息|红利|股息/i.test(String(report.stock_name||''));
+  // Financing and trading crowding already have a standalone evidence panel.
+  // Saved reports from earlier versions can repeat those figures in several
+  // LLM paragraphs; omit only those repeated sentences, not the whole chapter.
+  const removeDuplicatedTrading=(value)=>{
+    const prose=String(value||'');
+    if(!Object.keys(crowd).length)return prose;
+    return prose.split(/(?<=[。！？；])/u).filter(sentence=>
+      !/融资|成交额|净申购|换手率|交易拥挤|融资盘/.test(sentence)
+    ).join('').trim();
+  };
+  const cleanNarrative={};
+  keys.forEach(key=>{
+    cleanNarrative[key]=removeDuplicatedTrading(sections[key]);
+  });
+  // The dividend ETF report has three distinct jobs: pricing/drawdown,
+  // earnings/payout sustainability and trading crowding (shown above).
+  // Older cached LLM reports may repeat the SAME stocks and risk across
+  // high_positions, valuation, industry_cycle, earnings_cycle, and risk_notes.
+  const visibleKeys=keys.filter(key=>{
+    if(!String(cleanNarrative[key]||'').trim())return false;
+    if(!isDividendStrategy)return true;
+    if(key==='valuation' && cleanNarrative.high_positions)return false;
+    if(key==='industry_cycle' && cleanNarrative.earnings_cycle)return false;
+    if(key==='commodity_market' && cleanNarrative.earnings_cycle)return false;
+    return true;
+  });
+  for(const key of visibleKeys) {
     html+='<section class="etf-block">'+heading(labels[key]||key)+
-      '<div class="etf-prose">'+safe(sections[key])+'</div></section>';
+      '<div class="etf-prose">'+safe(cleanNarrative[key])+'</div></section>';
   }
-  if(summary.risk_notes)html+='<section class="etf-block">'+heading('主要风险')+
-    '<div class="etf-prose">'+safe(summary.risk_notes)+'</div></section>';
+  // For dividend ETFs the thesis already contains the primary downside
+  // mechanism; another generic "主要风险" chapter repeats pricing and payout
+  // data. Preserve the raw risk_notes in the API but omit the duplicate UI.
+  if(summary.risk_notes && (!isDividendStrategy ||
+    !(sections.high_positions||sections.earnings_cycle))) {
+    html+='<section class="etf-block">'+heading('主要风险')+
+      '<div class="etf-prose">'+safe(summary.risk_notes)+'</div></section>';
+  }
   if(summary.invalidation_condition)html+='<section class="etf-block">'+heading('什么会改变判断')+
     '<div class="etf-prose">'+safe(summary.invalidation_condition)+'</div></section>';
   html+='<section class="etf-block"><p class="etf-source">'+

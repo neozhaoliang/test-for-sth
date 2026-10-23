@@ -113,10 +113,26 @@ def screen_holdings(fund: dict, portfolio: dict) -> dict:
         ],
     }
     if style["kind"] == "index":
+        name = str(fund.get("name") or "")
+        if re.search(r"高股息|红利|股息", name):
+            headline = (
+                "这类高股息指数按分红记录和股息率规则选股，并不保证重仓企业"
+                "的利润或派息始终稳定。若航运、能源等周期行业利润下行，"
+                "历史高股息可能随分红削减而下降，基金价格也可能回撤。"
+            )
+        else:
+            headline = (
+                "指数ETF依照既定选样和权重规则调仓，不会主动为市场高估值择时。"
+                "当成分股集中上涨、估值先于盈利扩张时，基金同样承担回撤风险。"
+            )
+        if price_count and high_price_weight > 0:
+            headline += (
+                f" 已披露的前十大中，处于52周价格高位的持仓约占基金净值"
+                f"{high_price_weight:.2f}%，但股价高位不等于估值泡沫。"
+            )
         risk = {
-            "kind": "指数被动高位承接风险",
-            "headline": ("需要检查指数是否在热门股票高位扩容、纳入或加权，以及基金"
-                         "是否被动跟随买入；指数ETF不等于有能力择时避开明显泡沫。"),
+            "kind": "指数调样与估值回撤风险",
+            "headline": headline,
             "verification": [
                 "指数编制方案的选样、权重和定期调样规则",
                 "最近两次指数纳入/剔除及调样公告与当时股价/估值分位",

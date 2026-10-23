@@ -22,6 +22,7 @@ from analysis.etf_discovery import assets_yi, ranked_matches, matches, recent_da
 from analysis.etf_macro import get_etf_market_context
 from analysis.etf_cycle import assess_cycle
 from analysis.etf_holding_risk import screen_holdings
+from analysis.etf_distribution import collect_etf_distributions
 from analysis.margin import get_margin_signal
 from analysis.trading_crowding import get_etf_turnover_activity, assess_margin_crowding
 from analysis.profitability import get_profitability_trend
@@ -1193,9 +1194,11 @@ async def collect_etf_overview(spot: dict) -> dict:
             if sina_close:
                 etf_price = {**etf_price, **sina_close}
         fund = _with_recent_close(fund, etf_price, today)
+    distribution = await collect_etf_distributions(code, fund, today)
     return {
         "asset_type": "etf",
         "fund": fund,
+        "distribution": distribution,
         "portfolio": holdings,
         "portfolio_stats": _portfolio_stats(holdings.get("holdings") or []),
         "holding_risk": screen_holdings(fund, holdings),
@@ -1223,6 +1226,7 @@ async def collect_etf_data(spot: dict) -> dict:
             if external_close:
                 etf_price = {**etf_price, **external_close}
         fund = _with_recent_close(fund, etf_price, today)
+    distribution = await collect_etf_distributions(code, fund, today)
     original = holdings.get("holdings") or []
     if not equity:
         for holding in original:
@@ -1306,6 +1310,7 @@ async def collect_etf_data(spot: dict) -> dict:
                   else "A股股票ETF" if equity
                   else "非A股股票ETF或混合资产ETF（限制适用个股透视）"),
         "fund": fund,
+        "distribution": distribution,
         "portfolio": {**holdings, "holdings": enriched},
         "portfolio_stats": _portfolio_stats(enriched),
         "etf_price_position": etf_price,

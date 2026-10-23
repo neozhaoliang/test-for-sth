@@ -88,9 +88,18 @@ assert.equal(metricCount(sink.innerHTML), 3,
   'ETF report must show price, IOPV reference premium and turnover beside the name');
 assert(sink.innerHTML.includes('ETF现价'));
 assert(sink.innerHTML.includes('1.567 元'));
-assert(sink.innerHTML.includes('暂无IOPV'),
+assert(sink.innerHTML.includes('溢价率'));
+assert(sink.innerHTML.includes('暂无数据'),
   'premium must remain unknown without comparable IOPV');
+assert(!sink.innerHTML.includes('缺少可比较的IOPV'));
+assert(!sink.innerHTML.includes('来源未提供报价日期'));
+assert(!sink.innerHTML.includes('二级市场成交'));
 assert(sink.innerHTML.includes('成交额'));
+assert(!sink.innerHTML.includes('近12个月分红率'),
+  'ETFs without verified payouts must not show a dividend-yield card');
+assert(!sink.innerHTML.includes('可供分配利润'),
+  'do not show a blank official distributable-profit box');
+assert(!sink.innerHTML.includes('最近每份分红'));
 assert(sink.innerHTML.includes('class="etf-hero-row"'));
 assert(etfCss.includes('grid-template-columns:minmax(250px,1fr) minmax(410px,1.28fr)'),
   'ETFs display fund name left and price/IOPV/turnover KPI cards right');
@@ -147,14 +156,58 @@ for (const field of ['市净率 PB', 'F10 披露ROE',
   assert(!sink.innerHTML.includes(field), 'ETF headline must omit ' + field);
 }
 
+// High-dividend ETFs must not repeat the same valuation and earnings
+// mechanics in three different sections, and do not acquire a fictitious
+// cash yield from their index name.
+const dividendReport = {
+  ...etf,
+  stock_name: '华泰柏瑞中证港股通高股息投资ETF(QDII)',
+  etf_data: {...etf.etf_data, distribution: {},
+    trading_crowding: {margin_balance_yi: 2.41, margin_change_pct: 19.3}},
+  summary: {
+    stance: 'neutral',
+    thesis_summary: '估值和盈利分化，考虑持有但不追高。',
+    sections: {
+      high_positions: '海丰国际价格高位和历史PE分位值得谨慎。ETF融资余额2.41亿元，成交额3.3亿元。',
+      earnings_cycle: '海丰国际盈利增速放缓，派息率上升。',
+      valuation: '这句话只重复海丰国际估值较高。',
+      industry_cycle: '这句话只重复海丰国际盈利增速放缓。',
+      commodity_market: '这句话只重复海丰国际派息可能下调。',
+    },
+    risk_notes: '海丰国际估值和派息的风险，再重复一次。',
+  },
+};
+renderers.renderEtfResult(dividendReport);
+assert(sink.innerHTML.includes('价格高位和历史PE分位'));
+assert(!sink.innerHTML.includes('ETF融资余额2.41亿元，成交额3.3亿元。'),
+  'do not repeat observed financing numbers in the price-position chapter');
+assert(sink.innerHTML.includes('盈利增速放缓，派息率上升'));
+for (const duplicated of [
+  '只重复海丰国际估值', '只重复海丰国际盈利', '只重复海丰国际派息',
+  '海丰国际估值和派息的风险，再重复一次。',
+  '近12个月分红率', '可供分配利润', '最近每份分红',
+]) assert(!sink.innerHTML.includes(duplicated),
+  'do not emit duplicate dividend-ETF analysis or unverified payout metric: '+duplicated);
+
 // Test both genuine discount and an observed turnover, with amounts scaled.
+etf.etf_data.distribution = {
+  dividend_ttm_per_share: 0.12,
+  dividend_yield_ttm_pct: 8.05,
+  distributable_profit_yuan: 1057954195.22,
+  latest_dividend_per_share: 0.01,
+  distributable_profit_as_of: '2026-09-30',
+};
 etf.etf_data.fund.iopv = 1.58;
 etf.etf_data.fund.iopv_premium_pct = -0.82;
 etf.etf_data.fund.turnover_yuan = 148040000;
 renderers.renderEtfResult(etf);
-assert(sink.innerHTML.includes('IOPV参考折价'));
+assert(sink.innerHTML.includes('溢价率'));
+assert(!sink.innerHTML.includes('IOPV参考折价'));
 assert(sink.innerHTML.includes('-0.82%'));
 assert(sink.innerHTML.includes('1.48 亿元'));
+assert(sink.innerHTML.includes('8.05%'));
+assert(sink.innerHTML.includes('10.58 亿元'));
+assert(sink.innerHTML.includes('0.0100 元'));
 assert.equal(metricCount(sink.innerHTML),3);
 etf.summary.sections.fund_structure='基金名称提示可能为指数产品，这段提示词不应出现在页面';
 etf.summary.sections.market_price='IOPV为null，latest_shares为null，错误叙述';
@@ -191,7 +244,8 @@ assert.equal(metricCount(sink.innerHTML), 3);
 assert(sink.innerHTML.includes('最近交易日收盘价'));
 assert(sink.innerHTML.includes('指数被动高位承接风险'));
 assert(sink.innerHTML.includes('高估值分位'));
-assert(sink.innerHTML.includes('指数编制和季度调样公告'));
+assert(!sink.innerHTML.includes('指数编制和季度调样公告'));
+assert(!sink.innerHTML.includes('基金名称提示，非合同核实'));
 assert.equal((sink.innerHTML.match(/class="etf-whole-report-card"/g)||[]).length,1);
 assert(sink.innerHTML.trim().endsWith('</article>'));
 assert(sink.innerHTML.includes('1.716 元'));

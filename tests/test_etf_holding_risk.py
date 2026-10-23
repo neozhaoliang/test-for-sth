@@ -19,7 +19,9 @@ def test_index_etf_must_warn_passive_high_price_reconstitution_risk():
              "pb_history_position":{"percentile":91}},
         ],
     })
-    assert "被动高位承接" in result["risk_type"]
+    assert "指数调样与估值回撤风险" == result["risk_type"]
+    assert "需要检查" not in result["risk_summary"]
+    assert "历史高股息" in result["risk_summary"]
     assert result["high_price_weight_pct"] == 5.91
     assert result["high_valuation_weight_pct"] == 10.12
     assert result["high_price_and_valuation_weight_pct"] == 5.91

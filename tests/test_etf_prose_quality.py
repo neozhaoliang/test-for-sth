@@ -111,3 +111,45 @@ def test_recent_verified_close_cannot_carry_intraday_turnover_or_iopv():
     for key in ("iopv","iopv_premium_pct","turnover_yuan",
                 "volume","price_change_pct"):
         assert updated[key] is None
+
+
+
+@pytest.mark.asyncio
+async def test_high_dividend_duplicates_removed_before_returning_report(monkeypatch):
+    sample=_sample()
+    rendered=_opinion()
+    rendered["sections"] = {
+        "high_positions": "海丰国际价格83%位置，PE估值分位较高。",
+        "earnings_cycle": "海丰国际净利增长回落，派息率偏高。",
+        "valuation": "海丰国际估值偏高，需要担心股价回撤。",
+        "industry_cycle": "海丰国际净利润增长回落，派息可能下降。",
+        "commodity_market": "海丰国际派息可能下降。",
+        "macro_liquidity": "长端利率回落使股息资产相对更有吸引力。",
+    }
+    rendered["risk_notes"] = "海丰国际估值偏高和派息可能下降。"
+    monkeypatch.setattr(
+        etf_report, "call_json_ex", AsyncMock(return_value=(rendered, None)),
+    )
+    result = await etf_report._write_etf_opinion(sample)
+    assert result["generation_status"] == "complete"
+    assert result["sections"]["high_positions"]
+    assert result["sections"]["earnings_cycle"]
+    assert result["sections"]["macro_liquidity"]
+    for key in ("valuation", "industry_cycle", "commodity_market"):
+        assert result["sections"][key] == ""
+    assert result["risk_notes"] == ""
+
+
+def test_non_dividend_etf_does_not_lose_distinct_narratives():
+    original = {
+        "high_positions": "某成分股价格高位。",
+        "earnings_cycle": "产业利润改善。",
+        "valuation": "整体估值收益率的独立测算。",
+        "industry_cycle": "库存周期出现拐点。",
+        "commodity_market": "独立产品价格上涨。",
+    }
+    sections = etf_report._compact_etf_sections(
+        original, "黄金产业股票"
+    )
+    for key, value in original.items():
+        assert sections[key] == value
