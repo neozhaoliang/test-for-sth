@@ -3978,8 +3978,12 @@ function renderEtfResult(report) {
     '<div class="etf-prose">'+safe(risk.risk_summary||
     '需要先核实基金的主动或指数管理方式，以及重仓股是否处于股价和估值高位。')+'</div>';
   if (Object.keys(risk).length) {
-    const hasPriceData=Number(risk.price_observed_count||0)>0;
-    const hasValuationData=Number(risk.valuation_observed_count||0)>0;
+    // Older persisted ETF reports lack observed_count; preserve known nonzero
+    // coverage there instead of falsely reporting the entire portfolio missing.
+    const hasPriceData=Number(risk.price_observed_count||0)>0 ||
+      Number(risk.price_observed_weight_pct||0)>0;
+    const hasValuationData=Number(risk.valuation_observed_count||0)>0 ||
+      Number(risk.valuation_observed_weight_pct||0)>0;
     const totalHoldings=Number(risk.disclosed_holding_count||rows.length||0);
     html+='<div class="etf-metric-row">'+
       '<div class="etf-metric"><span>52周价格位置已核实</span><strong>'+
