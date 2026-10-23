@@ -172,7 +172,7 @@ def _build_trading_crowding_block(data: Optional[Dict]) -> str:
     lines.append("  证据日期：融资 "+str(data.get("margin_date") or "暂缺")+
                  "；成交 "+str(data.get("trade_date") or "暂缺"))
     lines.append("  融资余额是存量，成交额不能视为资金净流入。")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def _build_rd_block(
