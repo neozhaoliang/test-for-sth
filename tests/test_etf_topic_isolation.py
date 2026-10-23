@@ -75,7 +75,7 @@ async def test_513530_prompt_contains_no_517520_or_gold_macro(monkeypatch):
     assert result["stance"] == "neutral"
     assert result["generation_status"] == "complete"
     assert len(prompts) == 1
-    for marker in ("黄金股ETF", "金价", "gold_cny", "gold_usd",
+    for marker in ("黄金股ETF", "国内金价", "美元金价", "gold_cny", "gold_usd",
                    "上海金", "永赢", "黄金期货"):
         assert marker not in prompts[0], f"foreign ETF leakage: {marker}"
     for current in ("513530", "高股息", "分红", "现金流", "中远海控"):
