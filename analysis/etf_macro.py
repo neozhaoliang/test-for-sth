@@ -19,6 +19,7 @@ import httpx
 import pandas as pd
 
 from tools.utils import utils
+from analysis.etf_broad_market import classify_broad_index
 
 _TTL = 900
 _CACHE: dict[str, tuple[float, dict]] = {}
@@ -74,6 +75,13 @@ _DIVIDEND_DRIVERS = (
     "股息率与利率、风险溢价和估值之间的关系",
     "港股投资时的汇率、预扣税、溢折价及QDII额度（须核实适用性）",
 )
+_BROAD_DRIVERS = (
+    "货币政策、M2和信贷变化对整体流动性与估值的影响",
+    "指数年内收益、回撤、近20/60日趋势和成交额变化",
+    "指数滚动市盈率、历史分位与风险偏好变化",
+    "成分股调样纳入日期与纳入前上涨幅度（仅核实样本）",
+    "行业权重、盈利广度与市场风格轮动",
+)
 _DIVIDEND_NAME_TERMS = ("高股息", "红利", "高分红", "股息", "收息", "dividend")
 _SINGLE_SECTOR_TERMS = ("煤炭", "石油", "油气", "铜", "铝", "钢铁", "化工", "制冷剂",
                         "半导体", "芯片", "光伏", "医药", "消费", "银行", "房地产")
@@ -81,6 +89,10 @@ _SINGLE_SECTOR_TERMS = ("煤炭", "石油", "油气", "铜", "铝", "钢铁", "�
 
 def sector_for_etf(name: str) -> dict:
     title = str(name or "")
+    broad = classify_broad_index(title)
+    if broad:
+        return {"sector": "宽基市场", "drivers": list(_BROAD_DRIVERS),
+                "commodity_contract": None, "benchmark": broad}
     if (any(term in title.lower() for term in _DIVIDEND_NAME_TERMS)
             and not any(term in title for term in _SINGLE_SECTOR_TERMS)):
         return {"sector": "跨行业高股息", "drivers": list(_DIVIDEND_DRIVERS),
