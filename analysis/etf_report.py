@@ -217,13 +217,28 @@ def _text(value: Any, limit: int = 6000) -> str:
     return str(value or "").strip()[:limit]
 
 
-def _compact_etf_sections(sections: dict, profile: str) -> dict:
+def _strip_crowding_sentences(text: str) -> str:
+    """The separate ETF crowding panel already owns financing/trading facts."""
+    sentences = re.split(r"(?<=[。！？；])", text)
+    return "".join(
+        sentence for sentence in sentences
+        if not re.search(r"融资|成交额|净申购|换手率|交易拥挤|融资盘", sentence)
+    ).strip()
+
+
+def _compact_etf_sections(
+    sections: dict, profile: str, *, has_crowding: bool = False,
+) -> dict:
     """Prevent overlapping narrative blocks, independent of LLM compliance."""
     result = {
         key: (_text(sections.get(key), 2400) if key not in
               ("holdings", "fund_structure", "market_price") else "")
         for key in _SECTION_NAMES
     }
+    if has_crowding:
+        for key in ("commodity_market", "industry_cycle", "high_positions",
+                    "earnings_cycle", "valuation"):
+            result[key] = _strip_crowding_sentences(result[key])
     if profile == "跨行业高股息":
         # Keep the richer quantitative price/valuation and profit/payout
         # narratives; a second generic valuation or cycle explanation tends
@@ -286,7 +301,9 @@ async def _write_etf_opinion(data: dict) -> dict:
     sections = parsed.get("sections")
     if not isinstance(sections, dict):
         sections = {}
-    clean_sections = _compact_etf_sections(sections, profile)
+    clean_sections = _compact_etf_sections(
+        sections, profile, has_crowding=bool(data.get('trading_crowding'))
+    )
     repeated_risk = (profile == "跨行业高股息" and
                      (clean_sections["high_positions"] or
                       clean_sections["earnings_cycle"]))
