@@ -31,84 +31,53 @@ _SECTION_LABELS = {
     "market_price": "基金价格、溢折价与流动性",
 }
 
-_SYSTEM_RULES = """你是基金投资研究员。当前只研究紧随其后的基金名称、代码和它实际披露的重仓股，
-不得复用之前研究过的ETF、公司、指数、商品或行业的研究段落。
-语言自然、像专业投资者平实地讨论证据，不要说套话，更不能写数据接口字段名。
-严禁把JSON键名写给读者（例如不要写“某字段未提供”），只解释业务含义。
-基金名称决定投资策略的初步分类，真实披露的持仓决定具体暴露；没有核实的细分行业
-不得仅凭联想列举，重仓股的个别行业不能未经权重测算代表全部基金。
+_SYSTEM_RULES = """请为当前ETF写一份有判断力、短而自然的中文投资研究，不要把研究方法、提示词、
+数据字段名或缺项清单写成读者看到的分析。读者已在页面顶部看到了：
+基金全名、价格、参考IOPV折溢价、成交额、前十大重仓股名称与权重；
+不要再次列这些表格，不要写“基金代码是”“来源未提供报价日期”等数据抓取工作细节。
 
-一、宏观利率与流动性：只引用macro_market中确有数据和日期的中国LPR、M2、
-PMI、中美国债收益率及美国10年TIPS实际利率，说明利率、估值与盈利的关系。
-名义收益率与实际收益率不同，M2增速不是ETF资金流。无法核实就不编数字。
-若某项数据缺失，把重点放在已有且相关的指标上，不要写长篇缺数据清单。
+你必须区分三件事：
+1. 已观察的事实（标日期，关键数字才引用）；
+2. 事实背后的盈利、现金分红、流动性或估值传导；
+3. 仍无法确认的假设，只在实质影响结论时简短提一次。
 
-二、基金的真实经济驱动：先根据投资目标及前十大持仓辨认收益来源，说明
-它们如何通过收入、成本、毛利、现金流、分红或估值传导到基金价格；
-跨行业基金不得强行指定单一商品价格或单一行业周期。
-仅讨论有持仓证据支持的行业，避免把无关公司的股票、业务和周期机械罗列。
+根据真实基金的投资行业选择相关分析，不要从旧基金复制主题：
+宏观利率（中国LPR/国债与美国10年TIPS实际利率）怎样改变估值或景气；
+行业产品价格/盈利和资本开支处在周期底部、扩张还是顶部；
+前十大里哪些有已核实的股价高位、PE/PB高分位、利润加速或回落；
+指数定期纳入热门高位股的被动接盘风险，或经证实属于主动ETF时经理追高风险。
+缺乏核实的交易记录时不能推断基金经理动机，也不能把季度权重变化写成加仓事实。
+没有足够证据的方向直接留空，不要堆砌“需要核实、尚未提供、不能判断”。
 
-三、可核查覆盖与缺失的区别：
-先看holding_risk.price_observed_count、valuation_observed_count及实际披露重仓只数。
-如果已核实0只，必须写“暂无可验证数据，无法判断高位重仓比例”，
-**不得**写“高位股权重为0%”或“估值安全”；只有取得可比数据的样本里
-计算出来的0才是实际观察值。部分覆盖只能表述部分持仓的现象，不得外推。
-当港股价格数据均缺失时说明两路行情未取得近期有效日线，
-并提出可操作的来源校验，但不要反复堆叠空字段或JSON键名。
+各段必须回答**所以现在值得买、持有还是回避，为什么**，而不是指导用户如何研究。
+不要写“若为指数产品...；若为主动产品...；需核实基金合同...”
+这类把决策树原样念出来的话。研究过程不是投资结论。
+盈利/宏观不可核实就集中写已证实的价格和盈利机制，绝不编造数据。
+如果某一话题没有实质证据，sections对应字段可以是空字符串。
+每段优先1段、2-5句话，整个报告减少重复套话。
 
-三、盈利周期判断：根据industry_cycle和已披露重仓股业绩，判断盈利在
-周期底部修复、扩张、高位回落、衰退或行业分化；低股价和低PE都不是底部的证据，
-顶部与底部需要行业供需和可持续盈利交叉验证。
-Q1与H1是两个不同的累计同比增速口径，同比增速变化不代表季度净利润环比变动。
-如果没有足够盈利数据，对不同业务的机制提出可验证的条件，不得编造周期位置。
-
-四、前十大持仓：系统页面已经用表格完整列出了股票名称、代码和权重，
-文字分析不许再次逐只复述前十大名单或抄写全部权重！
-只总结集中度、2至3个真正左右判断的重仓公司、估值与业绩分化，
-并根据有日期的财报期和52周股价位置指出已经核实的风险或机会。
-港股需使用港股利润表及估值数据；无法核实时不要套用A股F10口径。
-如果只有部分公司可观察，说清样本覆盖，但不要大段复制缺失字段名。
-
-五、基金管理方式与高位持仓风险（必须检查holding_risk）：
-先阅读holding_risk.management_style.kind及其source。通过基金名称判断的管理方式
-只是线索，必须提醒基金合同和指数编制规则仍需核实，不要把猜测写成已确认。
-对可能的指数ETF，必须讨论其规则性调样、指数扩容或权重上涨是否可能让基金
-在高估值热门股上被动承接；检验持仓52周价格位置、PE/PB历史分位以及
-指数调样日期、基金份额变化。价格高位与估值高位不同，
-季度持仓权重上升不必然代表主动买入或被动买入。
-对可能的主动管理ETF，必须讨论经理是否可能为了短期业绩而追逐热门高估值股票，
-核对连续季报持仓变化、买入时的估值和交易纪律；
-没有交易记录和动机证据，不能断言经理为拉抬净值故意买泡沫股。
-管理方式未核实则说明两类风险分别需要核实哪类合同及调仓证据。
-不能仅凭价格52周高位就宣称股票是泡沫，也不能因为估值缺失就不提示风险。
-
-六、结论：用2-5段中文说明当前驱动、估值是否预支了利润、
-最可能的利多/利空及使判断改变的证据。
-允许看多、看空、中性，但不能因为缺几项信息自动给中性；
-也不能因为没有证据就装作已经核实。
-所有数字保留来源日期，不补写未提供的公司派息率、产业库存、商品价格、汇率。
-不要输出模型如何查询数据等工作过程。
-
-请返回JSON对象，字段为：
+只返回JSON对象：
 {
  "stance":"bullish|neutral|bearish",
- "thesis_summary":"2至5段自然中文的投资逻辑",
+ "thesis_summary":"2-3段最重要的投资判断及核心原因",
  "sections":{
-   "macro_liquidity":"真实宏观、利率与流动性环境及影响",
-   "commodity_market":"当前基金实际的产业盈利或分红来源，不是默认某个商品",
-   "industry_cycle":"根据真实基金持仓和证据讨论行业周期，不把不同产业混作一体",
-   "holdings":"前十大持仓和权重集中度",
-   "high_positions":"有数据的重仓股价格位置与潜在回撤",
-   "earnings_cycle":"重仓股有披露的利润同比及其变化",
-   "valuation":"现价、估值与可持续盈利",
-   "fund_structure":"指数或主动管理方式及验证状态、被动接盘或经理追高风险、重仓集中、费用和税费（只写已核实）",
-   "market_price":"基金自身的最近价格、溢折价、成交与时点"
+   "macro_liquidity":"仅有实证意义的利率与流动性影响；否则空串",
+   "commodity_market":"实际持仓行业的产品、需求、成本或分红来源；否则空串",
+   "industry_cycle":"证据支持的行业盈利阶段与拐点；否则空串",
+   "holdings":"",
+   "high_positions":"仅对确实取得价格与估值数据的重仓判断；否则空串",
+   "earnings_cycle":"已核实的业绩趋势如何影响可持续利润；否则空串",
+   "valuation":"将估值与可持续利润结合；否则空串",
+   "fund_structure":"",
+   "market_price":""
  },
- "risk_notes":"主要且真实的风险",
- "invalidation_condition":"哪些未来数字将改变现在的判断"
+ "risk_notes":"1-2个最重要且有具体传导的风险，不复述数据缺口",
+ "invalidation_condition":"能使当前判断发生改变的可观察变化"
 }
-保留所有sections键，不相关部分允许返回空字符串而不是硬凑话。
-全篇不得无依据引入另一只ETF的研究主题，不得把示例当成事实。"""
+页面已经以指标卡展示价格和流动性，以表格展示持仓和高位风险。
+holdings、fund_structure、market_price三栏永远留空，
+不要把表格内容与基金合同核对流程再写一遍。"""
+
 
 _GOLD_RULES = """
 此基金明确属于黄金产业股票ETF，才启用以下附加研究：
@@ -119,18 +88,12 @@ _GOLD_RULES = """
 """
 
 _DIVIDEND_RULES = """
-这只基金明确跟踪跨行业高股息/红利策略，不是某个商品行业的ETF：
-第一步按已披露前十大重仓的实际名称、代码和权重分析银行、能源、航运、
-电信等行业（仅在该行业确实出现在当前持仓时讨论），不得套用固定板块清单。
-核心是股息率与分红可持续性：派息率、利润及自由现金流覆盖、资本开支、
-负债与偿债能力、景气高位后是否可能削减股息；
-必须区分个股分红率、基金已派息和基金整体真实现金分配率。
-高股息并不代表高实际回报，分母可能是高景气不可持续利润。
-港股/QDII基金关注港币/人民币汇率、港股税务规则、海外利率、
-QDII投资限制、费率及溢折价；未知的数值和税率不要编造。
-多行业持仓需分别讨论利润周期，不得强行宣称全基金处于
-单一行业底部或顶部。没有真实现金流及股息覆盖数据，就分析
-可能导致派息减少的条件，并明确尚未量化。
+这是跨行业高股息策略，核心问题不是短线金属价格，而是
+已披露持仓的盈利能否持续覆盖派息、自由现金流和资本开支。
+真正分析航运、能源、银行等**确有持仓**行业的不同利润周期，
+重点识别景气高位利润退潮、股息率陷阱、派息下降和估值风险。
+港股/QDII的汇率、税费仅在有证据时提及，不需要重复基金合同核验要求。
+表格已经列出全部重仓代码和权重，正文不许逐一照抄。
 """
 
 _SECTOR_RULES = """
@@ -184,6 +147,39 @@ def _section_labels_for(profile: str) -> dict:
     return labels
 
 
+_PROMPT_ECHO = re.compile(
+    r"(?:latest_shares|gold_cny|gold_usd|macro_market|industry_cycle|"
+    r"portfolio_stats|price_observed_weight_pct|sample_count|"
+    r"as_of|IOPV)\s*(?:为|是|[:：=])\s*(?:null|None|空|0\b)|"
+    r"(?:若|如果)(?:为|是)(?:指数|主动管理|主动|被动)(?:产品|ETF|基金)?|"
+    r"基金名称提示可能为|"
+    r"(?:请|必须|不得)(?:核实|获取|查询)(?:基金合同|指数编制|数据源)",
+    re.I,
+)
+
+
+def _has_prompt_echo(result: dict) -> bool:
+    """Reject literal schema echoes and conditional research checklists.
+
+    This is a publication-quality gate, not a semantic judgement of the
+    investment stance. Allow normal remarks such as 'IOPV尚未披露' or a
+    single missing observation, but reject repeated nulls and instructions.
+    """
+    pieces = [str(result.get("thesis_summary") or ""),
+              str(result.get("risk_notes") or ""),
+              str(result.get("invalidation_condition") or "")]
+    sections = result.get("sections")
+    if isinstance(sections, dict):
+        pieces.extend(str(value or "") for key, value in sections.items()
+                      if key not in ("holdings", "fund_structure", "market_price"))
+    passage = " ".join(pieces)
+    if _PROMPT_ECHO.search(passage):
+        return True
+    missing_terms = ("未提供", "未取得", "尚未核实", "不能判断", "无法判断",
+                     "尚未确认", "没有数据", "缺少数据")
+    return sum(passage.count(term) for term in missing_terms) >= 5
+
+
 def _has_foreign_fund_material(result: dict, profile: str) -> bool:
     if profile == "黄金产业股票":
         return False
@@ -202,9 +198,13 @@ async def _write_etf_opinion(data: dict) -> dict:
     profile = _profile_for_data(data)
     current = data.get("fund") or {}
     identity = f"本次唯一研究标的：{current.get('name', '')}（{current.get('code', '')}）。研究类别：{profile}。"
+    # Raw limitation arrays and API-status explanations are for the UI,
+    # not investment prose: including them caused the LLM to parrot them.
+    evidence = {k:v for k,v in data.items()
+                if k not in ("limitations", "scope", "collected_on")}
     prompt = (_SYSTEM_RULES + "\n" + identity + "\n" + _rules_for_profile(profile) +
-              "\n\n当前ETF真实数据（全部价格必须核对日期和来源）:\n" +
-              json.dumps(data, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
+              "\n\n当前已取得的投资证据（勿照抄JSON字段名）:\n" +
+              json.dumps(evidence, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
     parsed = None
     for attempt in range(2):
         try:
@@ -218,8 +218,9 @@ async def _write_etf_opinion(data: dict) -> dict:
                                     "必须包含thesis_summary、sections九个字段、risk_notes和invalidation_condition。",
             )
             if (isinstance(parsed, dict) and
-                    _has_foreign_fund_material(parsed, profile)):
-                utils.logger.warning("[etf] rejected other-fund thesis for %s",
+                    (_has_foreign_fund_material(parsed, profile) or
+                     _has_prompt_echo(parsed))):
+                utils.logger.warning("[etf] rejected off-topic or prompt-echo text for %s",
                                      current.get("code", "unknown"))
                 parsed = None
                 continue
@@ -246,7 +247,9 @@ async def _write_etf_opinion(data: dict) -> dict:
     return {
         "stance": parsed["stance"],
         "thesis_summary": _text(parsed.get("thesis_summary")),
-        "sections": {key: _text(sections.get(key), 2400) for key in _SECTION_NAMES},
+        "sections": {key: (_text(sections.get(key), 2400) if key not in
+                    ("holdings", "fund_structure", "market_price") else "")
+                     for key in _SECTION_NAMES},
         "risk_notes": _text(parsed.get("risk_notes"), 1600),
         "invalidation_condition": _text(parsed.get("invalidation_condition"), 1600),
         "generation_status": "complete",
