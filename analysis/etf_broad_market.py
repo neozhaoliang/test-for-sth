@@ -29,6 +29,7 @@ _FAMILIES = (
     ("创业板指", "399006", "sz", None),
     ("科创50", "000688", "sh", None),
     ("科创100", "000698", "sh", None),
+    ("科创综指", "000680", "sh", None),
     ("中证500", "000905", "sh", "中证500"),
     ("中证1000", "000852", "sh", "中证1000"),
 )
@@ -60,10 +61,12 @@ def classify_broad_index(name: str) -> dict | None:
         family = _FAMILIES[3]
     elif "科创100" in n or "科创板100" in n:
         family = _FAMILIES[4]
-    elif "中证500" in n:
+    elif "科创综指" in n or "科创板综合" in n:
         family = _FAMILIES[5]
-    elif "中证1000" in n:
+    elif "中证500" in n:
         family = _FAMILIES[6]
+    elif "中证1000" in n:
+        family = _FAMILIES[7]
     else:
         return None
     label, code, exchange, pe_symbol = family
