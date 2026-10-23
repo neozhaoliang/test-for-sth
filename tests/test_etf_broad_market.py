@@ -14,6 +14,8 @@ from analysis import etf_broad_market, etf_macro, etf_report
     ("华夏科创50ETF", "科创50", "000688"),
     ("科创板50ETF易方达", "科创50", "000688"),
     ("科创100ETF", "科创100", "000698"),
+    ("科创综指ETF", "科创综指", "000680"),
+    ("科创板综合ETF", "科创综指", "000680"),
     ("南方中证500ETF", "中证500", "000905"),
 ])
 def test_broad_etf_family(name, family, index):
