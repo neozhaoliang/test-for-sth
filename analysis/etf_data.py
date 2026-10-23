@@ -929,6 +929,47 @@ async def _hk_stock_financial(code: str, today: date) -> dict:
     return indicator
 
 
+async def _hk_stock_snapshot(code: str, today: date) -> dict:
+    """Latest HK F10 indicators (dividend/ROE/PE/PB) with explicit date caveat.
+
+    This is NOT a replacement for dated profit growth or a valuation history.
+    Some AKShare versions omit the REPORT_DATE column altogether.
+    """
+    fn = getattr(ak, "stock_hk_financial_indicator_em", None)
+    if not callable(fn):
+        return {}
+    try:
+        df = await asyncio.wait_for(
+            asyncio.to_thread(fn, symbol=code), timeout=10,
+        )
+        if df is None or getattr(df, "empty", True):
+            return {}
+        row = pd.DataFrame(df).iloc[0]
+        fields = {
+            "roe_pct": ("股东权益回报率(%)", "ROE_AVG"),
+            "pe_ttm": ("市盈率", "PE_TTM"),
+            "pb": ("市净率", "PB_TTM"),
+            "dividend_yield_ttm_pct": ("股息率TTM(%)", "DIVIDEND_RATE"),
+            "payout_ratio_pct": ("派息比率(%)", "DIVI_RATIO"),
+        }
+        out = {}
+        for key, aliases in fields.items():
+            for label in aliases:
+                if label in row.index:
+                    v = _num(str(row[label]).replace("%", "").replace(",", ""))
+                    if v is not None and math.isfinite(v):
+                        out[key] = v
+                        break
+        if out:
+            out["snapshot_source"] = "东方财富港股核心指标快照（财报截止日未核实）"
+            out["snapshot_fetched_on"] = today.isoformat()
+            out["snapshot_verified_report_period"] = False
+        return out
+    except Exception as exc:
+        utils.logger.warning("[etf] HK F10 snapshot %s: %s", code, exc)
+        return {}
+
+
 def _hk_valuation_history(df: Any, *, today: date,
                           metric: str) -> dict:
     """Baidu history: current metric and percentile from dated valid points."""
@@ -1206,11 +1247,15 @@ async def collect_etf_data(spot: dict) -> dict:
             if re.fullmatch(r"[0-9]{5}", code):
                 # Hong Kong financial indicators have their own report
                 # periods and definitions; do not use A-share F10 data.
-                price, financial, valuation = await asyncio.gather(
+                price, financial, valuation, snapshot = await asyncio.gather(
                     _hk_stock_price(code, today),
                     _hk_stock_financial(code, today),
                     _hk_stock_valuation(code, today),
+                    _hk_stock_snapshot(code, today),
                 )
+                # Snapshot values fill gaps without overriding dated
+                # report periods or dated valuation series.
+                row.update(snapshot)
                 row.update(price)
                 row.update(financial)
                 row.update(valuation)
