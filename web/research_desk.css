@@ -283,13 +283,69 @@ body, input, select, textarea, button { font-family:inherit; }
   background:linear-gradient(100deg,#f6f9ff,#fbfdff);
 }
 /* ETF headline has a single quote, never five empty issuer KPIs. */
-#result .report-company-card .verdict-market-strip.verdict-market-strip-etf {
+/* ETF-only quote, IOPV reference premium and turnover cards.
+   Name is on the left; cards on the right. Never inherit the stock 6-grid. */
+#result .report-etf-card .etf-hero-row {
   display:grid;
-  grid-template-columns:minmax(0,1fr);
-  width:min(100%,320px);
+  grid-template-columns:minmax(250px,1fr) minmax(410px,1.28fr);
+  align-items:center;
+  column-gap:20px;
+  width:100%;
+  min-width:0;
 }
-#result .report-company-card .verdict-market-strip-etf .verdict-market-metric {
+#result .report-etf-card .etf-hero-row .report-company-identity {
+  flex-wrap:wrap;
+  align-content:center;
+  min-width:0;
+}
+#result .report-etf-card .etf-hero-row .report-company-identity h2 {
+  font-size:clamp(24px,2.35vw,32px);
+  overflow-wrap:anywhere;
+}
+#result .report-etf-card .etf-hero-row .verdict-market-strip.verdict-market-strip-etf {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:9px;
+  width:100%;
+  margin:0;
+  padding:0;
   border:0;
+  background:transparent;
+}
+#result .report-etf-card .etf-hero-row .verdict-market-strip-etf .verdict-market-metric {
+  box-sizing:border-box;
+  min-width:0;
+  padding:14px 12px;
+  border:1px solid #dce5f3;
+  border-radius:13px;
+  background:#f5f8fd;
+}
+#result .report-etf-card .etf-hero-row .verdict-market-strip-etf .verdict-market-value {
+  font-size:clamp(15px,1.55vw,21px);
+  white-space:normal;
+  overflow-wrap:anywhere;
+}
+#result .report-etf-card .etf-hero-row .verdict-market-strip-etf .verdict-market-price .verdict-market-value {
+  font-size:clamp(20px,1.8vw,26px);
+}
+#result .report-etf-card .etf-hero-row .verdict-market-strip-etf .verdict-market-context,
+#result .report-etf-card .etf-hero-row .verdict-market-strip-etf .verdict-market-date {
+  white-space:normal;
+  overflow-wrap:anywhere;
+}
+@media(max-width:1050px) {
+  #result .report-etf-card .etf-hero-row {
+    grid-template-columns:minmax(0,1fr);
+    row-gap:14px;
+  }
+}
+@media(max-width:600px) {
+  #result .report-etf-card .etf-hero-row .verdict-market-strip.verdict-market-strip-etf {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  #result .report-etf-card .etf-hero-row .verdict-market-strip-etf .verdict-market-metric:first-child {
+    grid-column:1/-1;
+  }
 }
 #result .report-etf-card + .etf-subtitle {
   margin:10px 0 18px;
