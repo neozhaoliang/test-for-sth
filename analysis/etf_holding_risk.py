@@ -144,6 +144,6 @@ def screen_holdings(fund: dict, portfolio: dict) -> dict:
         "watchlist": exposed,
         "limitations": (
             "价格区间80%是股价高位指标，非泡沫认定；历史PE/PB分位也非独立定价证据。"
-            "季报权重变动既可能来自交易，也可能来自股价涨跌；不提供实时买卖或经理动机证据。"
+            "季报权重变动既可能来自交易，也可能来自股价涨跌，不能据此断定ETF实际在高位买入，更不能推断基金经理动机。"
         ),
     }
