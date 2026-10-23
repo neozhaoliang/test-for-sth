@@ -23,6 +23,7 @@ from analysis.etf_macro import get_etf_market_context
 from analysis.etf_cycle import assess_cycle
 from analysis.etf_holding_risk import screen_holdings
 from analysis.etf_broad_market import classify_broad_index, get_broad_market_context
+from analysis.etf_hk_liquidity import is_hk_equity_exposure, get_hk_liquidity_context
 from analysis.etf_distribution import collect_etf_distributions
 from analysis.margin import get_margin_signal
 from analysis.trading_crowding import get_etf_turnover_activity, assess_margin_crowding
@@ -1231,6 +1232,11 @@ async def collect_etf_data(spot: dict) -> dict:
         fund = _with_recent_close(fund, etf_price, today)
     distribution = await collect_etf_distributions(code, fund, today)
     original = holdings.get("holdings") or []
+    # Start offshore liquidity collection in parallel with the slow issuer
+    # look-through requests. Avoid unnecessary HKMA/FRED calls for A-share ETFs.
+    hk_exposure = is_hk_equity_exposure(name, original)
+    hk_task = (asyncio.create_task(get_hk_liquidity_context(as_of=today))
+               if hk_exposure else None)
     if not equity:
         for holding in original:
             holding["not_an_a_share_lookthrough"] = True
@@ -1270,6 +1276,7 @@ async def collect_etf_data(spot: dict) -> dict:
         return row
 
     enriched = await asyncio.gather(*(enrich(h) for h in original[:10]))
+    hk_liquidity = await hk_task if hk_task else {}
     margin, turnover_activity = await asyncio.gather(
         get_margin_signal(spot["stock_code"]),
         get_etf_turnover_activity(code, as_of=today),
@@ -1321,6 +1328,7 @@ async def collect_etf_data(spot: dict) -> dict:
         "macro_market": market,
         "industry_cycle": cycle,
         "broad_market": broad_market,
+        "hk_liquidity": hk_liquidity,
         "trading_crowding": crowding,
         "holding_risk": holding_risk,
         "limitations": limitations,
