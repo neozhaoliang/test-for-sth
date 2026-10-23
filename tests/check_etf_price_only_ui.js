@@ -278,6 +278,63 @@ assert(sink.innerHTML.includes('不能判断高位股实际占比'),
 console.log('ETF price-only and latest top-ten checks passed: current, dated close, 10 holdings, zero coverage vs missing, legacy and stock.');
 
 
+// Broad-based ETFs use actual benchmark evidence, NOT commodity cycle
+// boilerplate; quote data and ETF financing remain independent.
+const broadReport = {
+  ...etf,
+  stock_code:'SH510300',
+  stock_name:'华泰柏瑞沪深300ETF',
+  etf_data: {
+    ...etf.etf_data,
+    distribution: {},
+    broad_market: {
+      profile: {family:'沪深300',index_code:'000300'},
+      benchmark_price: {
+        status:'observed',as_of:'2026-10-23',
+        ytd_pct:26.3,return_20d_pct:5.8,return_60d_pct:16.2,
+        ytd_max_drawdown_pct:-11.4,price_position_52w_pct:83.2,
+        recent5_vs_prior20_amount_ratio:1.88,
+      },
+      index_valuation:{status:'observed',as_of:'2026-10-22',
+                       pe_ttm:16.3,pe_3y_percentile_pct:82.2},
+      constituent_changes:{
+        recent_entries:[{
+          name:'高位样本',code:'688256',included_on:'2026-09-15',
+          pre_inclusion_60d_return_pct:76.5,momentum_flag:true,
+        }],
+      },
+      sentiment_observation:'近20日指数涨幅较高且成交明显放大',
+    },
+    macro_market:{observations:{
+      china_lpr1y:{name:'中国1年LPR',value:3.1,unit:'%',
+                   as_of:'2026-10-20',source:'公开数据'},
+    }},
+    industry_cycle:{stage:'不应显示商品周期',earnings_breadth:{}},
+  },
+  summary:{
+    stance:'neutral',thesis_summary:'指数估值分位上升，回撤风险需要关注。',
+    sections:{valuation:'指数整体估值应审慎分析。'},
+    risk_notes:'',
+  },
+};
+renderers.renderEtfResult(broadReport);
+for(const must of ['沪深300：年内行情、量能与市场情绪',
+  '指数年初以来','26.30%','年内最大回撤','-11.40%',
+  '近5日/前20日指数成交额','1.88 倍','指数PE近3年分位',
+  '宏观政策与流动性观察','中国1年LPR','指数调样与高位纳入观察',
+  '高位样本','76.5%','纳入前上涨较快']) {
+  assert(sink.innerHTML.includes(must), 'missing broad-market observation: '+must);
+}
+for(const unrelated of ['行业周期与前十大盈利广度',
+  '不应显示商品周期','宏观、流动性与产品价格：最新可核实数据',
+  '重仓股、宏观与估值风险分析','近12个月分红率']) {
+  assert(!sink.innerHTML.includes(unrelated), 'broad ETF has unrelated legacy sections: '+unrelated);
+}
+assert.equal(metricCount(sink.innerHTML),3);
+assert(sink.innerHTML.includes('指数成交额与ETF自身成交额不同'));
+assert(sink.innerHTML.indexOf('etf-broad-market') <
+       sink.innerHTML.indexOf('etf-unified-evidence'));
+
 // This is the *original production failure*: /api/tasks stripped asset_type
 // and etf_data, causing an ETF's narrative to be rendered as a stock chart.
 // Old payloads must render ETF-only content and independently rehydrate.
