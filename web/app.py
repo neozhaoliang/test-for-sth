@@ -4055,6 +4055,7 @@ function renderEtfResult(report) {
   const isBroad=!!broadProfile.index_code;
   if (isBroad) {
     const tape=broad.benchmark_price||{}, pval=broad.index_valuation||{};
+    const marketBreadth=broad.market_breadth||{};
     const inclusion=broad.constituent_changes||{}, additions=inclusion.recent_entries||[];
     const num=v=>numericOrNull(v);
     const stat=(label,value,unit='',digits=1)=>{
@@ -4075,6 +4076,13 @@ function renderEtfResult(report) {
       stat('指数PE近3年分位',pval.pe_3y_percentile_pct,'%',1)+
       '</div>'+
       '<p class="etf-prose">'+safe(broad.sentiment_observation||'指数风险偏好暂缺有效量价证据。')+'</p>'+
+      (marketBreadth.status==='observed' ?
+        '<div class="etf-metric-row etf-broad-metrics">'+
+          stat('全A上涨家数',marketBreadth.advancers,' 家',0)+
+          stat('全A下跌家数',marketBreadth.decliners,' 家',0)+
+          stat('上涨占比（涨跌家数）',marketBreadth.advancing_share_pct,'%',1)+
+          '</div><p class="etf-source">市场广度：'+safe(marketBreadth.as_of||'')+
+          ' · 全市场上涨/下跌家数，不是该指数内部涨跌家数。</p>' : '')+
       '<p class="etf-source">跟踪指数 '+safe(broadProfile.index_code||'')+
         ' · 指数行情日期：'+safe(tape.as_of||'尚未取得')+
         ' · 指数PE日期：'+safe(pval.as_of||'尚未取得')+
