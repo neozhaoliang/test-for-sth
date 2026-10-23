@@ -84,10 +84,16 @@ etf.summary.sections.holdings = '不应重复展示的持仓名单唯一测试�
 renderers.renderEtfResult(etf);
 assert(!sink.innerHTML.includes('不应重复展示的持仓名单唯一测试标记'),
   'do not repeat the top-ten table holdings in an additional prose section');
-assert.equal(metricCount(sink.innerHTML), 1,
-  'new ETF report should have one quote box, not a six-column issuer strip');
+assert.equal(metricCount(sink.innerHTML), 3,
+  'ETF report must show price, IOPV reference premium and turnover beside the name');
 assert(sink.innerHTML.includes('ETF现价'));
 assert(sink.innerHTML.includes('1.567 元'));
+assert(sink.innerHTML.includes('暂无IOPV'),
+  'premium must remain unknown without comparable IOPV');
+assert(sink.innerHTML.includes('成交额'));
+assert(sink.innerHTML.includes('class="etf-hero-row"'));
+assert(etfCss.includes('grid-template-columns:minmax(250px,1fr) minmax(410px,1.28fr)'),
+  'ETFs display fund name left and price/IOPV/turnover KPI cards right');
 assert(sink.innerHTML.includes('最新披露前十大重仓股'));
 const holdingsHeaderStart = sink.innerHTML.indexOf('class="etf-holdings-heading"');
 const holdingsHeaderEnd = sink.innerHTML.indexOf('</div>', holdingsHeaderStart);
@@ -137,14 +143,32 @@ assert(!sink.innerHTML.slice(outerCardStart, holdingsWithinCard).includes('</sec
 assert(sink.innerHTML.slice(holdingsWithinCard, verdictOutsideCard).includes('</div></section>'),
   'top-ten holdings and outer ETF card must close together before the investment verdict');
 for (const field of ['市净率 PB', 'F10 披露ROE',
-  '现金流/归母净利', 'IOPV参考溢价', 'ETF一年价格区间位置']) {
+  '现金流/归母净利', 'ETF一年价格区间位置']) {
   assert(!sink.innerHTML.includes(field), 'ETF headline must omit ' + field);
 }
 
+// Test both genuine discount and an observed turnover, with amounts scaled.
+etf.etf_data.fund.iopv = 1.58;
+etf.etf_data.fund.iopv_premium_pct = -0.82;
+etf.etf_data.fund.turnover_yuan = 148040000;
+renderers.renderEtfResult(etf);
+assert(sink.innerHTML.includes('IOPV参考折价'));
+assert(sink.innerHTML.includes('-0.82%'));
+assert(sink.innerHTML.includes('1.48 亿元'));
+assert.equal(metricCount(sink.innerHTML),3);
+etf.summary.sections.fund_structure='基金名称提示可能为指数产品，这段提示词不应出现在页面';
+etf.summary.sections.market_price='IOPV为null，latest_shares为null，错误叙述';
+renderers.renderEtfResult(etf);
+assert(!sink.innerHTML.includes('基金名称提示可能为指数产品'));
+assert(!sink.innerHTML.includes('latest_shares为null'));
 etf.etf_data.fund.latest_price = null;
 etf.etf_data.etf_price_position = {
   recent_close: 1.716, recent_close_as_of: '2026-10-21',
 };
+// A dated close must not borrow intraday IOPV or turnover.
+etf.etf_data.fund.iopv = null;
+etf.etf_data.fund.iopv_premium_pct = null;
+etf.etf_data.fund.turnover_yuan = null;
 etf.etf_data.portfolio.disclosure_as_of = '2026-06-30';
 etf.etf_data.portfolio.holdings = Array.from({length: 10}, (_, i) => ({
   code: '600' + String(100 + i), name: '持仓' + (i + 1),
@@ -163,7 +187,7 @@ etf.etf_data.holding_risk={
   limitations:'价格高位不等于泡沫。',
 };
 renderers.renderEtfResult(etf);
-assert.equal(metricCount(sink.innerHTML), 1);
+assert.equal(metricCount(sink.innerHTML), 3);
 assert(sink.innerHTML.includes('最近交易日收盘价'));
 assert(sink.innerHTML.includes('指数被动高位承接风险'));
 assert(sink.innerHTML.includes('高估值分位'));
