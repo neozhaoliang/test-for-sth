@@ -3934,10 +3934,8 @@ function renderEtfResult(report) {
   const hasPremium=hasMarketQuote && iopv!==null && iopv>0 &&
     premium!==null && Number.isFinite(premium);
   const premiumText=hasPremium?
-    (premium>0?'+':'')+premium.toFixed(2)+'%':'暂无IOPV';
-  const premiumLabel=hasPremium?
-    (premium>0?'IOPV参考溢价':premium<0?'IOPV参考折价':'IOPV参考溢折价'):
-    'IOPV参考溢折价';
+    (premium>0?'+':'')+premium.toFixed(2)+'%':'暂无数据';
+  const premiumLabel='溢价率';
   const turnover=numericOrNull(fund.turnover_yuan);
   const turnoverText=turnover===null||turnover<0?'暂无数据':
     (turnover>=1e8?(turnover/1e8).toFixed(2)+' 亿元':
@@ -3954,15 +3952,36 @@ function renderEtfResult(report) {
         '<span class="report-stock-code">'+safe(report.stock_code||'')+'</span>'+
       '</div>'+
       '<div class="verdict-market-strip verdict-market-strip-etf" role="group" aria-label="ETF行情和流动性">'+
-        verdictMetric(quoteLabel,latestText,quoteAt,
-          latest!==null&&latest>0?'price':'missing',quoteDetail)+
-        verdictMetric(premiumLabel,premiumText,
-          hasPremium?'相对IOPV，非官方净值溢折价':'缺少可比较的IOPV',
-          hasPremium?'valuation':'missing','数据仅供参考')+
-        verdictMetric('成交额',turnoverText,turnoverAt,
-          turnover!==null&&turnover>=0?'cash':'missing','二级市场成交')+
+        verdictMetric(quoteLabel,latestText,'',
+          latest!==null&&latest>0?'price':'missing','')+
+        verdictMetric(premiumLabel,premiumText,'',
+          hasPremium?'valuation':'missing','')+
+        verdictMetric('成交额',turnoverText,'',
+          turnover!==null&&turnover>=0?'cash':'missing','')+
       '</div>'+
     '</div>';
+  // Visible KPI cards contain only a title and value. Source dates remain
+  // attached to the report data and are available on hover.
+  const dist=data.distribution||{};
+  const cashYield=numericOrNull(dist.dividend_yield_ttm_pct);
+  const distributable=numericOrNull(dist.distributable_profit_yuan);
+  const lastDividend=numericOrNull(dist.latest_dividend_per_share);
+  const yieldTitle='近12个月实际现金分红 / 行情参考价；'+
+    String(dist.dividend_yield_price_date||'价格日期以行情记录为准');
+  const profitTitle='截至 '+String(dist.distributable_profit_as_of||'报告期未核实')+
+    ' · '+String(dist.distributable_profit_source||'数据来源未核实');
+  html+='<div class="etf-distribution-row" role="group" aria-label="ETF分红与收益分配">'+
+    '<div class="etf-distribution-item" title="'+safe(yieldTitle)+'">'+
+      '<span>近12个月分红率</span><strong>'+
+      safe(cashYield===null?'暂无数据':cashYield.toFixed(2)+'%')+'</strong></div>'+
+    '<div class="etf-distribution-item" title="'+safe(profitTitle)+'">'+
+      '<span>可供分配利润</span><strong>'+
+      safe(distributable===null?'暂无数据':(distributable/1e8).toFixed(2)+' 亿元')+
+      '</strong></div>'+
+    '<div class="etf-distribution-item">'+
+      '<span>最近每份分红</span><strong>'+
+      safe(lastDividend===null?'暂无数据':lastDividend.toFixed(4)+' 元')+
+      '</strong></div></div>';
   // Place the top-ten disclosure inside the same visual card as the ETF identity,
   // independently of all discretionary/LLM-generated analysis sections.
   const disclosure=portfolio.disclosure_as_of||portfolio.as_of||'报告期未核实';
@@ -4018,8 +4037,6 @@ function renderEtfResult(report) {
     heading('重仓股、宏观与估值风险分析');
   html+='<div class="etf-analysis-subsection etf-manager-risk" id="etf-management-risk">'+
     heading(risk.risk_type||'指数调样与主动管理的高位风险')+
-    '<p class="etf-source">'+safe(strategy.label||'尚未核实管理方式')+
-    ' · '+safe(strategy.source||'先核实基金合同及投资策略')+'</p>'+
     '<div class="etf-prose">'+safe(risk.risk_summary||
     '需要先核实基金的主动或指数管理方式，以及重仓股是否处于股价和估值高位。')+'</div>';
   if (Object.keys(risk).length) {
@@ -4110,7 +4127,7 @@ function renderEtfResult(report) {
         safe(Number(breadth.comparable_count||0)>0?fmt(breadth.decelerating_growth_weight_pct,'%',1):'尚无法判断')+
         '</strong></div>'+
     '</div><div class="etf-prose">'+safe((cycle.evidence||[]).join('；'))+
-    '</div><p class="etf-source">'+safe(breadth.definition||'')+'</p></div>';
+    '</div></div>';
   html+='<div class="etf-analysis-subsection" id="etf-holdings">'+heading('十大重仓股价格、业绩与估值穿透')+
     '<p class="etf-source">'+safe(portfolio.scope||'')+' · '+safe(portfolio.as_of||'披露期暂缺')+
     ' · '+safe(portfolio.source||'来源暂缺')+'</p>';
