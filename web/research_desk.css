@@ -666,6 +666,36 @@ body, input, select, textarea, button { font-family:inherit; }
   }
 }
 
+/* One research panel immediately after the disclosed ETF top-ten. */
+#result .etf-unified-evidence {
+  margin-top:14px;
+}
+#result .etf-unified-evidence > h3 {
+  margin:0 0 8px;
+  color:#183653;
+}
+#result .etf-unified-evidence .etf-analysis-subsection {
+  margin:0;
+  padding:18px 0;
+  min-width:0;
+  border:0;
+  background:transparent;
+  box-shadow:none;
+}
+#result .etf-unified-evidence .etf-analysis-subsection + .etf-analysis-subsection {
+  border-top:1px solid #e4eaf4;
+}
+#result .etf-unified-evidence .etf-analysis-subsection h3 {
+  font-size:17px;
+  margin:0 0 10px;
+}
+#result .etf-unified-evidence .etf-analysis-subsection .etf-table-wrap {
+  margin-top:10px;
+}
+@media (max-width:600px) {
+  #result .etf-unified-evidence .etf-analysis-subsection { padding:14px 0; }
+}
+
 /* Single visible TOC heading: 研究目录, without an English eyebrow or count. */
 /* Linked article-style contents panel; limited to the 840px research column. */
 #result .report-toc {
