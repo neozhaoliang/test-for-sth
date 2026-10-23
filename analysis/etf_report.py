@@ -49,6 +49,18 @@ _SYSTEM_RULES = """请为当前ETF写一份有判断力、短而自然的中文�
 缺乏核实的交易记录时不能推断基金经理动机，也不能把季度权重变化写成加仓事实。
 没有足够证据的方向直接留空，不要堆砌“需要核实、尚未提供、不能判断”。
 
+段落严格分工，不准换个说法重复同一条证据：
+- high_positions：只分析个股的股价位置、PE/PB估值分位及价格回撤，不再谈派息覆盖或ETF融资；
+- earnings_cycle：只分析净利润增速、分红覆盖和未来派息可持续性，不再谈股票价格位置；
+- valuation：只有新增独立的基金层面估值或投资回报测算时才填写，不能重述high_positions，
+  也不能重复顶部已展示的历史基金现金分红率；无新增事实就留空；
+- commodity_market 与 industry_cycle：跨行业高股息ETF若已在earnings_cycle里论述产业
+  盈利分化，以上两个字段留空。除非存在真实、互不重复的产品价格与周期证据；
+- risk_notes：仅放此前所有章节都没有提过的独立风险；否则留空；
+- thesis_summary：只给投资态度及最关键因果判断，不要再次照抄后面章节所有数字。
+每个上市公司同一季度同一指标只出现一次；融资余额和成交额在上方专属段落已有图表，
+在上述所有章节不再重复引用融资余额或成交额的数值。
+
 筹码与交易拥挤度必须参考trading_crowding中的有日期数据：
 ETF只分析该基金证券自身融资余额、融资变化和成交额相对历史的放大倍数；
 不将前十大股票融资余额加总，也不把ETF场内成交额当成资金净申购。
@@ -205,6 +217,25 @@ def _text(value: Any, limit: int = 6000) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _compact_etf_sections(sections: dict, profile: str) -> dict:
+    """Prevent overlapping narrative blocks, independent of LLM compliance."""
+    result = {
+        key: (_text(sections.get(key), 2400) if key not in
+              ("holdings", "fund_structure", "market_price") else "")
+        for key in _SECTION_NAMES
+    }
+    if profile == "跨行业高股息":
+        # Keep the richer quantitative price/valuation and profit/payout
+        # narratives; a second generic valuation or cycle explanation tends
+        # to repeat the same constituent figures and conclusions.
+        if result["high_positions"]:
+            result["valuation"] = ""
+        if result["earnings_cycle"]:
+            result["industry_cycle"] = ""
+            result["commodity_market"] = ""
+    return result
+
+
 async def _write_etf_opinion(data: dict) -> dict:
     profile = _profile_for_data(data)
     current = data.get("fund") or {}
@@ -255,13 +286,16 @@ async def _write_etf_opinion(data: dict) -> dict:
     sections = parsed.get("sections")
     if not isinstance(sections, dict):
         sections = {}
+    clean_sections = _compact_etf_sections(sections, profile)
+    repeated_risk = (profile == "跨行业高股息" and
+                     (clean_sections["high_positions"] or
+                      clean_sections["earnings_cycle"]))
     return {
         "stance": parsed["stance"],
         "thesis_summary": _text(parsed.get("thesis_summary")),
-        "sections": {key: (_text(sections.get(key), 2400) if key not in
-                    ("holdings", "fund_structure", "market_price") else "")
-                     for key in _SECTION_NAMES},
-        "risk_notes": _text(parsed.get("risk_notes"), 1600),
+        "sections": clean_sections,
+        "risk_notes": ("" if repeated_risk else
+                       _text(parsed.get("risk_notes"), 1600)),
         "invalidation_condition": _text(parsed.get("invalidation_condition"), 1600),
         "generation_status": "complete",
     }
