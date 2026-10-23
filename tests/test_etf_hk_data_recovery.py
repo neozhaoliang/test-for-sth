@@ -169,6 +169,7 @@ async def test_513530_ten_hk_holdings_produce_real_price_coverage_when_feeds_wor
                         lambda **kwargs: pd.DataFrame())
     monkeypatch.setattr(etf_data.ak, "stock_hk_daily",
                         lambda **kwargs: _hk_daily(), raising=False)
+    monkeypatch.setattr(etf_data, "_hk_stock_snapshot", AsyncMock(return_value={}))
     monkeypatch.setattr(etf_data, "_hk_stock_financial",
                         AsyncMock(return_value={
                             "financial_period":"2026-06-30",
