@@ -200,6 +200,34 @@ def summarize_index_pe(frame: Any, *, as_of: date) -> dict:
     return out
 
 
+def market_breadth_snapshot(frame: Any, *, as_of: date) -> dict:
+    """Whole-market advancing/declining shares, separately dated from index."""
+    if frame is None or getattr(frame, "empty", True):
+        return {"status": "unavailable"}
+    f = pd.DataFrame(frame)
+    if not {"item", "value"}.issubset(f.columns):
+        return {"status": "unavailable"}
+    kv = {str(row["item"]).strip(): row["value"] for _, row in f.iterrows()}
+    raw_day = str(kv.get("统计日期") or "")
+    m = re.search(r"20\d{2}[-/]\d{1,2}[-/]\d{1,2}", raw_day)
+    observed = _day(m.group(0)) if m else None
+    if observed is None or observed > as_of or (as_of-observed).days > 4:
+        return {"status": "unavailable"}
+    up = _num(kv.get("上涨"))
+    down = _num(kv.get("下跌"))
+    if (up is None or down is None or up < 0 or down < 0
+            or up+down < 300):
+        return {"status": "unavailable"}
+    return {
+        "status": "observed",
+        "as_of": observed.isoformat(),
+        "advancers": int(up),
+        "decliners": int(down),
+        "advancing_share_pct": round(up/(up+down)*100, 1),
+        "source": "乐咕乐股市场上涨/下跌家数；不是某一指数的成分股上涨家数",
+    }
+
+
 def _recent_entries(frame: Any, *, as_of: date) -> dict:
     """Sina inclusion dates, NOT the CSIndex snapshot's column named 日期."""
     if frame is None or getattr(frame, "empty", True):
@@ -271,7 +299,7 @@ async def _collect_uncached(profile: dict, as_of: date) -> dict:
     code = profile["index_code"]
     begin = (date(as_of.year-1, 1, 1)-timedelta(days=25)).strftime("%Y%m%d")
     end = as_of.strftime("%Y%m%d")
-    series, valuation, constituents = await asyncio.gather(
+    series, valuation, constituents, breadth = await asyncio.gather(
         _ak_call("index_zh_a_hist", params={
             "symbol": code, "period": "daily",
             "start_date": begin, "end_date": end,
@@ -279,8 +307,10 @@ async def _collect_uncached(profile: dict, as_of: date) -> dict:
         _ak_call("stock_index_pe_lg", params={"symbol": profile["pe_symbol"]},
                  timeout=11) if profile["pe_symbol"] else asyncio.sleep(0, result=None),
         _ak_call("index_stock_cons", params={"symbol": code}, timeout=12),
+        _ak_call("stock_market_activity_legu", params={}, timeout=10),
     )
     price = summarize_index_tape(series, as_of=as_of)
+    market_breadth = market_breadth_snapshot(breadth, as_of=as_of)
     pe = summarize_index_pe(valuation, as_of=as_of)
     changes = _recent_entries(constituents, as_of=as_of)
     candidates = changes.get("recent_entries", [])[:5]
@@ -318,7 +348,8 @@ async def _collect_uncached(profile: dict, as_of: date) -> dict:
             outlook = "价格与成交指标未共同构成明显的单边情绪证据"
     return {
         "profile": profile, "benchmark_price": price, "index_valuation": pe,
-        "constituent_changes": changes, "sentiment_observation": outlook,
+        "constituent_changes": changes, "market_breadth": market_breadth,
+        "sentiment_observation": outlook,
         "index_methodology_risk": (
             "指数公司按规则纳入和调权成分股，ETF依照跟踪策略调整；"
             "只有同时核实纳入生效日与此前行情，才能判断是否存在追高纳入风险。"
