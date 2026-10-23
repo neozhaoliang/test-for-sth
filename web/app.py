@@ -4059,6 +4059,9 @@ function renderEtfResult(report) {
         '未取得可核实的离岸融资判断。')+'</div>'+
       '<div class="etf-prose">'+safe(assessment.china_inflation_assessment||
         '企业盈利仍须结合报告期核实。')+'</div>'+
+      (assessment.recent_funding_extreme_watch ?
+        '<div class="etf-prose">'+safe(assessment.extreme_watch_assessment||'')+
+        '</div>' : '')+
       '<p class="etf-source">流动性最差点并非可直接观测的买点；'
         +'资金见底仍需结合企业盈利、估值和后续流动性改善判断。</p></section>';
   }
