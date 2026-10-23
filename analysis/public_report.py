@@ -352,7 +352,7 @@ _ETF_PUBLIC_FIELDS = frozenset((
 ))
 _ETF_DATA_FIELDS = frozenset((
     "asset_type", "scope", "fund", "portfolio", "portfolio_stats",
-    "etf_price_position", "macro_market", "industry_cycle",
+    "etf_price_position", "macro_market", "industry_cycle", "holding_risk",
     "limitations", "collected_on",
 ))
 _ETF_SUMMARY_FIELDS = frozenset((

@@ -50,6 +50,26 @@ def assess_cycle(market: dict, holdings: list[dict]) -> dict:
     earnings = earnings_breadth(holdings)
     sector = market.get("sector") or ""
     observations = market.get("observations") or {}
+    if sector == "跨行业高股息":
+        # A multi-sector dividend ETF has NO common commodity top/bottom.
+        # What matters is distribution quality and issuer-level earnings.
+        count = earnings["sample_count"]
+        coverage = earnings["sample_weight_pct"]
+        comparable = earnings["comparable_count"]
+        return {
+            "sector": sector,
+            "stage": "多行业派息能力与盈利周期分化",
+            "confidence": ("持仓部分可观察" if count >= 3 else "分红覆盖和业绩证据不足"),
+            "earnings_breadth": earnings,
+            "commodity_signal": None,
+            "evidence": [
+                f"前十大重仓可观察净利润同比的公司{count}只，覆盖基金净值{coverage:.2f}%；可比增速{comparable}只",
+                "不同产业分别评估现金流和盈利，不能用单一金属、能源价格或某一行业拐点给全基金定性",
+                "股息率、派息率、自由现金流覆盖及偿债压力尚未核实时，不应承诺分红能维持",
+            ],
+            "bottom_confirmation": "分红ETF的买点应由可持续股息、估值、利率与盈利风险共同决定，不是某一行业价格底部",
+            "top_confirmation": "须警惕高景气利润退潮造成股息率的分母陷阱、分红下修和估值压缩",
+        }
     commodity = (observations.get("gold_cny") or observations.get("gold_usd")
                  if sector == "黄金产业股票" else observations.get("sector_commodity"))
     price_trend_3m = _numeric((commodity or {}).get("return_3m_pct"))

@@ -639,6 +639,115 @@ body, input, select, textarea, button { font-family:inherit; }
   #result .report-company-identity { align-items:baseline;gap:8px;flex-wrap:wrap; }
 }
 
+/* ETF name, price, and latest disclosed holdings share one card. */
+#result .report-header-inline.report-company-card.report-etf-card {
+  padding-bottom:25px;
+}
+#result .report-etf-card .etf-top-holdings {
+  width:100%;
+  min-width:0;
+  margin-top:22px;
+  padding-top:22px;
+  border-top:1px solid #dce5f3;
+}
+#result .report-etf-card .etf-top-holdings h3 {
+  margin:0 0 12px;
+  color:#183653;
+}
+#result .report-etf-card .etf-top-holdings .etf-table-wrap {
+  margin-top:12px;
+  border-radius:10px;
+  background:#fff;
+}
+@media(max-width:600px){
+  #result .report-etf-card .etf-top-holdings {
+    margin-top:18px;
+    padding-top:18px;
+  }
+}
+
+/* All ETF sections belong to ONE visible card, unlike issuer dashboards.
+   Child sections remain semantic sections but never appear as separate panels.
+   This block is ETF-scoped; ordinary stock report cards are unchanged. */
+#result .etf-whole-report-card {
+  box-sizing:border-box;
+  width:100%;
+  min-width:0;
+  margin:0;
+  padding:30px 36px 34px;
+  border:1px solid #d5e2f2;
+  border-radius:22px;
+  background:#fff;
+  box-shadow:0 12px 36px rgba(33,67,114,.075);
+}
+#result .etf-whole-report-card > .report-header-inline.report-company-card.report-etf-card {
+  width:100%;
+  margin:0;
+  padding:0 0 24px;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+}
+#result .etf-whole-report-card > .etf-block {
+  box-sizing:border-box;
+  min-width:0;
+  width:100%;
+  margin:0;
+  padding:24px 0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+}
+#result .etf-whole-report-card > .etf-block + .etf-block,
+#result .etf-whole-report-card > .report-etf-card + .etf-block {
+  border-top:1px solid #e4eaf4;
+}
+#result .etf-whole-report-card > .etf-block:last-child { padding-bottom:0; }
+#result .etf-whole-report-card > .etf-unified-evidence { margin:0; }
+#result .etf-whole-report-card > .etf-block h3 { color:#183653; }
+@media(max-width:600px) {
+  #result .etf-whole-report-card {
+    padding:20px 16px 24px;
+    border-radius:16px;
+  }
+  #result .etf-whole-report-card > .report-header-inline.report-company-card.report-etf-card {
+    padding:0 0 18px;
+  }
+  #result .etf-whole-report-card > .etf-block { padding:18px 0; }
+}
+
+/* One research panel immediately after the disclosed ETF top-ten. */
+#result .etf-unified-evidence {
+  margin-top:14px;
+}
+#result .etf-unified-evidence > h3 {
+  margin:0 0 8px;
+  color:#183653;
+}
+#result .etf-unified-evidence .etf-analysis-subsection {
+  margin:0;
+  padding:18px 0;
+  min-width:0;
+  border:0;
+  background:transparent;
+  box-shadow:none;
+}
+#result .etf-unified-evidence .etf-analysis-subsection + .etf-analysis-subsection {
+  border-top:1px solid #e4eaf4;
+}
+#result .etf-unified-evidence .etf-analysis-subsection h3 {
+  font-size:17px;
+  margin:0 0 10px;
+}
+#result .etf-unified-evidence .etf-analysis-subsection .etf-table-wrap {
+  margin-top:10px;
+}
+@media (max-width:600px) {
+  #result .etf-unified-evidence .etf-analysis-subsection { padding:14px 0; }
+}
+
 /* Single visible TOC heading: 研究目录, without an English eyebrow or count. */
 /* Linked article-style contents panel; limited to the 840px research column. */
 #result .report-toc {
