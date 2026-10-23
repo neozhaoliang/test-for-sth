@@ -3833,10 +3833,11 @@ function renderReportToc(reportHtml) {
 // The six source-backed quote/valuation facts sit directly under the
 // company name in the top identity card, before the report contents.
 // Historical snapshots use the values supplied for the as-of date.
-function verdictMetric(label, value, date, tone, detail) {
+function verdictMetric(label, value, date, tone, detail, tooltip) {
   const safeTone=['price','valuation','profit','cash','low','mid','high','missing'].includes(tone)?
     tone:'mid';
-  return '<div class="verdict-market-metric verdict-market-'+safeTone+'">'+
+  return '<div class="verdict-market-metric verdict-market-'+safeTone+'"'+
+    (tooltip?' title="'+escapeHtml(String(tooltip))+'"':'')+'>'+
     '<span class="verdict-market-label">'+escapeHtml(String(label))+'</span>'+
     '<span class="verdict-market-value">'+escapeHtml(String(value))+'</span>'+
     (detail?'<span class="verdict-market-context">'+escapeHtml(String(detail))+'</span>':'')+
@@ -3953,11 +3954,13 @@ function renderEtfResult(report) {
       '</div>'+
       '<div class="verdict-market-strip verdict-market-strip-etf" role="group" aria-label="ETF行情和流动性">'+
         verdictMetric(quoteLabel,latestText,'',
-          latest!==null&&latest>0?'price':'missing','')+
+          latest!==null&&latest>0?'price':'missing','',
+          [quoteAt,quoteDetail].filter(Boolean).join(' · '))+
         verdictMetric(premiumLabel,premiumText,'',
-          hasPremium?'valuation':'missing','')+
+          hasPremium?'valuation':'missing','',
+          hasPremium?'相对IOPV的行情参考溢价率':'未取得可比较的实时IOPV')+
         verdictMetric('成交额',turnoverText,'',
-          turnover!==null&&turnover>=0?'cash':'missing','')+
+          turnover!==null&&turnover>=0?'cash':'missing','',turnoverAt)+
       '</div>'+
     '</div>';
   // Visible KPI cards contain only a title and value. Source dates remain
