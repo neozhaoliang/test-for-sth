@@ -6,6 +6,11 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '../web/app.py'), 'utf8');
+const etfCss = fs.readFileSync(path.join(__dirname, '../web/research_desk.css'), 'utf8');
+assert(etfCss.includes('#result .etf-whole-report-card > .etf-block'),
+  'all ETF chapters must be styled as subsections inside the single card');
+assert(etfCss.includes('#result .etf-whole-report-card > .report-header-inline.report-company-card.report-etf-card'),
+  'ETF identity header must also lose its own outer border/shadow');
 const from = source.indexOf('function verdictMetric(');
 const to = source.indexOf("document.getElementById('submitBtn').addEventListener", from);
 assert(from >= 0 && to > from, 'header render functions must exist');
@@ -81,6 +86,18 @@ assert.equal(metricCount(sink.innerHTML), 1,
 assert(sink.innerHTML.includes('ETF现价'));
 assert(sink.innerHTML.includes('1.567 元'));
 assert(sink.innerHTML.includes('最新披露前十大重仓股'));
+// The entire ETF report, including narrative, risk notes and limitations,
+// must have exactly ONE outer visible card (no separate chapter cards).
+assert.equal((sink.innerHTML.match(/class="etf-whole-report-card"/g)||[]).length, 1);
+assert(sink.innerHTML.startsWith('<article class="etf-whole-report-card"'),
+  'ETF report should start with the sole card wrapper');
+assert(sink.innerHTML.trim().endsWith('</article>'),
+  'full report, not just the header, must close inside the one outer card');
+const reportSections=[
+  'report-top', 'etf-latest-top-ten', 'etf-unified-evidence', 'report-verdict',
+];
+reportSections.forEach(id=>assert(sink.innerHTML.includes('id="'+id+'"'),
+  'all report sections must remain visible: '+id));
 assert(sink.innerHTML.includes('id="etf-unified-evidence"'),
   'one combined research panel must follow the top-ten');
 assert.equal((sink.innerHTML.match(/class="etf-block" id="etf-(macro-evidence|cycle-evidence|holdings)"/g)||[]).length,0,
@@ -131,6 +148,8 @@ assert(sink.innerHTML.includes('最近交易日收盘价'));
 assert(sink.innerHTML.includes('指数被动高位承接风险'));
 assert(sink.innerHTML.includes('高估值分位'));
 assert(sink.innerHTML.includes('指数编制和季度调样公告'));
+assert.equal((sink.innerHTML.match(/class="etf-whole-report-card"/g)||[]).length,1);
+assert(sink.innerHTML.trim().endsWith('</article>'));
 assert(sink.innerHTML.includes('1.716 元'));
 assert(sink.innerHTML.includes('2026-06-30'));
 assert(sink.innerHTML.indexOf('etf-latest-top-ten') <
@@ -197,5 +216,8 @@ console.log('ETF price-only and latest top-ten checks passed: current, dated clo
   assert(sink.innerHTML.includes('2026-06-30'));
   assert(sink.innerHTML.includes('600109'));
   assert(!sink.innerHTML.includes('市净率 PB'));
-  console.log('Legacy ETF task projection UI recovery passed: price, ten holdings, no issuer charts.');
+  assert.equal((sink.innerHTML.match(/class="etf-whole-report-card"/g)||[]).length,1,
+    'legacy ETF must also use a single card');
+  assert(sink.innerHTML.trim().endsWith('</article>'));
+  console.log('Legacy ETF task projection UI recovery passed: price, ten holdings, single card, no issuer charts.');
 })().catch(error => { console.error(error); process.exitCode=1; });
