@@ -3973,18 +3973,34 @@ function renderEtfResult(report) {
     String(dist.dividend_yield_price_date||'价格日期以行情记录为准');
   const profitTitle='截至 '+String(dist.distributable_profit_as_of||'报告期未核实')+
     ' · '+String(dist.distributable_profit_source||'数据来源未核实');
-  html+='<div class="etf-distribution-row" role="group" aria-label="ETF分红与收益分配">'+
-    '<div class="etf-distribution-item" title="'+safe(yieldTitle)+'">'+
-      '<span>近12个月分红率</span><strong>'+
-      safe(cashYield===null?'暂无数据':cashYield.toFixed(2)+'%')+'</strong></div>'+
-    '<div class="etf-distribution-item" title="'+safe(profitTitle)+'">'+
-      '<span>可供分配利润</span><strong>'+
-      safe(distributable===null?'暂无数据':(distributable/1e8).toFixed(2)+' 亿元')+
-      '</strong></div>'+
-    '<div class="etf-distribution-item">'+
-      '<span>最近每份分红</span><strong>'+
-      safe(lastDividend===null?'暂无数据':lastDividend.toFixed(4)+' 元')+
-      '</strong></div></div>';
+  const paidTtm=numericOrNull(dist.dividend_ttm_per_share);
+  // Show fund-level cash-distribution metrics only if the FUND has
+  // confirmed cash dividends in the trailing year. Do not infer a payout
+  // from its "high dividend" name or its constituent stocks' dividend yields.
+  if (paidTtm!==null && paidTtm>0) {
+    const dividendMetrics=[];
+    if (cashYield!==null && cashYield>0) {
+      dividendMetrics.push(
+        '<div class="etf-distribution-item" title="'+safe(yieldTitle)+'">'+
+        '<span>近12个月分红率</span><strong>'+
+        safe(cashYield.toFixed(2)+'%')+'</strong></div>');
+    }
+    if (distributable!==null && distributable>=0) {
+      dividendMetrics.push(
+        '<div class="etf-distribution-item" title="'+safe(profitTitle)+'">'+
+        '<span>可供分配利润</span><strong>'+
+        safe((distributable/1e8).toFixed(2)+' 亿元')+'</strong></div>');
+    }
+    if (lastDividend!==null && lastDividend>0) {
+      dividendMetrics.push(
+        '<div class="etf-distribution-item">'+
+        '<span>最近每份分红</span><strong>'+
+        safe(lastDividend.toFixed(4)+' 元')+'</strong></div>');
+    }
+    if(dividendMetrics.length) html+='<div class="etf-distribution-row" '+
+      'role="group" aria-label="ETF已实施分红">'+
+      dividendMetrics.join('')+'</div>';
+  }
   // Place the top-ten disclosure inside the same visual card as the ETF identity,
   // independently of all discretionary/LLM-generated analysis sections.
   const disclosure=portfolio.disclosure_as_of||portfolio.as_of||'报告期未核实';
@@ -4179,13 +4195,31 @@ function renderEtfResult(report) {
     'high_positions','earnings_cycle','valuation'];
   const labels=report.section_labels||{};
   const sections=summary.sections||{};
-  for(const key of keys) {
-    if(!sections[key])continue;
+  const isDividendStrategy=/高股息|红利|股息/i.test(String(report.stock_name||''));
+  // The dividend ETF report has three distinct jobs: pricing/drawdown,
+  // earnings/payout sustainability and trading crowding (shown above).
+  // Older cached LLM reports may repeat the SAME stocks and risk across
+  // high_positions, valuation, industry_cycle, earnings_cycle, and risk_notes.
+  const visibleKeys=keys.filter(key=>{
+    if(!String(sections[key]||'').trim())return false;
+    if(!isDividendStrategy)return true;
+    if(key==='valuation' && sections.high_positions)return false;
+    if(key==='industry_cycle' && sections.earnings_cycle)return false;
+    if(key==='commodity_market' && sections.earnings_cycle)return false;
+    return true;
+  });
+  for(const key of visibleKeys) {
     html+='<section class="etf-block">'+heading(labels[key]||key)+
       '<div class="etf-prose">'+safe(sections[key])+'</div></section>';
   }
-  if(summary.risk_notes)html+='<section class="etf-block">'+heading('主要风险')+
-    '<div class="etf-prose">'+safe(summary.risk_notes)+'</div></section>';
+  // For dividend ETFs the thesis already contains the primary downside
+  // mechanism; another generic "主要风险" chapter repeats pricing and payout
+  // data. Preserve the raw risk_notes in the API but omit the duplicate UI.
+  if(summary.risk_notes && (!isDividendStrategy ||
+    !(sections.high_positions||sections.earnings_cycle))) {
+    html+='<section class="etf-block">'+heading('主要风险')+
+      '<div class="etf-prose">'+safe(summary.risk_notes)+'</div></section>';
+  }
   if(summary.invalidation_condition)html+='<section class="etf-block">'+heading('什么会改变判断')+
     '<div class="etf-prose">'+safe(summary.invalidation_condition)+'</div></section>';
   html+='<section class="etf-block"><p class="etf-source">'+
