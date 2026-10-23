@@ -224,6 +224,7 @@ jobs:
             tests/test_etf_discovery.py \
             tests/test_etf_task_projection.py \
             tests/test_etf_quote_and_holdings.py \
+            tests/test_etf_topic_isolation.py \
             tests/test_etf_macro_cycle.py \
             tests/test_etf_research.py \
             tests/test_company_valuation_knowledge.py \
