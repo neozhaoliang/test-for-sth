@@ -3927,7 +3927,8 @@ function renderEtfResult(report) {
     '报价时间暂缺'):(closeAsOf+' 收盘（非实时）');
   const quoteDetail=hasMarketQuote?(fund.quote_source||''):
     (price.recent_close_source||'基金历史交易日数据');
-  let html='<section class="report-header-inline report-company-card report-etf-card" '+
+  let html='<article class="etf-whole-report-card" id="etf-whole-report-card" role="article" aria-label="ETF完整研究报告">'+
+    '<section class="report-header-inline report-company-card report-etf-card" '+
     'role="group" aria-label="ETF基金与现价">'+
     '<div class="report-company-identity"><h2 id="report-top">'+
       safe(report.stock_name||'ETF名称暂缺')+'</h2>'+
@@ -4096,6 +4097,8 @@ function renderEtfResult(report) {
   html+='<section class="etf-block"><p class="etf-source">'+
     (data.limitations||[]).map(safe).join(' · ')+
     '</p></section>';
+  // ETF only: one visible outer card for *all* report sections.
+  html+='</article>';
   document.getElementById('result').innerHTML=html;
 }
 
