@@ -155,6 +155,12 @@ for (const field of ['市净率 PB', 'F10 披露ROE',
 }
 
 // Test both genuine discount and an observed turnover, with amounts scaled.
+etf.etf_data.distribution = {
+  dividend_yield_ttm_pct: 8.05,
+  distributable_profit_yuan: 1057954195.22,
+  latest_dividend_per_share: 0.01,
+  distributable_profit_as_of: '2026-09-30',
+};
 etf.etf_data.fund.iopv = 1.58;
 etf.etf_data.fund.iopv_premium_pct = -0.82;
 etf.etf_data.fund.turnover_yuan = 148040000;
@@ -163,6 +169,9 @@ assert(sink.innerHTML.includes('溢价率'));
 assert(!sink.innerHTML.includes('IOPV参考折价'));
 assert(sink.innerHTML.includes('-0.82%'));
 assert(sink.innerHTML.includes('1.48 亿元'));
+assert(sink.innerHTML.includes('8.05%'));
+assert(sink.innerHTML.includes('10.58 亿元'));
+assert(sink.innerHTML.includes('0.0100 元'));
 assert.equal(metricCount(sink.innerHTML),3);
 etf.summary.sections.fund_structure='基金名称提示可能为指数产品，这段提示词不应出现在页面';
 etf.summary.sections.market_price='IOPV为null，latest_shares为null，错误叙述';
