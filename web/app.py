@@ -3936,9 +3936,7 @@ function renderEtfResult(report) {
     '<div class="verdict-market-strip verdict-market-strip-etf" role="group" aria-label="ETF现价">'+
       verdictMetric(quoteLabel,latestText,quoteAt,
         latest!==null&&latest>0?'price':'missing',quoteDetail)+
-    '</div></section>'+
-    '<p class="etf-subtitle">ETF专项研究 · '+safe(data.scope||'')+
-    ' · 数据截至 '+safe(report.as_of||'日期暂缺')+'</p>';
+    '</div></section>';
   // Show the latest published fund top ten immediately after the identity,
   // independently of all discretionary/LLM-generated analysis sections.
   const disclosure=portfolio.disclosure_as_of||portfolio.as_of||'报告期未核实';
