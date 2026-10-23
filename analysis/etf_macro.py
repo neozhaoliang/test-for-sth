@@ -65,9 +65,26 @@ _SECTORS = (
 )
 _GENERIC = ("企业利润趋势与盈利广度", "供需/库存和产能", "产品价格与利润率", "资本开支与政策")
 
+# Dividend-index funds commonly span banks, energy, transport and telecom.
+# They have no single product or commodity whose cycle represents the fund.
+_DIVIDEND_DRIVERS = (
+    "重仓公司的现金分红与自由现金流覆盖",
+    "分红支付率、净负债和派息可持续性",
+    "各行业盈利周期对分红能力的不同影响",
+    "股息率与利率、风险溢价和估值之间的关系",
+    "港股投资时的汇率、预扣税、溢折价及QDII额度（须核实适用性）",
+)
+_DIVIDEND_NAME_TERMS = ("高股息", "红利", "高分红", "股息", "收息", "dividend")
+_SINGLE_SECTOR_TERMS = ("煤炭", "石油", "油气", "铜", "铝", "钢铁", "化工", "制冷剂",
+                        "半导体", "芯片", "光伏", "医药", "消费", "银行", "房地产")
+
 
 def sector_for_etf(name: str) -> dict:
     title = str(name or "")
+    if (any(term in title.lower() for term in _DIVIDEND_NAME_TERMS)
+            and not any(term in title for term in _SINGLE_SECTOR_TERMS)):
+        return {"sector": "跨行业高股息", "drivers": list(_DIVIDEND_DRIVERS),
+                "commodity_contract": None}
     for sector, keys, commodity, drivers in _SECTORS:
         if any(k in title for k in keys):
             return {"sector": sector, "drivers": list(drivers),
