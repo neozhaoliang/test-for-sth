@@ -189,3 +189,71 @@ async def test_hk_current_snapshot_parses_roe_dividend_pe_pb_without_inventing_y
     assert result["pe_ttm"] == 8.9
     assert "financial_period" not in result
     assert result["snapshot_verified_report_period"] is False
+
+
+
+@pytest.mark.asyncio
+async def test_etf_tencent_price_fallback_avoids_native_js_decoder(monkeypatch):
+    dates = pd.bdate_range(end=TODAY, periods=252)
+    rows = [
+        [day.strftime("%Y-%m-%d"), "1.3", str(1.3+i/1000), "1.5", "1.2", "1000"]
+        for i, day in enumerate(dates)
+    ]
+    seen = []
+    async def tencent(url, params, timeout=8):
+        seen.append(params)
+        assert params == {"param": "sh513530,day,,,330,qfq"}
+        return {"data": {"sh513530": {"qfqday": rows}}}
+    monkeypatch.setattr(etf_hk_market, "_request_json", tencent)
+    def forbid(*args, **kwargs):
+        raise AssertionError("MiniRacer-backed Sina ETF history must not run")
+    monkeypatch.setattr(
+        etf_data.ak, "fund_etf_hist_sina", forbid, raising=False,
+    )
+    quoted = await etf_data._independent_etf_close("513530", TODAY)
+    assert quoted["recent_close_as_of"] == TODAY.isoformat()
+    assert quoted["recent_close"] > 0
+    assert quoted["price_position_pct"] == 100.0
+    assert "腾讯ETF" in quoted["recent_close_source"]
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_etf_short_tencent_history_provides_dated_close_only(monkeypatch):
+    rows = [["2026-10-22", "1.45", "1.487", "1.55", "1.42", "100"]]
+    async def tencent(url, params, timeout=8):
+        return {"data": {"sz159915": {"day": rows}}}
+    monkeypatch.setattr(etf_hk_market, "_request_json", tencent)
+    quote = await etf_data._independent_etf_close("SZ159915", TODAY)
+    assert quote["recent_close"] == 1.487
+    assert quote["recent_close_as_of"] == TODAY.isoformat()
+    assert "price_position_pct" not in quote
+
+
+def test_etf_hk_price_call_graph_has_no_native_sina_v8_paths():
+    import inspect
+    body = inspect.getsource(etf_data._hk_stock_price)
+    # Comment/docstring may name the prohibited entry point to explain why it
+    # is excluded. Check the calls themselves instead of scanning any string.
+    import ast
+    tree = ast.parse(body)
+    forbidden = {"stock_hk_daily", "fund_etf_hist_sina", "MiniRacer"}
+    calls = {
+        n.func.attr for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+    }
+    assert not calls.intersection(forbidden)
+    assert "stock_hk_daily" not in set(
+        inspect.getsource(etf_data._hk_stock_price).split("getattr(ak, ")[-1:]
+    )
+    assert "fund_etf_hist_sina" not in inspect.getsource(
+        etf_data._independent_etf_close
+    ).replace("fund_etf_hist_sina's V8 decoder", "")
+
+
+@pytest.mark.asyncio
+async def test_all_safe_etf_price_providers_missing_never_creates_undated_close(monkeypatch):
+    async def empty(url, params, timeout=8):
+        return {"data": {"sh513530": {}}}
+    monkeypatch.setattr(etf_hk_market, "_request_json", empty)
+    assert await etf_data._independent_etf_close("SH513530", TODAY) == {}
