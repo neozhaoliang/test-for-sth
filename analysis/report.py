@@ -175,6 +175,7 @@ async def generate_report(
         fundamentals,
         market_context,
         margin_signal,
+        crowding_activity,
         primary_evidence,
         a_share_structure,
         valuation_history,
@@ -196,6 +197,7 @@ async def generate_report(
         fundamentals_task,
         get_market_context(stock_code, as_of=request.as_of),
         get_margin_signal(stock_code, as_of=request.as_of),
+        get_stock_turnover_activity(stock_code, as_of=request.as_of),
         get_cninfo_primary_evidence(stock_code, as_of=request.as_of),
         live_a_share_structure_task,
         get_valuation_history(stock_code, as_of=request.as_of),
@@ -428,9 +430,6 @@ async def generate_report(
                 )
     # Stock trading crowding uses dated security-level financing and turnover,
     # and is kept separate from issuer equity-financing/secondary issuance.
-    crowding_activity = await get_stock_turnover_activity(
-        stock_code, as_of=request.as_of,
-    )
     float_shares = (valuation or {}).get("float_shares")
     current_price = (quote or {}).get("latest_price")
     float_market_cap_yi = (float_shares * current_price / 1e8
