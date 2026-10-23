@@ -146,7 +146,8 @@ async def test_hk_etf_report_uses_sanitized_mechanism_not_kol_raw_text(monkeypat
     assert out["generation_status"] == "complete"
     assert len(prompts) == 1
     assert "联系汇率" in prompts[0]
-    assert "流动性压力" in prompts[0]
+    assert "港元拆息" in prompts[0]
+    assert "港元融资压力" in prompts[0]
     assert "hk_liquidity" in prompts[0]
     for private in ("老木匠", "买股票的老木匠", "雪球", "Bilibili直播",
                     "视频标题", "原帖全文"):
