@@ -650,14 +650,40 @@ body, input, select, textarea, button { font-family:inherit; }
   padding-top:22px;
   border-top:1px solid #dce5f3;
 }
-#result .report-etf-card .etf-top-holdings h3 {
-  margin:0 0 12px;
+#result .report-etf-card .etf-holdings-heading {
+  display:grid;
+  grid-template-columns:max-content minmax(0,1fr);
+  align-items:baseline;
+  gap:18px;
+  width:100%;
+  min-width:0;
+}
+#result .report-etf-card .etf-holdings-heading h3 {
+  margin:0;
   color:#183653;
+  white-space:nowrap;
+}
+#result .report-etf-card .etf-holdings-heading .etf-holdings-meta {
+  min-width:0;
+  margin:0;
+  text-align:right;
+  overflow-wrap:anywhere;
 }
 #result .report-etf-card .etf-top-holdings .etf-table-wrap {
   margin-top:12px;
   border-radius:10px;
   background:#fff;
+}
+@media(max-width:760px){
+  #result .report-etf-card .etf-holdings-heading {
+    grid-template-columns:minmax(0,1fr);
+    align-items:start;
+    gap:6px;
+  }
+  #result .report-etf-card .etf-holdings-heading h3 { white-space:normal; }
+  #result .report-etf-card .etf-holdings-heading .etf-holdings-meta {
+    text-align:left;
+  }
 }
 @media(max-width:600px){
   #result .report-etf-card .etf-top-holdings {
