@@ -465,23 +465,10 @@ def _with_recent_close(fund: dict, etf_price: dict, today: date) -> dict:
     return updated
 
 
-async def _sina_last_close(code: str, today: date) -> dict:
-    """Independent Sina daily tape when Eastmoney daily candles are unavailable."""
-    try:
-        df = await asyncio.wait_for(
-            asyncio.to_thread(ak.fund_etf_hist_sina,
-                              symbol=_etf_code(code).lower()),
-            timeout=12,
-        )
-        close = _latest_daily_close(
-            df, date_column="date", close_column="close", today=today
-        )
-        if close:
-            close["recent_close_source"] = "新浪ETF历史日行情（未复权）"
-        return close
-    except Exception as exc:
-        utils.logger.warning("[etf] Sina ETF close %s unavailable: %s", code, exc)
-        return {}
+async def _independent_etf_close(code: str, today: date) -> dict:
+    """Pure-HTTP daily close: NEVER invoke fund_etf_hist_sina's V8 decoder."""
+    from analysis.etf_hk_market import get_etf_web_price
+    return await get_etf_web_price(code, today)
 
 
 def _quarter(value: Any) -> tuple[int, int] | None:
@@ -1200,7 +1187,7 @@ async def collect_etf_overview(spot: dict) -> dict:
         "dated_market_snapshot", "undated_market_snapshot"
     ):
         if not _valid_close_date(etf_price.get("recent_close_as_of"), today):
-            sina_close = await _sina_last_close(code, today)
+            sina_close = await _independent_etf_close(code, today)
             if sina_close:
                 etf_price = {**etf_price, **sina_close}
         fund = _with_recent_close(fund, etf_price, today)
@@ -1230,7 +1217,7 @@ async def collect_etf_data(spot: dict) -> dict:
     # the Eastmoney daily candle supplied a usable verified recent price.
     if fund.get("quote_mode") not in ("dated_market_snapshot", "undated_market_snapshot"):
         if not _valid_close_date(etf_price.get("recent_close_as_of"), today):
-            external_close = await _sina_last_close(code, today)
+            external_close = await _independent_etf_close(code, today)
             if external_close:
                 etf_price = {**etf_price, **external_close}
         fund = _with_recent_close(fund, etf_price, today)
