@@ -314,7 +314,7 @@ const broadReport = {
   summary:{
     stance:'neutral',thesis_summary:'指数估值分位上升，回撤风险需要关注。',
     sections:{valuation:'指数整体估值应审慎分析。'},
-    risk_notes:'',
+    risk_notes:'指数估值风险被重复说明。',
   },
 };
 renderers.renderEtfResult(broadReport);
@@ -327,7 +327,8 @@ for(const must of ['沪深300：年内行情、量能与市场情绪',
 }
 for(const unrelated of ['行业周期与前十大盈利广度',
   '不应显示商品周期','宏观、流动性与产品价格：最新可核实数据',
-  '重仓股、宏观与估值风险分析','近12个月分红率']) {
+  '重仓股、宏观与估值风险分析','近12个月分红率',
+  '指数估值风险被重复说明。']) {
   assert(!sink.innerHTML.includes(unrelated), 'broad ETF has unrelated legacy sections: '+unrelated);
 }
 assert.equal(metricCount(sink.innerHTML),3);
