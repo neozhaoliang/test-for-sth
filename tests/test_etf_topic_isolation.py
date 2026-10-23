@@ -146,6 +146,8 @@ async def test_513530_market_payload_has_no_gold_warnings_and_dividend_cycle(mon
             "sector": market["sector"],
             "key_drivers":market["drivers"], "observations":{},
         }))
+    monkeypatch.setattr(etf_data, "_hk_stock_financial", AsyncMock(return_value={}))
+    monkeypatch.setattr(etf_data, "_hk_stock_valuation", AsyncMock(return_value={}))
     monkeypatch.setattr(etf_data, "_hk_stock_price",
         AsyncMock(return_value={"price_position_pct": 55, "price_currency":"HKD"}))
     result = await etf_data.collect_etf_data({

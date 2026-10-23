@@ -67,14 +67,18 @@ def screen_holdings(fund: dict, portfolio: dict) -> dict:
     high_price_weight = 0.0
     high_valuation_weight = 0.0
     high_both_weight = 0.0
+    price_count = 0
+    valuation_count = 0
     for h in holdings:
         weight = _float(h.get("weight_pct")) or 0
         pos = _float(h.get("price_position_pct"))
         pct = _valuation_percentile(h)
         if pos is not None:
             observed_weight += weight
+            price_count += 1
         if pct is not None:
             valuation_observed += weight
+            valuation_count += 1
         high_price = pos is not None and pos >= 80
         high_valuation = pct is not None and pct >= 80
         if high_price:
@@ -136,11 +140,16 @@ def screen_holdings(fund: dict, portfolio: dict) -> dict:
         "risk_summary": risk["headline"],
         "verification_needed": risk["verification"],
         "disclosure_as_of": portfolio.get("disclosure_as_of") or portfolio.get("as_of"),
+        "disclosed_holding_count": len(holdings),
+        "price_observed_count": price_count,
+        "valuation_observed_count": valuation_count,
         "price_observed_weight_pct": round(observed_weight, 2),
         "valuation_observed_weight_pct": round(valuation_observed, 2),
-        "high_price_weight_pct": round(high_price_weight, 2),
-        "high_valuation_weight_pct": round(high_valuation_weight, 2),
-        "high_price_and_valuation_weight_pct": round(high_both_weight, 2),
+        "high_price_weight_pct": round(high_price_weight, 2) if price_count else None,
+        "high_valuation_weight_pct": round(high_valuation_weight, 2) if valuation_count else None,
+        "high_price_and_valuation_weight_pct": (
+            round(high_both_weight, 2) if price_count and valuation_count else None
+        ),
         "watchlist": exposed,
         "limitations": (
             "价格区间80%是股价高位指标，非泡沫认定；历史PE/PB分位也非独立定价证据。"

@@ -172,9 +172,27 @@ assert(sink.innerHTML.indexOf('etf-latest-top-ten') <
 assert((sink.innerHTML.match(/持仓[0-9]+/g) || []).length >= 10);
 assert(sink.innerHTML.includes('600109'), 'must include tenth holding');
 etf.etf_data.etf_price_position = {};
+etf.etf_data.holding_risk={
+  risk_type:'指数被动高位承接风险',
+  management_style:{kind:'index',label:'可能为指数跟踪ETF'},
+  risk_summary:'必须进一步核实指数调样与持仓估值。',
+  disclosed_holding_count:10,
+  price_observed_count:0,
+  valuation_observed_count:0,
+  price_observed_weight_pct:0,
+  valuation_observed_weight_pct:0,
+  high_price_weight_pct:null,
+  high_valuation_weight_pct:null,
+  watchlist:[],
+};
 renderers.renderEtfResult(etf);
 assert(sink.innerHTML.includes('暂缺'));
-console.log('ETF price-only and latest top-ten checks passed: current, dated close, 10 holdings, legacy and stock.');
+assert(sink.innerHTML.includes('未取得有效日线'));
+assert(sink.innerHTML.includes('0/10只'));
+assert(sink.innerHTML.includes('尚无法判断'));
+assert(sink.innerHTML.includes('不是“高位股权重为0%”'),
+  'missing ten-stock data must NOT be rendered as verified zero high-price holdings');
+console.log('ETF price-only and latest top-ten checks passed: current, dated close, 10 holdings, zero coverage vs missing, legacy and stock.');
 
 
 // This is the *original production failure*: /api/tasks stripped asset_type

@@ -656,24 +656,243 @@ async def _etf_price(code: str, today: date) -> dict:
         return {}
 
 
+def _hk_daily_observation(df: Any, today: date, *, source: str,
+                          date_column: str, close_column: str) -> dict:
+    """A dated HK closing price and (if >=200 sessions) a 52-week position.
+
+    If the provider only has a short history, show the latest verified close
+    WITHOUT inventing a complete one-year high/low.
+    """
+    recent = _latest_daily_close(
+        df, date_column=date_column, close_column=close_column, today=today
+    )
+    if not recent:
+        return {}
+    result = {
+        "price_currency": "HKD",
+        "price_source": source,
+        "price_as_of": recent["recent_close_as_of"],
+        "price_close": recent["recent_close"],
+    }
+    full_window = _position_from_prices(
+        df, date_column=date_column, close_column=close_column
+    )
+    if full_window:
+        # The recent close was verified as fresh; the window covers the
+        # SAME series, so the price and percentile are comparable.
+        result.update(full_window)
+    else:
+        result["price_window_status"] = "历史数据不足200个交易日，52周位置未核实"
+    return result
+
+
 async def _hk_stock_price(code: str, today: date) -> dict:
-    """HK top holdings are still observable for price, never via A-share F10."""
+    """Two independently sourced HK daily feeds; conservative date checks."""
+    providers = (
+        ("东方财富港股历史行情（前复权）", "stock_hk_hist",
+         {"symbol": code, "period": "daily",
+          "start_date": (today-timedelta(days=445)).strftime("%Y%m%d"),
+          "end_date": today.strftime("%Y%m%d"), "adjust": "qfq"},
+         "日期", "收盘"),
+        ("新浪港股历史行情（前复权）", "stock_hk_daily",
+         {"symbol": code, "adjust": "qfq"}, "date", "close"),
+    )
+    failure_notes = []
+    for source, api, kwargs, date_col, close_col in providers:
+        fn = getattr(ak, api, None)
+        if not callable(fn):
+            failure_notes.append(api + ":接口未安装")
+            continue
+        try:
+            df = await asyncio.wait_for(
+                asyncio.to_thread(fn, **kwargs), timeout=12
+            )
+            outcome = _hk_daily_observation(
+                df, today, source=source,
+                date_column=date_col, close_column=close_col
+            )
+            if outcome:
+                return outcome
+            failure_notes.append(api + ":无近期有效日线")
+        except Exception as exc:
+            failure_notes.append(api + ":" + type(exc).__name__)
+            utils.logger.warning("[etf] HK holding price %s %s: %s",
+                                 code, api, exc)
+    return {
+        "price_lookup_status": "港股日线双数据源均未取得有效近期价格",
+        "price_lookup_sources": ["stock_hk_hist", "stock_hk_daily"],
+        # No 0-valued prices or imaginary valuation percentiles.
+    }
+
+
+def _hk_financial_period(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw or raw.lower() in ("nan", "none"):
+        return ""
+    found = re.search(r"(20\d{2})[-/.年](0?[1-9]|1[0-2])(?:[-/.月](\d{1,2}))?", raw)
+    if found:
+        yyyy, mm, dd = int(found[1]), int(found[2]), int(found[3] or 1)
+        try:
+            return date(yyyy, mm, dd).isoformat()
+        except ValueError:
+            pass
+    return ""
+
+
+def _hk_indicator_column(columns: list, *, include: tuple[str, ...],
+                         exclude: tuple[str, ...] = ()) -> str | None:
+    for col in columns:
+        text = str(col).replace(" ", "")
+        if all(part in text for part in include) and not any(part in text for part in exclude):
+            return col
+    return None
+
+
+def _hk_financial_from_frame(df: Any, today: date) -> dict:
+    """Read ACTUAL HK periodic fields only. No A-share indicator substitution."""
+    if df is None or getattr(df, "empty", True):
+        return {}
+    frame = pd.DataFrame(df)
+    cols = frame.columns.tolist()
+    period_col = next(
+        (col for col in cols if str(col).strip() in ("周期", "报告期", "报告日期", "日期")), None
+    )
+    if period_col is None:
+        return {}
+    rows = []
+    profit_yoy = (
+        _hk_indicator_column(cols, include=("归母净利润", "同比"))
+        or _hk_indicator_column(cols, include=("归属母公司净利润", "同比"))
+        or _hk_indicator_column(cols, include=("净利润", "同比"),
+                                exclude=("非经常", "扣非"))
+        or _hk_indicator_column(cols, include=("归母净利润", "增长"))
+    )
+    roe_col = (
+        _hk_indicator_column(cols, include=("净资产收益率",),
+                            exclude=("同比", "增长"))
+        or _hk_indicator_column(cols, include=("ROE",), exclude=("同比",))
+    )
+    for _, r in frame.iterrows():
+        period = _hk_financial_period(r.get(period_col))
+        if not period or period > today.isoformat():
+            continue
+        growth = _num(str(r.get(profit_yoy)).replace("%", "").replace(",", "")) if profit_yoy else None
+        roe = _num(str(r.get(roe_col)).replace("%", "").replace(",", "")) if roe_col else None
+        if growth is not None or roe is not None:
+            rows.append({
+                "period": period, "net_profit_growth_pct": growth, "roe_pct": roe
+            })
+    if not rows:
+        return {}
+    rows = sorted(rows, key=lambda item:item["period"])
+    latest = rows[-1]
+    valid_growth = [x for x in rows if x.get("net_profit_growth_pct") is not None]
+    result = {
+        "financial_period": latest["period"],
+        "financial_source": "东方财富港股财务分析（报告期）",
+        "financial_history": rows[-8:],
+        "net_profit_growth_pct": latest.get("net_profit_growth_pct"),
+        "roe_pct": latest.get("roe_pct"),
+    }
+    if len(valid_growth) >= 2:
+        recent, previous = valid_growth[-1], valid_growth[-2]
+        result.update({
+            "financial_period": recent["period"],
+            "previous_financial_period": previous["period"],
+            "previous_net_profit_growth_pct": previous["net_profit_growth_pct"],
+            "growth_change_pp": round(
+                recent["net_profit_growth_pct"] - previous["net_profit_growth_pct"], 2
+            ),
+            "growth_change_definition": "港股报告期净利润同比增速之差，非季度利润环比",
+        })
+    return result
+
+
+async def _hk_stock_financial(code: str, today: date) -> dict:
+    fn = getattr(ak, "stock_financial_hk_analysis_indicator_em", None)
+    if not callable(fn):
+        return {}
     try:
         df = await asyncio.wait_for(
-            asyncio.to_thread(
-                ak.stock_hk_hist, symbol=code, period="daily",
-                start_date=(today - timedelta(days=430)).strftime("%Y%m%d"),
-                end_date=today.strftime("%Y%m%d"), adjust="qfq"
-            ), timeout=16
+            asyncio.to_thread(fn, symbol=code, indicator="报告期"), timeout=13
         )
-        out = _position_from_prices(df, date_column="日期", close_column="收盘")
-        if out:
-            out["price_currency"] = "HKD"
-            out["price_source"] = "东方财富港股历史行情（前复权）"
-        return out
+        return _hk_financial_from_frame(df, today)
     except Exception as exc:
-        utils.logger.warning("[etf] HK holding price %s: %s", code, exc)
+        utils.logger.warning("[etf] HK financial indicator %s unavailable: %s", code, exc)
         return {}
+
+
+def _hk_valuation_history(df: Any, *, today: date,
+                          metric: str) -> dict:
+    """Baidu history: current metric and percentile from dated valid points."""
+    if df is None or getattr(df, "empty", True):
+        return {}
+    frame = pd.DataFrame(df)
+    date_col = next((col for col in frame.columns
+                     if str(col).lower() in ("date", "日期", "时间", "time")), None)
+    value_col = next((col for col in frame.columns if str(col) in (
+        "value", "值", "数值", "市盈率(TTM)", "市净率", metric)), None)
+    if date_col is None or value_col is None:
+        return {}
+    frame = frame[[date_col, value_col]].copy()
+    frame.columns = ["date", "value"]
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    frame["value"] = pd.to_numeric(
+        frame["value"].astype(str).str.replace(",", "", regex=False), errors="coerce"
+    )
+    frame = frame.dropna().sort_values("date")
+    frame = frame[(frame["date"].dt.date <= today) &
+                  (frame["date"].dt.date >= today-timedelta(days=440))]
+    frame = frame[frame["value"] > 0]
+    if frame.empty:
+        return {}
+    last = frame.iloc[-1]
+    last_day = _valid_close_date(last["date"].date(), today)
+    if not last_day:
+        return {}
+    out = {"latest":round(float(last["value"]), 3),
+           "as_of":last_day.isoformat()}
+    vals = frame.tail(260)["value"].tolist()
+    if len(vals) >= 90:
+        current = float(last["value"])
+        out["history_position"] = {
+            "years":1, "observations":len(vals),
+            "percentile":round(sum(value <= current for value in vals) /
+                               len(vals) * 100, 1),
+        }
+    return out
+
+
+async def _hk_stock_valuation(code: str, today: date) -> dict:
+    fn = getattr(ak, "stock_hk_valuation_baidu", None)
+    if not callable(fn):
+        return {}
+    async def get(indicator):
+        try:
+            df = await asyncio.wait_for(
+                asyncio.to_thread(
+                    fn, symbol=code, indicator=indicator, period="近一年"
+                ), timeout=10
+            )
+            return _hk_valuation_history(df, today=today, metric=indicator)
+        except Exception as exc:
+            utils.logger.warning("[etf] HK valuation %s %s unavailable: %s",
+                                 code, indicator, exc)
+            return {}
+    pe, pb = await asyncio.gather(get("市盈率(TTM)"), get("市净率"))
+    out = {}
+    if pe:
+        out["pe_ttm"] = pe["latest"]
+        if pe.get("history_position"):
+            out["pe_history_position"] = pe["history_position"]
+    if pb:
+        out["pb"] = pb["latest"]
+        if pb.get("history_position"):
+            out["pb_history_position"] = pb["history_position"]
+    if pe or pb:
+        out["valuation_observed_on"] = (pe or pb)["as_of"]
+        out["valuation_source"] = "百度股市通港股估值历史（近一年）"
+    return out
 
 
 async def _stock_valuation(code: str) -> dict:
@@ -878,7 +1097,16 @@ async def collect_etf_data(spot: dict) -> dict:
         code = row.get("code") or ""
         async with sem:
             if re.fullmatch(r"[0-9]{5}", code):
-                row.update(await _hk_stock_price(code, today))
+                # Hong Kong financial indicators have their own report
+                # periods and definitions; do not use A-share F10 data.
+                price, financial, valuation = await asyncio.gather(
+                    _hk_stock_price(code, today),
+                    _hk_stock_financial(code, today),
+                    _hk_stock_valuation(code, today),
+                )
+                row.update(price)
+                row.update(financial)
+                row.update(valuation)
             elif equity and re.fullmatch(r"(?:[0369]\d{5}|[48]\d{5})", code):
                 price, profit, valuation = await asyncio.gather(
                     _stock_price(code, today),
@@ -913,6 +1141,7 @@ async def collect_etf_data(spot: dict) -> dict:
     elif profile == "跨行业高股息":
         limitations.extend([
             "基金历史分红率、重仓公司股息率、派息率和现金流覆盖不同，不得相互替代",
+            "港股财务指标来自港股报告期接口，各公司披露频率和会计准则不同，不套用A股口径",
             "港股股息税、汇率、QDII规则须按基金和投资者适用范围核实",
             "没有可比的分红覆盖数据时，不得从高股息指数名称推导持续分红承诺",
         ])

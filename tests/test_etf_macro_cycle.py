@@ -151,6 +151,8 @@ async def test_all_top_ten_stocks_get_financial_data_and_hk_gets_prices(monkeypa
     monkeypatch.setattr(etf_data, "_stock_price", sp)
     monkeypatch.setattr(etf_data, "_stock_profit", prof)
     monkeypatch.setattr(etf_data, "_stock_valuation", val)
+    monkeypatch.setattr(etf_data, "_hk_stock_financial", AsyncMock(return_value={}))
+    monkeypatch.setattr(etf_data, "_hk_stock_valuation", AsyncMock(return_value={}))
     monkeypatch.setattr(etf_data, "_hk_stock_price", hk)
     result = await etf_data.collect_etf_data(
         {"code": code,"stock_code":"SH517520","name":"黄金股ETF永赢"})

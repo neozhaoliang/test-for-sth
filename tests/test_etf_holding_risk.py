@@ -41,8 +41,9 @@ def test_active_etf_risk_must_not_assert_manager_manipulation():
     assert "不能仅凭" in result["risk_summary"]
     assert any("经理" in line for line in result["verification_needed"])
     assert result["high_price_weight_pct"] == 12
-    assert result["high_valuation_weight_pct"] == 0
+    assert result["high_valuation_weight_pct"] is None
     assert result["valuation_observed_weight_pct"] == 0
+    assert result["valuation_observed_count"] == 0
 
 
 def test_unknown_style_warns_neither_type_as_fact_and_no_data_as_no_risk():
@@ -52,6 +53,9 @@ def test_unknown_style_warns_neither_type_as_fact_and_no_data_as_no_risk():
     assert result["management_style"]["verified"] is False
     assert "核实" in result["risk_summary"]
     assert result["price_observed_weight_pct"] == 0
+    assert result["price_observed_count"] == 0
+    assert result["high_price_weight_pct"] is None
+    assert result["high_valuation_weight_pct"] is None
     assert result["watchlist"] == []
 
 
