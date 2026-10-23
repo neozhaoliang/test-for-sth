@@ -132,3 +132,20 @@ async def test_etf_crowding_uses_its_own_exchange_margin_signal(monkeypatch):
     signal.assert_awaited_once_with("SH513530")
     assert result["trading_crowding"]["margin_balance_yi"]==38.95
     assert result["trading_crowding"]["asset_type"]=="etf"
+
+
+def test_margin_purchase_ratio_requires_exact_same_trade_date():
+    activity=trading_crowding.turnover_activity(
+        _turnover(),cutoff=TODAY,source="真实成交",
+    )
+    m=_margin()
+    m["latest_buy_yuan"]=50_000_000
+    ratio=trading_crowding.assess_margin_crowding(
+        m,activity,asset_type="stock",
+    )
+    assert ratio["financing_buy_to_same_day_turnover_pct"]==25
+    m["latest_date"]="20261021"
+    mismatched=trading_crowding.assess_margin_crowding(
+        m,activity,asset_type="stock",
+    )
+    assert mismatched["financing_buy_to_same_day_turnover_pct"] is None
