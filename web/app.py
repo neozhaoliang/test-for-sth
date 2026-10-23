@@ -3978,13 +3978,30 @@ function renderEtfResult(report) {
     '<div class="etf-prose">'+safe(risk.risk_summary||
     '需要先核实基金的主动或指数管理方式，以及重仓股是否处于股价和估值高位。')+'</div>';
   if (Object.keys(risk).length) {
+    const hasPriceData=Number(risk.price_observed_count||0)>0;
+    const hasValuationData=Number(risk.valuation_observed_count||0)>0;
+    const totalHoldings=Number(risk.disclosed_holding_count||rows.length||0);
     html+='<div class="etf-metric-row">'+
-      '<div class="etf-metric"><span>可观察52周股价位置权重</span><strong>'+
-      safe(fmt(risk.price_observed_weight_pct,'%',1))+'</strong></div>'+
+      '<div class="etf-metric"><span>52周价格位置已核实</span><strong>'+
+      safe(hasPriceData?fmt(risk.price_observed_weight_pct,'%',1):
+        '未取得有效日线')+'</strong><small>'+
+      safe(String(risk.price_observed_count||0)+'/'+String(totalHoldings)+'只')+
+      '</small></div>'+
       '<div class="etf-metric"><span>其中52周高位重仓权重</span><strong>'+
-      safe(fmt(risk.high_price_weight_pct,'%',1))+'</strong></div>'+
+      safe(hasPriceData?fmt(risk.high_price_weight_pct,'%',1):
+        '尚无法判断')+'</strong></div>'+
       '<div class="etf-metric"><span>高估值分位重仓权重</span><strong>'+
-      safe(fmt(risk.high_valuation_weight_pct,'%',1))+'</strong></div></div>';
+      safe(hasValuationData?fmt(risk.high_valuation_weight_pct,'%',1):
+        '尚无法判断')+'</strong><small>'+
+      safe(String(risk.valuation_observed_count||0)+'/'+String(totalHoldings)+'只估值可核实')+
+      '</small></div></div>';
+    if (!hasPriceData && totalHoldings) {
+      const failed=rows.filter(h=>h.price_lookup_status).length;
+      html+='<p class="etf-source etf-unknown">目前披露的'+safe(totalHoldings)+
+        '只重仓股中，未取得可核实的52周股价位置。'+
+        (failed?'其中'+safe(failed)+'只港股的东财/新浪日线查询均未返回有效近期价格。':'')+
+        '这表示行情覆盖不足，不是“高位股权重为0%”。</p>';
+    }
     const suspicious=Array.isArray(risk.watchlist)?risk.watchlist:[];
     if (suspicious.length) {
       html+='<p class="etf-source">高位观察：'+suspicious.slice(0,10).map(h=>
