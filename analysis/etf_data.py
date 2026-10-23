@@ -22,6 +22,7 @@ from analysis.etf_discovery import assets_yi, ranked_matches, matches, recent_da
 from analysis.etf_macro import get_etf_market_context
 from analysis.etf_cycle import assess_cycle
 from analysis.etf_holding_risk import screen_holdings
+from analysis.etf_broad_market import classify_broad_index, get_broad_market_context
 from analysis.etf_distribution import collect_etf_distributions
 from analysis.margin import get_margin_signal
 from analysis.trading_crowding import get_etf_turnover_activity, assess_margin_crowding
@@ -1213,9 +1214,11 @@ async def collect_etf_data(spot: dict) -> dict:
     code, name = spot["code"], spot["name"]
     gold_equity = bool(_GOLD_EQUITY.search(name))
     equity = gold_equity or not bool(_EXCLUDED.search(name))
-    holdings, etf_price, fund, market = await asyncio.gather(
+    broad_profile = classify_broad_index(name)
+    holdings, etf_price, fund, market, broad_market = await asyncio.gather(
         _holdings(code, today), _etf_price(code, today),
         _fund_with_live_quote(spot), get_etf_market_context(name, today),
+        get_broad_market_context(broad_profile, today),
     )
     # Quote availability is separate from the historical 52-week analysis.
     # Fetch a dated independent daily close only if neither quote feed nor
@@ -1307,6 +1310,7 @@ async def collect_etf_data(spot: dict) -> dict:
                   "个股财务透视仅涵盖A股）" if gold_equity
                   else "跨行业高股息股票ETF（需分行业验证分红和现金流）"
                   if profile == "跨行业高股息"
+                  else "A股宽基指数ETF（指数交易、宏观与调样证据优先）" if broad_profile
                   else "A股股票ETF" if equity
                   else "非A股股票ETF或混合资产ETF（限制适用个股透视）"),
         "fund": fund,
@@ -1316,6 +1320,7 @@ async def collect_etf_data(spot: dict) -> dict:
         "etf_price_position": etf_price,
         "macro_market": market,
         "industry_cycle": cycle,
+        "broad_market": broad_market,
         "trading_crowding": crowding,
         "holding_risk": holding_risk,
         "limitations": limitations,
