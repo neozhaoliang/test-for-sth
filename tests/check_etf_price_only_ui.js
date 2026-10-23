@@ -86,6 +86,21 @@ assert.equal(metricCount(sink.innerHTML), 1,
 assert(sink.innerHTML.includes('ETF现价'));
 assert(sink.innerHTML.includes('1.567 元'));
 assert(sink.innerHTML.includes('最新披露前十大重仓股'));
+const holdingsHeaderStart = sink.innerHTML.indexOf('class="etf-holdings-heading"');
+const holdingsHeaderEnd = sink.innerHTML.indexOf('</div>', holdingsHeaderStart);
+const holdingsHeaderHtml = sink.innerHTML.slice(holdingsHeaderStart, holdingsHeaderEnd);
+assert(holdingsHeaderStart >= 0 && holdingsHeaderHtml.includes('<h3>最新披露前十大重仓股</h3>'),
+  'top-ten title must share the heading row with its disclosure metadata');
+assert(holdingsHeaderHtml.includes('class="etf-source etf-holdings-meta"'),
+  'source and date must be in the title row rather than below it');
+assert(holdingsHeaderHtml.includes('持仓截止日：'));
+assert(holdingsHeaderHtml.includes('定期报告持仓'));
+assert(etfCss.includes('grid-template-columns:max-content minmax(0,1fr)'),
+  'desktop top-ten heading should have a title column and right-side metadata');
+assert(etfCss.includes('#result .report-etf-card .etf-holdings-heading .etf-holdings-meta'),
+  'right-side disclosure metadata styling should be scoped to ETF');
+assert(etfCss.includes('@media(max-width:760px)'),
+  'small screens should stack title and metadata without horizontal overflow');
 // The entire ETF report, including narrative, risk notes and limitations,
 // must have exactly ONE outer visible card (no separate chapter cards).
 assert.equal((sink.innerHTML.match(/class="etf-whole-report-card"/g)||[]).length, 1);

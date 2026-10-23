@@ -3942,11 +3942,13 @@ function renderEtfResult(report) {
   // independently of all discretionary/LLM-generated analysis sections.
   const disclosure=portfolio.disclosure_as_of||portfolio.as_of||'报告期未核实';
   html+='<div class="etf-top-holdings" id="etf-latest-top-ten">'+
-    heading('最新披露前十大重仓股')+
-    '<p class="etf-source">持仓截止日：'+safe(disclosure)+
-    ' · '+safe(portfolio.source||'持仓来源暂缺')+
-    (portfolio.retrieved_on?' · 查询日期：'+safe(portfolio.retrieved_on):'')+
-    '。属于定期报告持仓，并非当日实时指数权重。</p>';
+    '<div class="etf-holdings-heading">'+
+      heading('最新披露前十大重仓股')+
+      '<p class="etf-source etf-holdings-meta">持仓截止日：'+safe(disclosure)+
+      ' · '+safe(portfolio.source||'持仓来源暂缺')+
+      (portfolio.retrieved_on?' · 查询日期：'+safe(portfolio.retrieved_on):'')+
+      '。属于定期报告持仓，并非当日实时指数权重。</p>'+
+    '</div>';
   if(rows.length) {
     html+='<div class="etf-table-wrap"><table class="etf-table"><thead><tr>'+
       '<th>排名</th><th>股票</th><th>代码</th><th>占基金净值</th>'+
