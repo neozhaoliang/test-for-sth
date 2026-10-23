@@ -718,10 +718,18 @@ async def _hk_stock_price(code: str, today: date) -> dict:
             failure_notes.append(api + ":" + type(exc).__name__)
             utils.logger.warning("[etf] HK holding price %s %s: %s",
                                  code, api, exc)
+    # Two independent HTTP endpoints provide dated K-lines outside AKShare.
+    # This addresses broker-site CDN outages and stale Sina updates.
+    from analysis.etf_hk_market import get_hk_web_price
+    web_price = await get_hk_web_price(code, today)
+    if web_price:
+        return web_price
     return {
-        "price_lookup_status": "港股日线双数据源均未取得有效近期价格",
-        "price_lookup_sources": ["stock_hk_hist", "stock_hk_daily"],
-        # No 0-valued prices or imaginary valuation percentiles.
+        "price_lookup_status": "东财/新浪/腾讯/Yahoo均未返回有效近期日线",
+        "price_lookup_sources": [
+            "stock_hk_hist", "stock_hk_daily", "Tencent HK", "Yahoo HK"
+        ],
+        # Missing is not a numeric zero and never authorizes an inference.
     }
 
 
@@ -755,7 +763,9 @@ def _hk_financial_from_frame(df: Any, today: date) -> dict:
     frame = pd.DataFrame(df)
     cols = frame.columns.tolist()
     period_col = next(
-        (col for col in cols if str(col).strip() in ("周期", "报告期", "报告日期", "日期")), None
+        (col for col in cols if str(col).strip() in (
+            "周期", "报告期", "报告日期", "日期", "报告时间",
+            "REPORT_DATE", "REPORT_PERIOD")), None
     )
     if period_col is None:
         return {}
@@ -769,6 +779,8 @@ def _hk_financial_from_frame(df: Any, today: date) -> dict:
     )
     roe_col = (
         _hk_indicator_column(cols, include=("净资产收益率",),
+                            exclude=("同比", "增长"))
+        or _hk_indicator_column(cols, include=("股东权益回报率",),
                             exclude=("同比", "增长"))
         or _hk_indicator_column(cols, include=("ROE",), exclude=("同比",))
     )
@@ -790,6 +802,7 @@ def _hk_financial_from_frame(df: Any, today: date) -> dict:
     result = {
         "financial_period": latest["period"],
         "financial_source": "东方财富港股财务分析（报告期）",
+        "financial_evidence_kind": "报告期港股真实财务字段",
         "financial_history": rows[-8:],
         "net_profit_growth_pct": latest.get("net_profit_growth_pct"),
         "roe_pct": latest.get("roe_pct"),
@@ -808,17 +821,152 @@ def _hk_financial_from_frame(df: Any, today: date) -> dict:
     return result
 
 
+_HK_PARENT_PROFIT_CODES = frozenset((
+    "001025002",  # banks
+    "002014002",  # insurers
+    "003015002",  # securities
+    "004025002",  # general industrial companies
+))
+
+
+def _hk_profit_from_statement(df: Any, today: date) -> dict:
+    """Compute actual HK parent-profit YoY from year-to-date income statements.
+
+    The EM report is a LONG table: REPORT_DATE / STD_ITEM_CODE /
+    STD_ITEM_NAME / AMOUNT. Comparing a report only to the *same* fiscal
+    period last year avoids mixing annual with semiannual cumulative profits.
+    Different issuer accounting templates require different profit codes.
+    """
+    if df is None or getattr(df, "empty", True):
+        return {}
+    frame = pd.DataFrame(df)
+    required = {"REPORT_DATE", "STD_ITEM_CODE", "AMOUNT"}
+    if not required.issubset(frame.columns):
+        return {}
+    frame = frame.copy()
+    frame["_report"] = pd.to_datetime(frame["REPORT_DATE"], errors="coerce")
+    frame["_amount"] = pd.to_numeric(frame["AMOUNT"], errors="coerce")
+    frame["_code"] = frame["STD_ITEM_CODE"].astype(str).str.strip()
+    frame = frame[
+        frame["_code"].isin(_HK_PARENT_PROFIT_CODES)
+        & frame["_report"].notna()
+        & (frame["_report"].dt.date <= today)
+        & frame["_amount"].notna()
+    ]
+    if frame.empty:
+        return {}
+    money = {}
+    for day, amount in zip(frame["_report"], frame["_amount"]):
+        value = float(amount)
+        if math.isfinite(value):
+            money[day.date()] = value
+    observations = []
+    for period in sorted(money):
+        prior = date(period.year - 1, period.month, period.day) if (
+            not (period.month == 2 and period.day == 29)
+        ) else None
+        value = money.get(period)
+        before = money.get(prior) if prior else None
+        if before is None or before <= 0:
+            continue
+        growth = (value / before - 1.0) * 100
+        if math.isfinite(growth):
+            observations.append({
+                "period":period.isoformat(),
+                "net_profit_growth_pct": round(growth, 2),
+            })
+    if not observations:
+        return {}
+    result = {
+        "financial_period": observations[-1]["period"],
+        "net_profit_growth_pct": observations[-1]["net_profit_growth_pct"],
+        "financial_history": observations[-8:],
+        "financial_source": "东方财富港股利润表（按相同财政报告期计算股东应占溢利同比）",
+        "growth_change_definition": "累计报告期归母净利同比增速变动，非单季度环比",
+        "profit_currency_note": "同一数据源同一公司原始报表计量单位，计算的是百分比",
+    }
+    if len(observations) >= 2:
+        result["previous_financial_period"] = observations[-2]["period"]
+        result["previous_net_profit_growth_pct"] = observations[-2]["net_profit_growth_pct"]
+        result["growth_change_pp"] = round(
+            observations[-1]["net_profit_growth_pct"] -
+            observations[-2]["net_profit_growth_pct"], 2
+        )
+    return result
+
+
 async def _hk_stock_financial(code: str, today: date) -> dict:
+    """Actual Hong Kong indicator feed, with income-statement YoY fallback."""
+    indicator = {}
     fn = getattr(ak, "stock_financial_hk_analysis_indicator_em", None)
+    if callable(fn):
+        try:
+            df = await asyncio.wait_for(
+                asyncio.to_thread(fn, symbol=code, indicator="报告期"),
+                timeout=11,
+            )
+            indicator = _hk_financial_from_frame(df, today)
+        except Exception as exc:
+            utils.logger.warning("[etf] HK financial indicator %s: %s", code, exc)
+    # The indicator feed often has ROE but not an explicit net-profit-YoY
+    # column; use real period statements rather than treating this as zero.
+    if indicator.get("net_profit_growth_pct") is not None:
+        return indicator
+    report_fn = getattr(ak, "stock_financial_hk_report_em", None)
+    if not callable(report_fn):
+        return indicator
+    try:
+        statement = await asyncio.wait_for(
+            asyncio.to_thread(
+                report_fn, stock=code, symbol="利润表", indicator="报告期"
+            ), timeout=13,
+        )
+        profit = _hk_profit_from_statement(statement, today)
+        if profit:
+            return {**indicator, **profit}
+    except Exception as exc:
+        utils.logger.warning("[etf] HK profit statement %s: %s", code, exc)
+    return indicator
+
+
+async def _hk_stock_snapshot(code: str, today: date) -> dict:
+    """Latest HK F10 indicators (dividend/ROE/PE/PB) with explicit date caveat.
+
+    This is NOT a replacement for dated profit growth or a valuation history.
+    Some AKShare versions omit the REPORT_DATE column altogether.
+    """
+    fn = getattr(ak, "stock_hk_financial_indicator_em", None)
     if not callable(fn):
         return {}
     try:
         df = await asyncio.wait_for(
-            asyncio.to_thread(fn, symbol=code, indicator="报告期"), timeout=13
+            asyncio.to_thread(fn, symbol=code), timeout=10,
         )
-        return _hk_financial_from_frame(df, today)
+        if df is None or getattr(df, "empty", True):
+            return {}
+        row = pd.DataFrame(df).iloc[0]
+        fields = {
+            "roe_pct": ("股东权益回报率(%)", "ROE_AVG"),
+            "pe_ttm": ("市盈率", "PE_TTM"),
+            "pb": ("市净率", "PB_TTM"),
+            "dividend_yield_ttm_pct": ("股息率TTM(%)", "DIVIDEND_RATE"),
+            "payout_ratio_pct": ("派息比率(%)", "DIVI_RATIO"),
+        }
+        out = {}
+        for key, aliases in fields.items():
+            for label in aliases:
+                if label in row.index:
+                    v = _num(str(row[label]).replace("%", "").replace(",", ""))
+                    if v is not None and math.isfinite(v):
+                        out[key] = v
+                        break
+        if out:
+            out["snapshot_source"] = "东方财富港股核心指标快照（财报截止日未核实）"
+            out["snapshot_fetched_on"] = today.isoformat()
+            out["snapshot_verified_report_period"] = False
+        return out
     except Exception as exc:
-        utils.logger.warning("[etf] HK financial indicator %s unavailable: %s", code, exc)
+        utils.logger.warning("[etf] HK F10 snapshot %s: %s", code, exc)
         return {}
 
 
@@ -1099,11 +1247,15 @@ async def collect_etf_data(spot: dict) -> dict:
             if re.fullmatch(r"[0-9]{5}", code):
                 # Hong Kong financial indicators have their own report
                 # periods and definitions; do not use A-share F10 data.
-                price, financial, valuation = await asyncio.gather(
+                price, financial, valuation, snapshot = await asyncio.gather(
                     _hk_stock_price(code, today),
                     _hk_stock_financial(code, today),
                     _hk_stock_valuation(code, today),
+                    _hk_stock_snapshot(code, today),
                 )
+                # Snapshot values fill gaps without overriding dated
+                # report periods or dated valuation series.
+                row.update(snapshot)
                 row.update(price)
                 row.update(financial)
                 row.update(valuation)

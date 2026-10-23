@@ -4003,8 +4003,8 @@ function renderEtfResult(report) {
       const failed=rows.filter(h=>h.price_lookup_status).length;
       html+='<p class="etf-source etf-unknown">目前披露的'+safe(totalHoldings)+
         '只重仓股中，未取得可核实的52周股价位置。'+
-        (failed?'其中'+safe(failed)+'只港股的东财/新浪日线查询均未返回有效近期价格。':'')+
-        '这表示行情覆盖不足，不是“高位股权重为0%”。</p>';
+        (failed?'其中'+safe(failed)+'只港股的多个行情源没有返回有效近期日线。':'')+
+        '这是数据覆盖不足，不能判断高位股实际占比。</p>';
     }
     const suspicious=Array.isArray(risk.watchlist)?risk.watchlist:[];
     if (suspicious.length) {
@@ -4054,12 +4054,16 @@ function renderEtfResult(report) {
     '<div class="etf-prose"><b>'+safe(cycle.stage||'周期待确认')+'</b> · '+
       safe(cycle.confidence||'证据不足')+'</div>'+
     '<div class="etf-metric-row">'+
-      '<div class="etf-metric"><span>已观察净利同比的权重</span><strong>'+
-        safe(fmt(breadth.sample_weight_pct,'%',1))+'</strong></div>'+
+      '<div class="etf-metric"><span>已核实净利同比权重</span><strong>'+
+        safe(Number(breadth.sample_count||0)>0?fmt(breadth.sample_weight_pct,'%',1):'尚未核实')+
+        '</strong><small>'+safe(String(breadth.sample_count||0)+'/'+String(rows.length)+'只')+
+        '</small></div>'+
       '<div class="etf-metric"><span>同比增速改善权重</span><strong>'+
-        safe(fmt(breadth.accelerating_growth_weight_pct,'%',1))+'</strong></div>'+
+        safe(Number(breadth.comparable_count||0)>0?fmt(breadth.accelerating_growth_weight_pct,'%',1):'尚无法判断')+
+        '</strong></div>'+
       '<div class="etf-metric"><span>同比增速回落权重</span><strong>'+
-        safe(fmt(breadth.decelerating_growth_weight_pct,'%',1))+'</strong></div>'+
+        safe(Number(breadth.comparable_count||0)>0?fmt(breadth.decelerating_growth_weight_pct,'%',1):'尚无法判断')+
+        '</strong></div>'+
     '</div><div class="etf-prose">'+safe((cycle.evidence||[]).join('；'))+
     '</div><p class="etf-source">'+safe(breadth.definition||'')+'</p></div>';
   html+='<div class="etf-analysis-subsection" id="etf-holdings">'+heading('十大重仓股价格、业绩与估值穿透')+
@@ -4104,8 +4108,10 @@ function renderEtfResult(report) {
       safe(stanceLabel(summary.stance))+'</span>':
       '<span class="etf-unknown">研究判断暂未生成</span>')+
     '<div class="etf-prose">'+safe(summary.thesis_summary||'暂无结论')+'</div></section>';
+  // Holdings are already listed with codes and weights in the top-ten
+  // table. Do not render a second prose roll-call below it.
   const keys=['macro_liquidity','commodity_market','industry_cycle',
-    'holdings','high_positions','earnings_cycle','valuation','fund_structure','market_price'];
+    'high_positions','earnings_cycle','valuation','fund_structure','market_price'];
   const labels=report.section_labels||{};
   const sections=summary.sections||{};
   for(const key of keys) {

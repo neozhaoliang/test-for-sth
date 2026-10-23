@@ -197,6 +197,7 @@ async def test_gold_equity_etf_is_not_treated_as_physical_gold(monkeypatch):
         "observations": {}, "as_of": "2026-10-22",
     }))
     monkeypatch.setattr(etf_data, "_hk_stock_financial", AsyncMock(return_value={}))
+    monkeypatch.setattr(etf_data, "_hk_stock_snapshot", AsyncMock(return_value={}))
     monkeypatch.setattr(etf_data, "_hk_stock_valuation", AsyncMock(return_value={}))
     monkeypatch.setattr(etf_data, "_hk_stock_price", AsyncMock(return_value={
         "price_position_pct": 55, "price_currency": "HKD",

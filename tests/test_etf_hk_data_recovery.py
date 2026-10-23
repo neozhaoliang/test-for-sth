@@ -53,6 +53,11 @@ async def test_hk_quote_with_short_history_retains_last_close_but_no_false_52w(m
 
 @pytest.mark.asyncio
 async def test_stale_hk_market_data_is_rejected_and_not_inflated_to_live(monkeypatch):
+    from analysis import etf_hk_market
+    # Test ALL four sources stale/unavailable; an actually live Tencent
+    # feed may legitimately rescue the older providers.
+    monkeypatch.setattr(etf_hk_market, "get_hk_web_price",
+                        AsyncMock(return_value={}))
     stale = _hk_daily()
     stale["date"] = pd.to_datetime(stale["date"]) - pd.Timedelta(days=200)
     monkeypatch.setattr(etf_data.ak, "stock_hk_hist", lambda **kwargs: pd.DataFrame())
@@ -169,6 +174,7 @@ async def test_513530_ten_hk_holdings_produce_real_price_coverage_when_feeds_wor
                         lambda **kwargs: pd.DataFrame())
     monkeypatch.setattr(etf_data.ak, "stock_hk_daily",
                         lambda **kwargs: _hk_daily(), raising=False)
+    monkeypatch.setattr(etf_data, "_hk_stock_snapshot", AsyncMock(return_value={}))
     monkeypatch.setattr(etf_data, "_hk_stock_financial",
                         AsyncMock(return_value={
                             "financial_period":"2026-06-30",

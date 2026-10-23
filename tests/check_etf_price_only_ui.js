@@ -80,7 +80,10 @@ const etf = {
   },
   summary: {stance: 'neutral', thesis_summary: '基金研究摘要', sections: {}},
 };
+etf.summary.sections.holdings = '不应重复展示的持仓名单唯一测试标记';
 renderers.renderEtfResult(etf);
+assert(!sink.innerHTML.includes('不应重复展示的持仓名单唯一测试标记'),
+  'do not repeat the top-ten table holdings in an additional prose section');
 assert.equal(metricCount(sink.innerHTML), 1,
   'new ETF report should have one quote box, not a six-column issuer strip');
 assert(sink.innerHTML.includes('ETF现价'));
@@ -115,6 +118,8 @@ reportSections.forEach(id=>assert(sink.innerHTML.includes('id="'+id+'"'),
   'all report sections must remain visible: '+id));
 assert(sink.innerHTML.includes('id="etf-unified-evidence"'),
   'one combined research panel must follow the top-ten');
+assert(!sink.innerHTML.includes('前十大重仓：究竟买了什么'),
+  'the top-ten list is already in its own table; no redundant narrative card');
 assert.equal((sink.innerHTML.match(/class="etf-block" id="etf-(macro-evidence|cycle-evidence|holdings)"/g)||[]).length,0,
   'no three separate analysis cards');
 assert(sink.innerHTML.indexOf('id="etf-latest-top-ten"') <
@@ -190,7 +195,7 @@ assert(sink.innerHTML.includes('暂缺'));
 assert(sink.innerHTML.includes('未取得有效日线'));
 assert(sink.innerHTML.includes('0/10只'));
 assert(sink.innerHTML.includes('尚无法判断'));
-assert(sink.innerHTML.includes('不是“高位股权重为0%”'),
+assert(sink.innerHTML.includes('不能判断高位股实际占比'),
   'missing ten-stock data must NOT be rendered as verified zero high-price holdings');
 console.log('ETF price-only and latest top-ten checks passed: current, dated close, 10 holdings, zero coverage vs missing, legacy and stock.');
 
