@@ -459,6 +459,8 @@ def _with_recent_close(fund: dict, etf_price: dict, today: date) -> dict:
         "iopv": None,
         "iopv_premium_pct": None,
         "price_change_pct": None,
+        "turnover_yuan": None,
+        "volume": None,
     })
     return updated
 
