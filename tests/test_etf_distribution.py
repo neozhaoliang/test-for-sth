@@ -80,3 +80,66 @@ def test_cumulative_decreases_never_generate_fake_payments():
     assert etf_distribution._cash_distributions_from_cumulative(
         df, date(2026, 10, 23)
     ) == {}
+
+
+
+def test_etf_without_recent_cash_dividends_has_no_ttm_rate():
+    # An old dividend cannot be annualized as if it were still paid.
+    old = pd.DataFrame({
+        "日期": ["2024-01-15", "2024-06-15"],
+        "累计分红": [0.02, 0.04],
+    })
+    assert etf_distribution._cash_distributions_from_cumulative(
+        old, date(2026, 10, 23),
+    ) == {}
+    never_paid = pd.DataFrame({
+        "日期": ["2025-12-15", "2026-04-15"],
+        "累计分红": [0.0, 0.0],
+    })
+    assert etf_distribution._cash_distributions_from_cumulative(
+        never_paid, date(2026, 10, 23),
+    ) == {}
+
+
+def test_non_paying_funds_never_trigger_official_profit_pdf_lookup(monkeypatch):
+    paid = []
+    monkeypatch.setattr(
+        etf_distribution.ak, "fund_etf_dividend_sina",
+        lambda **kwargs: pd.DataFrame({
+            "日期": ["2026-01-15"],
+            "累计分红": [0.0],
+        }),
+    )
+    monkeypatch.setattr(
+        etf_distribution, "_latest_official_profit",
+        lambda *_: paid.append("read-official-pdf") or {},
+    )
+    result = etf_distribution._fetch_source_data(
+        "510300", date(2026, 10, 23),
+    )
+    assert result == {}
+    assert paid == []
+
+
+def test_only_genuine_cash_payers_fetch_latest_official_profit(monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        etf_distribution.ak, "fund_etf_dividend_sina",
+        lambda **kwargs: pd.DataFrame({
+            "日期": ["2026-01-15"],
+            "累计分红": [0.01],
+        }),
+    )
+    monkeypatch.setattr(
+        etf_distribution, "_latest_official_profit",
+        lambda code, today: called.append(code) or {
+            "distributable_profit_yuan": 1057954195.22,
+            "distributable_profit_as_of": "2026-09-30",
+        },
+    )
+    result = etf_distribution._fetch_source_data(
+        "513530", date(2026, 10, 23),
+    )
+    assert called == ["513530"]
+    assert result["dividend_ttm_per_share"] == 0.01
+    assert result["distributable_profit_yuan"] == 1057954195.22
