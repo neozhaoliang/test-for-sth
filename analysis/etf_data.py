@@ -856,20 +856,10 @@ def _hk_profit_from_statement(df: Any, today: date) -> dict:
     if frame.empty:
         return {}
     money = {}
-    for row in frame.itertuples(index=False):
-        try:
-            period = row._report.date()
-            amount = float(row._amount)
-            if math.isfinite(amount):
-                money[period] = amount
-        except (TypeError, ValueError, AttributeError):
-            continue
-    # pandas namedtuple sanitizes leading underscore column names; instead
-    # iterate explicit columns to preserve aliases.
-    if not money:
-        for day, amount in zip(frame["_report"], frame["_amount"]):
-            if math.isfinite(float(amount)):
-                money[day.date()] = float(amount)
+    for day, amount in zip(frame["_report"], frame["_amount"]):
+        value = float(amount)
+        if math.isfinite(value):
+            money[day.date()] = value
     observations = []
     for period in sorted(money):
         prior = date(period.year - 1, period.month, period.day) if (
