@@ -162,12 +162,13 @@ for (const field of ['市净率 PB', 'F10 披露ROE',
 const dividendReport = {
   ...etf,
   stock_name: '华泰柏瑞中证港股通高股息投资ETF(QDII)',
-  etf_data: {...etf.etf_data, distribution: {}},
+  etf_data: {...etf.etf_data, distribution: {},
+    trading_crowding: {margin_balance_yi: 2.41, margin_change_pct: 19.3}},
   summary: {
     stance: 'neutral',
     thesis_summary: '估值和盈利分化，考虑持有但不追高。',
     sections: {
-      high_positions: '海丰国际价格高位和历史PE分位值得谨慎。',
+      high_positions: '海丰国际价格高位和历史PE分位值得谨慎。ETF融资余额2.41亿元，成交额3.3亿元。',
       earnings_cycle: '海丰国际盈利增速放缓，派息率上升。',
       valuation: '这句话只重复海丰国际估值较高。',
       industry_cycle: '这句话只重复海丰国际盈利增速放缓。',
@@ -178,6 +179,8 @@ const dividendReport = {
 };
 renderers.renderEtfResult(dividendReport);
 assert(sink.innerHTML.includes('价格高位和历史PE分位'));
+assert(!sink.innerHTML.includes('ETF融资余额2.41亿元，成交额3.3亿元。'),
+  'do not repeat observed financing numbers in the price-position chapter');
 assert(sink.innerHTML.includes('盈利增速放缓，派息率上升'));
 for (const duplicated of [
   '只重复海丰国际估值', '只重复海丰国际盈利', '只重复海丰国际派息',
