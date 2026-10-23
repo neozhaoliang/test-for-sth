@@ -144,3 +144,25 @@ def test_broad_prompt_and_compaction_exclude_commodity_cycle():
     assert sections["industry_cycle"] == "盈利广度观察"
     assert sections["commodity_market"] == ""
     assert sections["earnings_cycle"] == ""
+
+
+
+def test_market_breadth_is_dated_and_not_inferred_from_index_volume():
+    df = pd.DataFrame({
+        "item": ["统计日期", "上涨", "下跌", "涨停", "活跃度"],
+        "value": ["2026-10-22", "3500", "1700", "52", "70%"],
+    })
+    result = etf_broad_market.market_breadth_snapshot(
+        df, as_of=date(2026, 10, 23),
+    )
+    assert result["status"] == "observed"
+    assert result["advancers"] == 3500
+    assert result["decliners"] == 1700
+    assert result["advancing_share_pct"] == pytest.approx(67.3)
+    assert etf_broad_market.market_breadth_snapshot(
+        df, as_of=date(2026, 11, 15)
+    )["status"] == "unavailable"
+    assert etf_broad_market.market_breadth_snapshot(
+        pd.DataFrame({"item": ["上涨", "下跌"], "value": [3500, 1700]}),
+        as_of=date(2026, 10, 23),
+    )["status"] == "unavailable"
