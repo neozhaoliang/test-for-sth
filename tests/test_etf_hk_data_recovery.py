@@ -21,29 +21,44 @@ def _hk_daily():
 
 
 @pytest.mark.asyncio
-async def test_hk_quote_falls_back_from_eastmoney_502_to_sina_qfq(monkeypatch):
-    def broken(**kwargs):
-        raise RuntimeError("eastmoney 502")
-    def sina(**kwargs):
-        assert kwargs == {"symbol": "01919", "adjust": "qfq"}
-        return _hk_daily()
-    monkeypatch.setattr(etf_data.ak, "stock_hk_hist", broken)
-    monkeypatch.setattr(etf_data.ak, "stock_hk_daily", sina, raising=False)
-    outcome = await etf_data._hk_stock_price("01919", TODAY)
-    assert outcome["price_source"].startswith("新浪港股")
-    assert outcome["price_currency"] == "HKD"
-    assert outcome["price_as_of"] == TODAY.isoformat()
-    assert outcome["price_position_pct"] == 100.0
-    assert outcome["period_return_pct"] > 0
-    assert outcome["history_trading_days"] == 252
+async def test_hk_quote_uses_plain_http_before_eastmoney_and_never_mini_racer(monkeypatch):
+    from analysis import etf_hk_market
+    web_observation = etf_data._hk_daily_observation(
+        _hk_daily(), TODAY, source="腾讯财经港股复权日K",
+        date_column="date", close_column="close",
+    )
+    web = AsyncMock(return_value=web_observation)
+    monkeypatch.setattr(etf_hk_market, "get_hk_web_price", web)
+    def forbidden(**kwargs):
+        raise AssertionError("V8/MiniRacer or needless Eastmoney call")
+    monkeypatch.setattr(etf_data.ak, "stock_hk_daily", forbidden, raising=False)
+    monkeypatch.setattr(etf_data.ak, "stock_hk_hist", forbidden, raising=False)
+    result = await etf_data._hk_stock_price("01919", TODAY)
+    assert result["price_source"].startswith("腾讯财经港股")
+    assert result["price_currency"] == "HKD"
+    assert result["price_as_of"] == TODAY.isoformat()
+    assert result["price_position_pct"] == 100
+    assert result["period_return_pct"] > 0
+    assert result["history_trading_days"] == 252
+    web.assert_awaited_once_with("01919", TODAY)
 
 
 @pytest.mark.asyncio
-async def test_hk_quote_with_short_history_retains_last_close_but_no_false_52w(monkeypatch):
+async def test_hk_quote_short_history_keeps_close_without_false_52w(monkeypatch):
+    from analysis import etf_hk_market
     short = _hk_daily().tail(85).copy()
-    monkeypatch.setattr(etf_data.ak, "stock_hk_hist", lambda **kwargs: pd.DataFrame())
-    monkeypatch.setattr(etf_data.ak, "stock_hk_daily",
-                        lambda **kwargs: short, raising=False)
+    observation = etf_data._hk_daily_observation(
+        short, TODAY, source="Yahoo Finance港股复权日K",
+        date_column="date", close_column="close",
+    )
+    monkeypatch.setattr(
+        etf_hk_market, "get_hk_web_price", AsyncMock(return_value=observation)
+    )
+    monkeypatch.setattr(
+        etf_data.ak, "stock_hk_daily",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("forbidden V8")),
+        raising=False,
+    )
     result = await etf_data._hk_stock_price("01088", TODAY)
     assert result["price_close"] > 0
     assert result["price_as_of"] == TODAY.isoformat()
@@ -54,19 +69,20 @@ async def test_hk_quote_with_short_history_retains_last_close_but_no_false_52w(m
 @pytest.mark.asyncio
 async def test_stale_hk_market_data_is_rejected_and_not_inflated_to_live(monkeypatch):
     from analysis import etf_hk_market
-    # Test ALL four sources stale/unavailable; an actually live Tencent
-    # feed may legitimately rescue the older providers.
-    monkeypatch.setattr(etf_hk_market, "get_hk_web_price",
-                        AsyncMock(return_value={}))
-    stale = _hk_daily()
-    stale["date"] = pd.to_datetime(stale["date"]) - pd.Timedelta(days=200)
+    monkeypatch.setattr(
+        etf_hk_market, "get_hk_web_price", AsyncMock(return_value={})
+    )
     monkeypatch.setattr(etf_data.ak, "stock_hk_hist", lambda **kwargs: pd.DataFrame())
-    monkeypatch.setattr(etf_data.ak, "stock_hk_daily",
-                        lambda **kwargs: stale, raising=False)
+    monkeypatch.setattr(
+        etf_data.ak, "stock_hk_daily",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("forbidden V8")),
+        raising=False,
+    )
     result = await etf_data._hk_stock_price("01919", TODAY)
     assert "price_close" not in result
     assert "price_position_pct" not in result
     assert result["price_lookup_status"]
+    assert "stock_hk_daily" not in result["price_lookup_sources"]
 
 
 def test_parse_hk_financial_report_period_and_yoy_without_a_share_substitution():
@@ -170,10 +186,24 @@ async def test_513530_ten_hk_holdings_produce_real_price_coverage_when_feeds_wor
                             "sector":"跨行业高股息","observations":{},
                             "key_drivers":[],
                         }))
-    monkeypatch.setattr(etf_data.ak, "stock_hk_hist",
-                        lambda **kwargs: pd.DataFrame())
-    monkeypatch.setattr(etf_data.ak, "stock_hk_daily",
-                        lambda **kwargs: _hk_daily(), raising=False)
+    from analysis import etf_hk_market
+    observed = etf_data._hk_daily_observation(
+        _hk_daily(), TODAY, source="腾讯财经港股复权日K",
+        date_column="date", close_column="close",
+    )
+    monkeypatch.setattr(
+        etf_hk_market, "get_hk_web_price", AsyncMock(return_value=observed)
+    )
+    monkeypatch.setattr(
+        etf_data.ak, "stock_hk_daily",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("V8 forbidden")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        etf_data.ak, "stock_hk_hist",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("HTTP suffices")),
+        raising=False,
+    )
     monkeypatch.setattr(etf_data, "_hk_stock_snapshot", AsyncMock(return_value={}))
     monkeypatch.setattr(etf_data, "_hk_stock_financial",
                         AsyncMock(return_value={
