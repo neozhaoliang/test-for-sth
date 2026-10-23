@@ -3927,16 +3927,41 @@ function renderEtfResult(report) {
     '报价时间暂缺'):(closeAsOf+' 收盘（非实时）');
   const quoteDetail=hasMarketQuote?(fund.quote_source||''):
     (price.recent_close_source||'基金历史交易日数据');
+  // Exchange trading price vs IOPV is a REFERENCE premium/discount, not
+  // market price vs published fund NAV. Omit the number if IOPV is missing.
+  const premium=numericOrNull(fund.iopv_premium_pct);
+  const iopv=numericOrNull(fund.iopv);
+  const hasPremium=hasMarketQuote && iopv!==null && iopv>0 &&
+    premium!==null && Number.isFinite(premium);
+  const premiumText=hasPremium?
+    (premium>0?'+':'')+premium.toFixed(2)+'%':'暂无IOPV';
+  const premiumLabel=hasPremium?
+    (premium>0?'IOPV参考溢价':premium<0?'IOPV参考折价':'IOPV参考溢折价'):
+    'IOPV参考溢折价';
+  const turnover=numericOrNull(fund.turnover_yuan);
+  const turnoverText=turnover===null||turnover<0?'暂无数据':
+    (turnover>=1e8?(turnover/1e8).toFixed(2)+' 亿元':
+      turnover>=1e4?(turnover/1e4).toFixed(1)+' 万元':
+      turnover.toFixed(0)+' 元');
+  const turnoverAt=fund.quote_time||fund.data_date||
+    fund.quote_fetch_time||'时间未核实';
   let html='<article class="etf-whole-report-card" id="etf-whole-report-card" role="article" aria-label="ETF完整研究报告">'+
     '<section class="report-header-inline report-company-card report-etf-card" '+
     'role="group" aria-label="ETF基金与现价">'+
-    '<div class="report-company-identity"><h2 id="report-top">'+
-      safe(report.stock_name||'ETF名称暂缺')+'</h2>'+
-      '<span class="report-stock-code">'+safe(report.stock_code||'')+'</span>'+
-    '</div>'+
-    '<div class="verdict-market-strip verdict-market-strip-etf" role="group" aria-label="ETF现价">'+
-      verdictMetric(quoteLabel,latestText,quoteAt,
-        latest!==null&&latest>0?'price':'missing',quoteDetail)+
+    '<div class="etf-hero-row">'+
+      '<div class="report-company-identity"><h2 id="report-top">'+
+        safe(report.stock_name||'ETF名称暂缺')+'</h2>'+
+        '<span class="report-stock-code">'+safe(report.stock_code||'')+'</span>'+
+      '</div>'+
+      '<div class="verdict-market-strip verdict-market-strip-etf" role="group" aria-label="ETF行情和流动性">'+
+        verdictMetric(quoteLabel,latestText,quoteAt,
+          latest!==null&&latest>0?'price':'missing',quoteDetail)+
+        verdictMetric(premiumLabel,premiumText,
+          hasPremium?'相对IOPV，非官方净值溢折价':'缺少可比较的IOPV',
+          hasPremium?'valuation':'missing','数据仅供参考')+
+        verdictMetric('成交额',turnoverText,turnoverAt,
+          turnover!==null&&turnover>=0?'cash':'missing','二级市场成交')+
+      '</div>'+
     '</div>';
   // Place the top-ten disclosure inside the same visual card as the ETF identity,
   // independently of all discretionary/LLM-generated analysis sections.
@@ -4110,8 +4135,10 @@ function renderEtfResult(report) {
     '<div class="etf-prose">'+safe(summary.thesis_summary||'暂无结论')+'</div></section>';
   // Holdings are already listed with codes and weights in the top-ten
   // table. Do not render a second prose roll-call below it.
+  // The fund structure risks already have a factual box above, and price,
+  // IOPV and turnover are shown beside the ETF name. Avoid an extra lecture.
   const keys=['macro_liquidity','commodity_market','industry_cycle',
-    'high_positions','earnings_cycle','valuation','fund_structure','market_price'];
+    'high_positions','earnings_cycle','valuation'];
   const labels=report.section_labels||{};
   const sections=summary.sections||{};
   for(const key of keys) {
