@@ -40,6 +40,7 @@ from analysis.live_financial_completion import complete_live_cash_profit
 from analysis.filing_calendar import get_financial_filing_calendar
 from analysis.industry import get_industry_comparison
 from analysis.margin import get_margin_signal
+from analysis.trading_crowding import get_stock_turnover_activity, assess_margin_crowding
 from analysis.management_capital import build_management_capital_record
 from analysis.issuer_capital import build_issuer_capital_context
 from analysis.macro_rates import get_macro_rate_context
@@ -174,6 +175,7 @@ async def generate_report(
         fundamentals,
         market_context,
         margin_signal,
+        crowding_activity,
         primary_evidence,
         a_share_structure,
         valuation_history,
@@ -195,6 +197,7 @@ async def generate_report(
         fundamentals_task,
         get_market_context(stock_code, as_of=request.as_of),
         get_margin_signal(stock_code, as_of=request.as_of),
+        get_stock_turnover_activity(stock_code, as_of=request.as_of),
         get_cninfo_primary_evidence(stock_code, as_of=request.as_of),
         live_a_share_structure_task,
         get_valuation_history(stock_code, as_of=request.as_of),
@@ -425,10 +428,24 @@ async def generate_report(
                     "[analysis.report] 股东户数与历史价格对齐失败 (%s): %s",
                     stock_code, exc,
                 )
+    # Stock trading crowding uses dated security-level financing and turnover,
+    # and is kept separate from issuer equity-financing/secondary issuance.
+    float_shares = (valuation or {}).get("float_shares")
+    current_price = (quote or {}).get("latest_price")
+    float_market_cap_yi = (float_shares * current_price / 1e8
+        if isinstance(float_shares,(int,float)) and float_shares>0
+        and isinstance(current_price,(int,float)) and current_price>0
+        else None)
     chip_price_context = assess_chip_price_context(
         market_context, shareholder_trend,
         as_of=str(request.as_of) if historical_mode else None,
         price_holder_series=aligned_holders,
+    )
+
+    trading_crowding = assess_margin_crowding(
+        margin_signal, crowding_activity, asset_type="stock",
+        price_position_pct=chip_price_context.get("position_52w_pct"),
+        float_market_cap_yi=float_market_cap_yi,
     )
 
     # Issuer-authored source facts: unlike investor discussion this can support
@@ -467,6 +484,7 @@ async def generate_report(
         market_context=market_context,
         freight_signal=freight_signal,
         margin_signal=margin_signal,
+        trading_crowding=trading_crowding,
         primary_evidence=primary_evidence,
         issuer_business=issuer_business,
         issuer_capital_context=issuer_capital_context,

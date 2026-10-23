@@ -22,6 +22,8 @@ from analysis.etf_discovery import assets_yi, ranked_matches, matches, recent_da
 from analysis.etf_macro import get_etf_market_context
 from analysis.etf_cycle import assess_cycle
 from analysis.etf_holding_risk import screen_holdings
+from analysis.margin import get_margin_signal
+from analysis.trading_crowding import get_etf_turnover_activity, assess_margin_crowding
 from analysis.profitability import get_profitability_trend
 from analysis.valuation_history import get_valuation_history
 from tools.utils import utils
@@ -1261,6 +1263,14 @@ async def collect_etf_data(spot: dict) -> dict:
         return row
 
     enriched = await asyncio.gather(*(enrich(h) for h in original[:10]))
+    margin, turnover_activity = await asyncio.gather(
+        get_margin_signal(spot["stock_code"]),
+        get_etf_turnover_activity(code, as_of=today),
+    )
+    crowding = assess_margin_crowding(
+        margin, turnover_activity, asset_type="etf",
+        price_position_pct=etf_price.get("price_position_pct"),
+    )
     cycle = assess_cycle(market, enriched)
     holding_risk = screen_holdings(fund, {**holdings, 'holdings': enriched})
     profile = market.get("sector") or "其他行业或混合主题"
@@ -1301,6 +1311,7 @@ async def collect_etf_data(spot: dict) -> dict:
         "etf_price_position": etf_price,
         "macro_market": market,
         "industry_cycle": cycle,
+        "trading_crowding": crowding,
         "holding_risk": holding_risk,
         "limitations": limitations,
         "collected_on": today.isoformat(),

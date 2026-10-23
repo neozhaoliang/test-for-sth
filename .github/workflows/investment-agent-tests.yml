@@ -125,6 +125,7 @@ jobs:
             analysis/report_social.py \
             analysis/report.py \
             analysis/etf_discovery.py \
+            analysis/trading_crowding.py \
             analysis/etf_hk_market.py \
             analysis/etf_holding_risk.py \
             analysis/etf_macro.py \
@@ -228,6 +229,7 @@ jobs:
             tests/test_etf_quote_and_holdings.py \
             tests/test_etf_prose_quality.py \
             tests/test_etf_topic_isolation.py \
+            tests/test_trading_crowding.py \
             tests/test_etf_hk_multi_source.py \
             tests/test_etf_hk_data_recovery.py \
             tests/test_etf_holding_risk.py \

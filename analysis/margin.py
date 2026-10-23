@@ -61,12 +61,24 @@ def _fetch_series(
                 df = ak.stock_margin_detail_sse(date=d)
                 row = df[df["标的证券代码"].astype(str) == symbol]
                 if len(row):
-                    series.append({"date": d, "balance_yuan": float(row.iloc[0]["融资余额"])})
+                    selected = row.iloc[0]
+                    buy = selected.get("融资买入额")
+                    series.append({
+                        "date": d, "balance_yuan": float(selected["融资余额"]),
+                        "buy_yuan": float(buy) if buy is not None and str(buy).strip()
+                                   not in ("", "-", "nan") else None,
+                    })
             else:
                 df = ak.stock_margin_detail_szse(date=d)
                 row = df[df["证券代码"].astype(str) == symbol]
                 if len(row):
-                    series.append({"date": d, "balance_yuan": float(row.iloc[0]["融资余额"])})
+                    selected = row.iloc[0]
+                    buy = selected.get("融资买入额")
+                    series.append({
+                        "date": d, "balance_yuan": float(selected["融资余额"]),
+                        "buy_yuan": float(buy) if buy is not None and str(buy).strip()
+                                   not in ("", "-", "nan") else None,
+                    })
         except Exception:
             continue  # 非交易日或接口异常, 继续回溯
         if len(series) >= _MAX_TRADING_DAYS:
@@ -110,4 +122,6 @@ async def get_margin_signal(
         "first_balance_yi": round(first / 1e8, 2),
         "change_pct": round(change_pct, 2),
         "days": len(series),
+        "latest_buy_yuan": series[-1].get("buy_yuan"),
+        "source": "上交所/深交所融资融券逐日明细（AKShare）",
     }

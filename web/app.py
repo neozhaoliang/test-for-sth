@@ -3993,6 +3993,26 @@ function renderEtfResult(report) {
       '可到基金公司正式定期报告或基金档案核对；不使用静态示例冒充最新前十。</p>';
   }
   html+='</div></section>';
+  const crowd=data.trading_crowding||{};
+  if(Object.keys(crowd).length){
+    const cx=(v,unit='')=>numericOrNull(v)===null?'未核实':
+      numericOrNull(v).toFixed(2)+unit;
+    html+='<section class="etf-block etf-financing-crowding" id="etf-financing-crowding">'+
+      heading('融资交易与市场拥挤度')+
+      '<div class="etf-metric-row">'+
+        '<div class="etf-metric"><span>ETF自身融资余额</span><strong>'+
+          safe(cx(crowd.margin_balance_yi,' 亿元'))+'</strong></div>'+
+        '<div class="etf-metric"><span>融资余额近期变化</span><strong>'+
+          safe(cx(crowd.margin_change_pct,'%'))+'</strong></div>'+
+        '<div class="etf-metric"><span>近5日/此前20日成交额</span><strong>'+
+          safe(cx(crowd.recent5_turnover_ratio,' 倍'))+'</strong></div></div>'+
+      '<p class="etf-prose">'+safe(crowd.assessment||'暂无可比数据')+'</p>'+
+      '<p class="etf-source">融资数据日期：'+safe(crowd.margin_date||'暂缺')+
+      ' · 成交数据日期：'+safe(crowd.trade_date||'暂缺')+
+      ' · 数据来源：'+safe(crowd.margin_source||'交易所融资融券披露')+
+      '、'+safe(crowd.turnover_source||'场内ETF日成交')+
+      '。只统计基金证券自身的融资交易，不将成分股融资余额加总。</p></section>';
+  }
   const risk=data.holding_risk||{}, strategy=risk.management_style||{};
   html+='<section class="etf-block etf-unified-evidence" id="etf-unified-evidence">'+
     heading('重仓股、宏观与估值风险分析');

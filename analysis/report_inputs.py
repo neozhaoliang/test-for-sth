@@ -50,6 +50,7 @@ class AnalysisInputs:
     debate: Optional[Dict] = None
     sentiment: Optional[Dict] = None
     margin_signal: Optional[Dict] = None
+    trading_crowding: Optional[Dict] = None
     market_context: Optional[Dict] = None
     freight_signal: Optional[Dict] = None
     primary_evidence: List[Dict] = field(default_factory=list)

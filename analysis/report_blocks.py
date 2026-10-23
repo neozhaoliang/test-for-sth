@@ -162,6 +162,19 @@ def _build_margin_block(
     return "融资盘与流通盘:\n" + "\n".join(lines)
 
 
+def _build_trading_crowding_block(data: Optional[Dict]) -> str:
+    if not data:
+        return "交易拥挤度：融资及成交数据暂缺"
+    evidence=data.get("evidence") or []
+    lines=["融资交易与拥挤程度："]
+    lines.extend("  · "+str(x) for x in evidence)
+    lines.append("  研判："+str(data.get("assessment") or "无法判断"))
+    lines.append("  证据日期：融资 "+str(data.get("margin_date") or "暂缺")+
+                 "；成交 "+str(data.get("trade_date") or "暂缺"))
+    lines.append("  融资余额是存量，成交额不能视为资金净流入。")
+    return "\n".join(lines)
+
+
 def _build_rd_block(
     fundamentals: Optional[Dict],
     executive_profile: Optional[Dict],
@@ -1441,7 +1454,8 @@ def _build_prompt(inputs: Any, candidates: List[CandidateOpinion]) -> str:
         shareholder_block=_build_shareholder_block(
             inputs.shareholder_trend, inputs.dividend_history, inputs.buyback_history
         ) + "\n" + render_chip_price_context(getattr(inputs, "chip_price_context", None)),
-        margin_block=_build_margin_block(inputs.margin_signal, inputs.valuation, inputs.quote),
+        margin_block=_build_margin_block(inputs.margin_signal, inputs.valuation, inputs.quote)
+        + '\n' + _build_trading_crowding_block(getattr(inputs,'trading_crowding',None)),
         a_share_structure_block=_build_a_share_structure_block(inputs.a_share_structure),
         kb_fund_flow_block=_build_kb_fund_flow_block(inputs.knowledge_excerpts),
         profitability_block=_build_profitability_block(inputs.profitability_trend),
