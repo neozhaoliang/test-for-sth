@@ -4304,8 +4304,9 @@ function renderEtfResult(report) {
   // For dividend ETFs the thesis already contains the primary downside
   // mechanism; another generic "主要风险" chapter repeats pricing and payout
   // data. Preserve the raw risk_notes in the API but omit the duplicate UI.
-  if(summary.risk_notes && (!isDividendStrategy ||
-    !(sections.high_positions||sections.earnings_cycle))) {
+  if(summary.risk_notes &&
+    (!isDividendStrategy || !(sections.high_positions||sections.earnings_cycle)) &&
+    (!isBroad || !(sections.high_positions||sections.valuation))) {
     html+='<section class="etf-block">'+heading('主要风险')+
       '<div class="etf-prose">'+safe(summary.risk_notes)+'</div></section>';
   }
