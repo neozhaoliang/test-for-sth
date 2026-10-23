@@ -135,3 +135,53 @@ async def get_hk_web_price(code: str, today: date) -> dict:
         r.get("price_position_pct") is not None,
     ), reverse=True)
     return usable[0]
+
+
+
+async def get_etf_web_price(code: str, today: date) -> dict:
+    """ETF recent exchange close and 52-week position using plain Tencent HTTP.
+
+    AKShare fund_etf_hist_sina calls MiniRacer() in-process to decrypt JS.
+    Avoid that route in a multithreaded Windows uvicorn server.
+    """
+    digits = str(code or "").strip().upper().removeprefix("SH").removeprefix("SZ")
+    if len(digits) != 6 or not digits.isdigit() or digits[0] not in "15":
+        return {}
+    prefix = "sh" if digits.startswith("5") else "sz"
+    market_code = prefix + digits
+    try:
+        payload = await asyncio.wait_for(
+            _request_json(
+                "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+                {"param": f"{market_code},day,,,330,qfq"},
+            ), timeout=10,
+        )
+        block = (payload.get("data") or {}).get(market_code) or {}
+        records = block.get("qfqday") or block.get("day") or []
+        values = []
+        for item in records:
+            if isinstance(item, (tuple, list)) and len(item) >= 3:
+                close = _to_float(item[2])
+                if close is not None:
+                    values.append((str(item[0])[:10], close))
+        if not values:
+            return {}
+        frame = pd.DataFrame(values, columns=["date", "close"])
+        from analysis.etf_data import _latest_daily_close, _position_from_prices
+        recent = _latest_daily_close(
+            frame, date_column="date", close_column="close", today=today,
+        )
+        if not recent:
+            return {}
+        return {
+            **_position_from_prices(
+                frame, date_column="date", close_column="close",
+            ),
+            **recent,
+            "recent_close_source":"腾讯ETF历史日行情（前复权，独立HTTP）",
+        }
+    except Exception as exc:
+        utils.logger.warning(
+            "[etf] independent ETF daily quote %s unavailable: %s", digits, exc
+        )
+        return {}
