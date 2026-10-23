@@ -347,9 +347,13 @@ async def _write_etf_opinion(data: dict) -> dict:
     clean_sections = _compact_etf_sections(
         sections, profile, has_crowding=bool(data.get('trading_crowding'))
     )
-    repeated_risk = (profile == "跨行业高股息" and
-                     (clean_sections["high_positions"] or
-                      clean_sections["earnings_cycle"]))
+    repeated_risk = (
+        profile == "跨行业高股息" and
+        (clean_sections["high_positions"] or clean_sections["earnings_cycle"])
+    ) or (
+        profile == "宽基市场" and
+        (clean_sections["high_positions"] or clean_sections["valuation"])
+    )
     return {
         "stance": parsed["stance"],
         "thesis_summary": _text(parsed.get("thesis_summary")),
