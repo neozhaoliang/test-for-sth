@@ -122,6 +122,37 @@ _DIVIDEND_RULES = """
 表格已经列出全部重仓代码和权重，正文不许逐一照抄。
 """
 
+_HK_DUAL_CYCLE_RULES = """
+适用于有实际港股股票敞口的ETF。这是一条来自已整理长期投资知识的
+机制假说：以内地业务为主的港股公司，收入、利润及分红能力更受中国
+消费/工业价格、信用和实体景气影响；美元政策利率通过港元联系汇率、
+HIBOR、香港银行体系总结余和跨境投资者折现率影响离岸估值。
+这并不意味着港股资金全部来自美国，不能忽略内地南向资金、回购、
+企业自身境外收入和国际资金结构。
+
+**必须从hk_liquidity中对照具体数据，不能机械复述假说：**
+1. 中国：CPI/PPI同比要分别核实、有日期；PPI负值是工业品价格压力，
+   不得直接写成整个中国经济确定通缩；利润与现金流按具体持仓核对。
+2. 美国：仅fed.status为observed且有60日变化时可断言联储目标利率
+   的变动；不能把名义美债收益率、HKMA基本利率误当联储最新动作。
+3. 香港：使用hkma的一月期HIBOR及变化、银行体系总结余及变化；
+   HIBOR上升与总结余收缩是融资条件偏紧的证据，不能据此直接
+   宣称海外资金全部流出港股，也不能把ETF场内成交额当净申购。
+4. 资金低谷与估值：同时核验离岸融资压力、ETF/相关指数价格及
+   PE/PB、重仓盈利/自由现金流、潜在南向资金影响。在压力仍增加时
+   将其视为风险积累；压力显著而数据开始持续改善时，可讨论
+   逆向分批买入的赔率，但绝不可保证“流动性最差点”或“收益最大”。
+5. 如果盈利预期下修、分红不能覆盖、美国利率逆势上行、
+   港元拆息重新抬升或港股估值仍昂贵，逆向判断可能失效。
+应比较至少两个有时点的独立因子后给出当前买/持有/观望倾向。
+尚未取得的数据不当作0，指标不同日期不能描述成实时共振。
+
+段落分工：macro_liquidity讲内地盈利环境与离岸资金条件的错位；
+valuation讲资金偏紧时的估值赔率与确认条件；earnings_cycle如有
+真实重仓盈利变化，才单独说明。不能在主要风险和摘要重复同一数字。
+不得出现投资者昵称、原帖、视频标题、URL或任何私人知识库来源信息。
+"""
+
 _BROAD_RULES = """
 这是A股普通宽基指数ETF，不是单一行业ETF。
 **分析顺序：**
@@ -211,6 +242,7 @@ def _section_labels_for(profile: str) -> dict:
 
 
 _PROMPT_ECHO = re.compile(
+    r"老木匠|买股票的老木匠|某投资者认为|知识库作者|"
     r"(?:latest_shares|gold_cny|gold_usd|macro_market|industry_cycle|"
     r"portfolio_stats|price_observed_weight_pct|sample_count|"
     r"as_of|IOPV)\s*(?:为|是|[:：=])\s*(?:null|None|空|0\b)|"
@@ -302,7 +334,9 @@ async def _write_etf_opinion(data: dict) -> dict:
     # not investment prose: including them caused the LLM to parrot them.
     evidence = {k:v for k,v in data.items()
                 if k not in ("limitations", "scope", "collected_on")}
+    hk_rule = _HK_DUAL_CYCLE_RULES if (data.get("hk_liquidity") or {}).get("exposure") == "hk_equities" else ""
     prompt = (_SYSTEM_RULES + "\n" + identity + "\n" + _rules_for_profile(profile) +
+              "\n" + hk_rule +
               "\n\n当前已取得的投资证据（勿照抄JSON字段名）:\n" +
               json.dumps(evidence, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
     parsed = None
@@ -376,6 +410,10 @@ async def generate_etf_report(spot: dict, request: ResearchRequest) -> dict:
     raw = await collect_etf_data(spot)
     data = finite_json_numbers(raw)
     summary = await _write_etf_opinion(data)
+    labels = _section_labels_for(_profile_for_data(data))
+    if (data.get("hk_liquidity") or {}).get("exposure") == "hk_equities":
+        labels["macro_liquidity"] = "中国盈利周期与港元/美元流动性"
+        labels["valuation"] = "港股流动性压力、估值与逆向买入条件"
     return finite_json_numbers({
         "asset_type": "etf",
         "stock_code": spot["stock_code"],
@@ -384,6 +422,6 @@ async def generate_etf_report(spot: dict, request: ResearchRequest) -> dict:
         "as_of": data["collected_on"],
         "etf_data": data,
         "summary": summary,
-        "section_labels": _section_labels_for(_profile_for_data(data)),
+        "section_labels": labels,
         "generated_at": int(time.time()),
     })
