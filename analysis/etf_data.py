@@ -21,6 +21,7 @@ import pandas as pd
 from analysis.etf_discovery import assets_yi, ranked_matches, matches, recent_day, theme, key
 from analysis.etf_macro import get_etf_market_context
 from analysis.etf_cycle import assess_cycle
+from analysis.etf_holding_risk import screen_holdings
 from analysis.profitability import get_profitability_trend
 from analysis.valuation_history import get_valuation_history
 from tools.utils import utils
@@ -839,6 +840,7 @@ async def collect_etf_overview(spot: dict) -> dict:
         "fund": fund,
         "portfolio": holdings,
         "portfolio_stats": _portfolio_stats(holdings.get("holdings") or []),
+        "holding_risk": screen_holdings(fund, holdings),
         "etf_price_position": etf_price,
         "collected_on": today.isoformat(),
     }
@@ -890,6 +892,7 @@ async def collect_etf_data(spot: dict) -> dict:
 
     enriched = await asyncio.gather(*(enrich(h) for h in original[:10]))
     cycle = assess_cycle(market, enriched)
+    holding_risk = screen_holdings(fund, {**holdings, 'holdings': enriched})
     profile = market.get("sector") or "其他行业或混合主题"
     limitations = [
         "最近交易日收盘价与盘中最新行情分别标注，不将前一交易日收盘冒充实时价",
@@ -927,6 +930,7 @@ async def collect_etf_data(spot: dict) -> dict:
         "etf_price_position": etf_price,
         "macro_market": market,
         "industry_cycle": cycle,
+        "holding_risk": holding_risk,
         "limitations": limitations,
         "collected_on": today.isoformat(),
     }
