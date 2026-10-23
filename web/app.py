@@ -4196,21 +4196,35 @@ function renderEtfResult(report) {
   const labels=report.section_labels||{};
   const sections=summary.sections||{};
   const isDividendStrategy=/高股息|红利|股息/i.test(String(report.stock_name||''));
+  // Financing and trading crowding already have a standalone evidence panel.
+  // Saved reports from earlier versions can repeat those figures in several
+  // LLM paragraphs; omit only those repeated sentences, not the whole chapter.
+  const removeDuplicatedTrading=(value)=>{
+    const prose=String(value||'');
+    if(!Object.keys(crowd).length)return prose;
+    return prose.split(/(?<=[。！？；])/u).filter(sentence=>
+      !/融资|成交额|净申购|换手率|交易拥挤|融资盘/.test(sentence)
+    ).join('').trim();
+  };
+  const cleanNarrative={};
+  keys.forEach(key=>{
+    cleanNarrative[key]=removeDuplicatedTrading(sections[key]);
+  });
   // The dividend ETF report has three distinct jobs: pricing/drawdown,
   // earnings/payout sustainability and trading crowding (shown above).
   // Older cached LLM reports may repeat the SAME stocks and risk across
   // high_positions, valuation, industry_cycle, earnings_cycle, and risk_notes.
   const visibleKeys=keys.filter(key=>{
-    if(!String(sections[key]||'').trim())return false;
+    if(!String(cleanNarrative[key]||'').trim())return false;
     if(!isDividendStrategy)return true;
-    if(key==='valuation' && sections.high_positions)return false;
-    if(key==='industry_cycle' && sections.earnings_cycle)return false;
-    if(key==='commodity_market' && sections.earnings_cycle)return false;
+    if(key==='valuation' && cleanNarrative.high_positions)return false;
+    if(key==='industry_cycle' && cleanNarrative.earnings_cycle)return false;
+    if(key==='commodity_market' && cleanNarrative.earnings_cycle)return false;
     return true;
   });
   for(const key of visibleKeys) {
     html+='<section class="etf-block">'+heading(labels[key]||key)+
-      '<div class="etf-prose">'+safe(sections[key])+'</div></section>';
+      '<div class="etf-prose">'+safe(cleanNarrative[key])+'</div></section>';
   }
   // For dividend ETFs the thesis already contains the primary downside
   // mechanism; another generic "主要风险" chapter repeats pricing and payout
