@@ -21,6 +21,7 @@ import pandas as pd
 from analysis.etf_discovery import assets_yi, ranked_matches, matches, recent_day, theme, key
 from analysis.etf_macro import get_etf_market_context
 from analysis.etf_cycle import assess_cycle
+from analysis.etf_holding_risk import screen_holdings
 from analysis.profitability import get_profitability_trend
 from analysis.valuation_history import get_valuation_history
 from tools.utils import utils
@@ -839,6 +840,7 @@ async def collect_etf_overview(spot: dict) -> dict:
         "fund": fund,
         "portfolio": holdings,
         "portfolio_stats": _portfolio_stats(holdings.get("holdings") or []),
+        "holding_risk": screen_holdings(fund, holdings),
         "etf_price_position": etf_price,
         "collected_on": today.isoformat(),
     }
@@ -890,10 +892,36 @@ async def collect_etf_data(spot: dict) -> dict:
 
     enriched = await asyncio.gather(*(enrich(h) for h in original[:10]))
     cycle = assess_cycle(market, enriched)
+    holding_risk = screen_holdings(fund, {**holdings, 'holdings': enriched})
+    profile = market.get("sector") or "其他行业或混合主题"
+    limitations = [
+        "最近交易日收盘价与盘中最新行情分别标注，不将前一交易日收盘冒充实时价",
+        "行情参考价若无源报价日期仅视为未经时点核实的快照；过期日线不用于现价展示",
+        "基金季报披露重仓股不等于今日全部指数成份股，亦不是申赎篮子",
+        "股价52周位置不是PE/PB估值高低，更不能独立证明周期底部或顶部",
+        "Q1与H1累计净利润同比增速之差不是单季度利润环比",
+        "宏观与财务指标各有披露日期，不能把滞后数据当作今日事实",
+        "单次成交额、份额不能推断ETF资金净申购",
+        "ETF整体PE/PB和费用必须来自基金或指数披露，不得平均重仓股编造",
+        "未覆盖的重仓股、行业库存、成本和分红率不能推测为已知",
+    ]
+    if gold_equity:
+        limitations.extend([
+            "黄金股ETF持有黄金产业股票而非实物黄金；港股不套用A股财务接口",
+            "黄金期货与矿企股票属于不同资产，价格走势不能直接外推矿企利润",
+        ])
+    elif profile == "跨行业高股息":
+        limitations.extend([
+            "基金历史分红率、重仓公司股息率、派息率和现金流覆盖不同，不得相互替代",
+            "港股股息税、汇率、QDII规则须按基金和投资者适用范围核实",
+            "没有可比的分红覆盖数据时，不得从高股息指数名称推导持续分红承诺",
+        ])
     return {
         "asset_type": "etf",
         "scope": ("黄金产业股票ETF（披露的A股/港股重仓价格可核查，"
                   "个股财务透视仅涵盖A股）" if gold_equity
+                  else "跨行业高股息股票ETF（需分行业验证分红和现金流）"
+                  if profile == "跨行业高股息"
                   else "A股股票ETF" if equity
                   else "非A股股票ETF或混合资产ETF（限制适用个股透视）"),
         "fund": fund,
@@ -902,18 +930,7 @@ async def collect_etf_data(spot: dict) -> dict:
         "etf_price_position": etf_price,
         "macro_market": market,
         "industry_cycle": cycle,
-        "limitations": [
-            "最近交易日收盘价与盘中最新行情分别标注，不将前一交易日收盘冒充实时价",
-            "行情参考价若无源报价日期仅视为未经时点核实的快照；过期日线不用于现价展示",
-            "基金季报披露重仓股不等于今日全部指数成份股，亦不是申赎篮子",
-            "黄金股ETF持有黄金产业股票，并非实物黄金ETF；港股不套用A股财务指标",
-            "黄金期货连续/国内金价与基金持仓是不同资产，价格驱动不等于利润兑现",
-            "股价52周位置不是PE/PB估值高低，更不能独立证明周期底部或顶部",
-            "Q1与H1的累计净利润同比增长率之差，不是独立单季度净利环比",
-            "利润增速、金价和宏观指标有各自观察日期；过期数据不得写成当日事实",
-            "单次成交额、份额无法推断ETF资金净申购或主动看好",
-            "ETF整体PE/PB及管理费必须来自可核实的指数或基金资料，不能平均前十大编造",
-            "未覆盖的持仓、库存产量单位成本不能凭想象补足",
-        ],
+        "holding_risk": holding_risk,
+        "limitations": limitations,
         "collected_on": today.isoformat(),
     }

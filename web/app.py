@@ -3965,11 +3965,37 @@ function renderEtfResult(report) {
       '可到基金公司正式定期报告或基金档案核对；不使用静态示例冒充最新前十。</p>';
   }
   html+='</div></section>';
-  html+='<section class="etf-block" id="report-verdict">'+heading('投资结论')+
-    (summary.stance?'<span class="stance-badge stance-'+safe(summary.stance)+'">'+
-      safe(stanceLabel(summary.stance))+'</span>':
-      '<span class="etf-unknown">研究判断暂未生成</span>')+
-    '<div class="etf-prose">'+safe(summary.thesis_summary||'暂无结论')+'</div></section>';
+  const risk=data.holding_risk||{}, strategy=risk.management_style||{};
+  html+='<section class="etf-block etf-unified-evidence" id="etf-unified-evidence">'+
+    heading('重仓股、宏观与估值风险分析');
+  html+='<div class="etf-analysis-subsection etf-manager-risk" id="etf-management-risk">'+
+    heading(risk.risk_type||'指数调样与主动管理的高位风险')+
+    '<p class="etf-source">'+safe(strategy.label||'尚未核实管理方式')+
+    ' · '+safe(strategy.source||'先核实基金合同及投资策略')+'</p>'+
+    '<div class="etf-prose">'+safe(risk.risk_summary||
+    '需要先核实基金的主动或指数管理方式，以及重仓股是否处于股价和估值高位。')+'</div>';
+  if (Object.keys(risk).length) {
+    html+='<div class="etf-metric-row">'+
+      '<div class="etf-metric"><span>可观察52周股价位置权重</span><strong>'+
+      safe(fmt(risk.price_observed_weight_pct,'%',1))+'</strong></div>'+
+      '<div class="etf-metric"><span>其中52周高位重仓权重</span><strong>'+
+      safe(fmt(risk.high_price_weight_pct,'%',1))+'</strong></div>'+
+      '<div class="etf-metric"><span>高估值分位重仓权重</span><strong>'+
+      safe(fmt(risk.high_valuation_weight_pct,'%',1))+'</strong></div></div>';
+    const suspicious=Array.isArray(risk.watchlist)?risk.watchlist:[];
+    if (suspicious.length) {
+      html+='<p class="etf-source">高位观察：'+suspicious.slice(0,10).map(h=>
+        safe(h.name||h.code)+' ('+safe(fmt(h.weight_pct,'%',1))+')：'+
+        safe((h.flags||[]).join('、'))).join('；')+'</p>';
+    } else {
+      html+='<p class="etf-source">尚无可核实的高位重仓证据；缺乏估值数据不代表没有泡沫风险。</p>';
+    }
+    if (Array.isArray(risk.verification_needed)&&risk.verification_needed.length) {
+      html+='<p class="etf-source">需要核对：'+risk.verification_needed.map(safe).join('；')+'</p>';
+    }
+    html+='<p class="etf-source">'+safe(risk.limitations||'')+'</p>';
+  }
+  html+='</div>';
   const macro=data.macro_market||{}, observations=macro.observations||{};
   const cycle=data.industry_cycle||{}, breadth=cycle.earnings_breadth||{};
   const macroFields=[
@@ -3977,7 +4003,7 @@ function renderEtfResult(report) {
     'china_treasury_10y','china_lpr1y','china_m2_yoy','china_pmi',
     'china_official_gold_reserves','sector_commodity'
   ];
-  html+='<section class="etf-block" id="etf-macro-evidence">'+
+  html+='<div class="etf-analysis-subsection" id="etf-macro-evidence">'+
     heading('宏观、流动性与产品价格：最新可核实数据');
   const known=macroFields.filter(key=>observations[key]);
   if(known.length) {
@@ -3997,9 +4023,9 @@ function renderEtfResult(report) {
     html+='</tbody></table></div><p class="etf-source">数据来源：'+
       known.map(key=>observations[key]).map(o=>safe(o.name)+': '+safe(o.source||'未标')).join('；')+
       '。数据时点各不相同，缺失期间不做推算。</p>';
-  } else html+='<p class="etf-unknown">宏观与产品价格暂无有效近期观测，不能把ETF价格走势当作金价或行业产品价格。</p>';
-  html+='</section>';
-  html+='<section class="etf-block" id="etf-cycle-evidence">'+
+  } else html+='<p class="etf-unknown">宏观或相关产业数据暂无有效近期观测，不能把ETF价格走势当作行业盈利驱动的证明。</p>';
+  html+='</div>';
+  html+='<div class="etf-analysis-subsection" id="etf-cycle-evidence">'+
     heading('行业周期与前十大盈利广度')+
     '<div class="etf-prose"><b>'+safe(cycle.stage||'周期待确认')+'</b> · '+
       safe(cycle.confidence||'证据不足')+'</div>'+
@@ -4011,8 +4037,8 @@ function renderEtfResult(report) {
       '<div class="etf-metric"><span>同比增速回落权重</span><strong>'+
         safe(fmt(breadth.decelerating_growth_weight_pct,'%',1))+'</strong></div>'+
     '</div><div class="etf-prose">'+safe((cycle.evidence||[]).join('；'))+
-    '</div><p class="etf-source">'+safe(breadth.definition||'')+'</p></section>';
-  html+='<section class="etf-block" id="etf-holdings">'+heading('十大重仓股价格、业绩与估值穿透')+
+    '</div><p class="etf-source">'+safe(breadth.definition||'')+'</p></div>';
+  html+='<div class="etf-analysis-subsection" id="etf-holdings">'+heading('十大重仓股价格、业绩与估值穿透')+
     '<p class="etf-source">'+safe(portfolio.scope||'')+' · '+safe(portfolio.as_of||'披露期暂缺')+
     ' · '+safe(portfolio.source||'来源暂缺')+'</p>';
   if(rows.length) {
@@ -4047,7 +4073,13 @@ function renderEtfResult(report) {
     '；取得PE/PB的披露持仓权重：'+safe(fmt(stats.pe_pb_observed_weight_pct,'%',1))+
     '；有历史估值分位的权重：'+safe(fmt(stats.historical_valuation_observed_weight_pct,'%',1))+
     '；其中处于至少一项估值80%高分位的权重：'+safe(fmt(stats.high_valuation_position_weight_pct,'%',1))+
-    '。没有数据的权重不视为零风险。</p></section>';
+    '。没有数据的权重不视为零风险。</p></div>';
+  html+='</section>';
+  html+='<section class="etf-block" id="report-verdict">'+heading('投资结论')+
+    (summary.stance?'<span class="stance-badge stance-'+safe(summary.stance)+'">'+
+      safe(stanceLabel(summary.stance))+'</span>':
+      '<span class="etf-unknown">研究判断暂未生成</span>')+
+    '<div class="etf-prose">'+safe(summary.thesis_summary||'暂无结论')+'</div></section>';
   const keys=['macro_liquidity','commodity_market','industry_cycle',
     'holdings','high_positions','earnings_cycle','valuation','fund_structure','market_price'];
   const labels=report.section_labels||{};

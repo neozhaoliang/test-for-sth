@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any
 
 from analysis.etf_data import collect_etf_data
+from analysis.etf_macro import sector_for_etf
 from backtest.llm_client import call_json_ex
 from analysis.json_safety import finite_json_numbers
 from analysis.research_context import ResearchMode, ResearchRequest
@@ -19,7 +21,7 @@ _SECTION_NAMES = (
 )
 _SECTION_LABELS = {
     "macro_liquidity": "宏观、利率与流动性环境",
-    "commodity_market": "黄金或行业产品价格：趋势与利润传导",
+    "commodity_market": "产品价格及盈利驱动",
     "industry_cycle": "行业周期：底部、扩张期还是顶部",
     "holdings": "前十大重仓：究竟买了什么",
     "high_positions": "十大重仓股的股价位置与回撤风险",
@@ -29,89 +31,157 @@ _SECTION_LABELS = {
     "market_price": "基金价格、溢折价与流动性",
 }
 
-_SYSTEM_RULES = """你是研究ETF的投资经理，写一篇真正能用于投资决策、自然、简明、有人味的中文分析。
-不是上市公司的F10模板，不要写打分清单、套路句、空洞的两面话；
-不要用“综上所述”“风险与机遇并存”“本质是在买”等套话。
-要求观点来自可核实证据，但不是数据不足就机械给中性：
-有数据的地方给出方向判断和因果；没有数据的驱动给出可证伪的条件情景。
-不要暴露幕后工作、作者、数据调用或工作流程。
+_SYSTEM_RULES = """你是基金投资研究员。当前只研究紧随其后的基金名称、代码和它实际披露的重仓股，
+不得复用之前研究过的ETF、公司、指数、商品或行业的研究段落。
+语言自然、像专业投资者平实地讨论证据，不要说套话，更不能写数据接口字段名。
+严禁把JSON键名写给读者（例如不要写“某字段未提供”），只解释业务含义。
+基金名称决定投资策略的初步分类，真实披露的持仓决定具体暴露；没有核实的细分行业
+不得仅凭联想列举，重仓股的个别行业不能未经权重测算代表全部基金。
 
-按以下研究顺序思考，再给结论：
+一、宏观利率与流动性：只引用macro_market中确有数据和日期的中国LPR、M2、
+PMI、中美国债收益率及美国10年TIPS实际利率，说明利率、估值与盈利的关系。
+名义收益率与实际收益率不同，M2增速不是ETF资金流。无法核实就不编数字。
+若某项数据缺失，把重点放在已有且相关的指标上，不要写长篇缺数据清单。
 
-【1. 宏观形势和流动性（必须认真写，不能略过）】
-读取macro_market.observations中有日期的最新中国1Y LPR、M2增速、PMI、
-中美10年名义国债收益率、美国10年TIPS实际收益率；
-明确比较可比的上一期变化和时间，解释利率、信用、风险偏好和行业估值的传导。
-名义利率不是实际利率，M2增加不是资金必然流入股票。
-若指标缺失，仅就其他真实指标给出分析；不能笼统说“宏观数据全无”。
-特别要区分“对黄金资产有利的利率下降”和“对黄金矿企利润是否有利”两个问题。
+二、基金的真实经济驱动：先根据投资目标及前十大持仓辨认收益来源，说明
+它们如何通过收入、成本、毛利、现金流、分红或估值传导到基金价格；
+跨行业基金不得强行指定单一商品价格或单一行业周期。
+仅讨论有持仓证据支持的行业，避免把无关公司的股票、业务和周期机械罗列。
 
-【2. 实物金价/商品价与产业链利润（必须结合观察值）】
-如果是黄金股ETF，必须重点看gold_cny（人民币/克）与gold_usd（美元/盎司）
-近1个月、3个月、1年变化，若有美国TIPS实际收益率需结合方向，
-解释美元、实际利率、央行购金、地缘风险怎样影响黄金供需；
-同时讨论矿企金价、单位采选成本、产量、资本开支和利润之间的关系：
-高金价未必带来高增量利润，成本上升与A/H股估值会抵消。
-“央行购金”只有储备有相邻观察才可说储备增减，不能凭情绪称当月持续增持。
-如果gold_usd抓取失败而gold_cny成功，就用后者研判、披露计价口径；
-如果都失败，不得伪造金价或编造金价方向。
-对其他ETF根据macro_market.sector和key_drivers做不同产业链判断：
-煤炭/有色/钢铁/化工看产品价格、库存、产能和利润价差；
-银行看息差、信用成本、不良与LPR；半导体看去库存、订单、
-制造产能利用率与资本开支；医药、消费、光伏、宽基分别分析自身周期。
-通用PMI只能做宏观背景，不能代替细分行业的产量、价格或库存。
+三、盈利周期判断：根据industry_cycle和已披露重仓股业绩，判断盈利在
+周期底部修复、扩张、高位回落、衰退或行业分化；低股价和低PE都不是底部的证据，
+顶部与底部需要行业供需和可持续盈利交叉验证。
+Q1与H1是两个不同的累计同比增速口径，同比增速变化不代表季度净利润环比变动。
+如果没有足够盈利数据，对不同业务的机制提出可验证的条件，不得编造周期位置。
 
-【3. 行业周期：底部看修复，顶部警惕拐点】
-优先引用industry_cycle.earnings_breadth中的可比盈利覆盖权重、
-增速改善/回落权重、正负增速权重，以及商品或产品价格3个月趋势。
-必须写出对“盈利修复初期/扩张/高景气走弱/下行/分化”的实际判断、
-导致这一判断的数字、何种证据会推翻它。
-低价格、低PE、高股息≠周期底部；高PE≠周期顶部。
-如果确有低利润改善、供给收缩、产品涨价证据，可以积极看多周期修复；
-如果盈利处高位、增速放缓、产能过剩、产品价格下跌，应认真考虑看空。
-但只看Q1和H1**累计口径**净利润同比增速差，不能说“二季度利润环比下降”，
-两者并非独立季度的同比；区分增长速度变慢和绝对盈利下滑。
+四、前十大持仓：逐一检查基金净值权重、52周股价位置、财报期、
+利润同比变化和可得的估值分位；只把已核实数据用于判断。
+港股无A股F10口径时，不能凭空给出ROE/PE/分红率。
+如果只有部分公司可观察，必须说清覆盖范围。
 
-【4. 前十大披露重仓穿透】
-逐一看 portfolio.holdings 中最多10只的代码、名称、净值权重、
-股价52周区间位置和近一年回报、披露财报期间、净利润同比增长和增速变化、
-估值位置（有则引用）；特别挑出高权重与业绩方向相反的股票。
-不能只分析前5只然后笼统概括“前十”。
-A股可以用财务指标；港股只能用返回的价格观察，港股财务缺失时不套A股数据。
-对A/H重复持有要指出穿透后的同一公司风险，但不同法人主体不能未经核实
-合并成同一家公司。解释单产业链相关性与集中风险。
+五、基金管理方式与高位持仓风险（必须检查holding_risk）：
+先阅读holding_risk.management_style.kind及其source。通过基金名称判断的管理方式
+只是线索，必须提醒基金合同和指数编制规则仍需核实，不要把猜测写成已确认。
+对可能的指数ETF，必须讨论其规则性调样、指数扩容或权重上涨是否可能让基金
+在高估值热门股上被动承接；检验持仓52周价格位置、PE/PB历史分位以及
+指数调样日期、基金份额变化。价格高位与估值高位不同，
+季度持仓权重上升不必然代表主动买入或被动买入。
+对可能的主动管理ETF，必须讨论经理是否可能为了短期业绩而追逐热门高估值股票，
+核对连续季报持仓变化、买入时的估值和交易纪律；
+没有交易记录和动机证据，不能断言经理为拉抬净值故意买泡沫股。
+管理方式未核实则说明两类风险分别需要核实哪类合同及调仓证据。
+不能仅凭价格52周高位就宣称股票是泡沫，也不能因为估值缺失就不提示风险。
 
-【5. 价格-估值、流动性与最终结论】
-区分矿企股票的一年价格高位和估值历史高分位。PE低可能是景气高利润；
-将行业未来盈利的可持续性和估值结合，判断是低估还是周期陷阱。
-ETF当前价格位置、IOPV、成交/份额、整体PE、费率未知时不编数字。
-用最重要的可证实因果写2-5自然段投资结论；至少把“现在阶段、涨跌驱动、
-未来哪些证据使看法改变”说清。
-如果上下游价格/业绩信号反方向，明确权衡何者领先、何者滞后；
-可以看多、看空、中性，但绝不因为有3项缺失就自动给中性。
-全部观测均有source/as_of；不能把滞后的月度和季度数据当作今日事实。
-绝对不能使用自身常识填补截至日期的实时金价、利率、机构动作或公司数据。
+六、结论：用2-5段中文说明当前驱动、估值是否预支了利润、
+最可能的利多/利空及使判断改变的证据。
+允许看多、看空、中性，但不能因为缺几项信息自动给中性；
+也不能因为没有证据就装作已经核实。
+所有数字保留来源日期，不补写未提供的公司派息率、产业库存、商品价格、汇率。
+不要输出模型如何查询数据等工作过程。
 
-只返回一个JSON对象，无Markdown:
+请返回JSON对象，字段为：
 {
  "stance":"bullish|neutral|bearish",
- "thesis_summary":"2至5段自然中文，明确宏观、行情、产业盈利、持仓估值的逻辑与立场",
+ "thesis_summary":"2至5段自然中文的投资逻辑",
  "sections":{
-   "macro_liquidity":"有日期的中美利率、实际利率、国内LPR/M2/PMI及影响；区分因果强弱",
-   "commodity_market":"黄金国内外价格及其近1/3/12月走势与金矿利润传导；其他行业讲产品和供需",
-   "industry_cycle":"明确判断行业处于什么周期阶段，引用盈利广度、产品价格和缺口",
-   "holdings":"前十大持仓及权重，谁主导净值",
-   "high_positions":"至少讨论前十大可核实的价格位置，高位/低位的权重与公司",
-   "earnings_cycle":"前十大能够核实的利润同比增长和增速变动，说明报告期",
-   "valuation":"前十估值分位与行业可持续利润辨析",
-   "fund_structure":"同一产业链、A/H、费用和指数信息，只写查到的",
-   "market_price":"ETF 52周区间、IOPV/流动性及观察时间"
+   "macro_liquidity":"真实宏观、利率与流动性环境及影响",
+   "commodity_market":"当前基金实际的产业盈利或分红来源，不是默认某个商品",
+   "industry_cycle":"根据真实基金持仓和证据讨论行业周期，不把不同产业混作一体",
+   "holdings":"前十大持仓和权重集中度",
+   "high_positions":"有数据的重仓股价格位置与潜在回撤",
+   "earnings_cycle":"重仓股有披露的利润同比及其变化",
+   "valuation":"现价、估值与可持续盈利",
+   "fund_structure":"指数或主动管理方式及验证状态、被动接盘或经理追高风险、重仓集中、费用和税费（只写已核实）",
+   "market_price":"基金自身的最近价格、溢折价、成交与时点"
  },
- "risk_notes":"最主要的2-4项明确风险",
- "invalidation_condition":"哪些具体后续数据会使判断方向反转"
+ "risk_notes":"主要且真实的风险",
+ "invalidation_condition":"哪些未来数字将改变现在的判断"
 }
-必须包含所有sections，即使某一项无指标也应说明具体价格/盈利的传导和下个证据。
-不允许一句“宏观环境复杂、需进一步观察”代替分析。"""
+保留所有sections键，不相关部分允许返回空字符串而不是硬凑话。
+全篇不得无依据引入另一只ETF的研究主题，不得把示例当成事实。"""
+
+_GOLD_RULES = """
+此基金明确属于黄金产业股票ETF，才启用以下附加研究：
+通过有日期的国内金价gold_cny与美元金价gold_usd观察1/3/12个月变化，
+关注真实利率、美元、官方储备变化；区分矿企金价、单位现金成本、
+产量、资本支出与股权估值。无法取得金价时不能说金价方向。
+高金价并不保证矿企持续高利润或低估值。
+"""
+
+_DIVIDEND_RULES = """
+这只基金明确跟踪跨行业高股息/红利策略，不是某个商品行业的ETF：
+第一步按已披露前十大重仓的实际名称、代码和权重分析银行、能源、航运、
+电信等行业（仅在该行业确实出现在当前持仓时讨论），不得套用固定板块清单。
+核心是股息率与分红可持续性：派息率、利润及自由现金流覆盖、资本开支、
+负债与偿债能力、景气高位后是否可能削减股息；
+必须区分个股分红率、基金已派息和基金整体真实现金分配率。
+高股息并不代表高实际回报，分母可能是高景气不可持续利润。
+港股/QDII基金关注港币/人民币汇率、港股税务规则、海外利率、
+QDII投资限制、费率及溢折价；未知的数值和税率不要编造。
+多行业持仓需分别讨论利润周期，不得强行宣称全基金处于
+单一行业底部或顶部。没有真实现金流及股息覆盖数据，就分析
+可能导致派息减少的条件，并明确尚未量化。
+"""
+
+_SECTOR_RULES = """
+根据实际sector、key_drivers与重仓股行业判断产业价格和利润：
+例如周期性行业核对产品价格/价差、库存、供给和资本开支，
+成长行业核对订单、利润率、产能利用率或研发变现，
+必须与真实取得的数据相互印证。只有确证的单行业ETF才能判断
+该行业是否在周期底部或顶部；其他ETF分析各自行业分化。
+"""
+
+_MIXED_RULES = """
+基金可能是宽基、跨行业、跨境或混合主题：
+必须先识别本基金真实的投资策略及前十大持仓，按可观察的行业分布、
+盈利与估值讨论。不能默认它是某一资源、制造或成长产业，
+也不应花大段篇幅列举与当前持仓无关的细分行业。
+"""
+
+_UNRELATED_FUND_RULES = re.compile(
+    r"gold_cny|gold_usd|本基金不是黄金股ETF|不是黄金股ETF|"
+    r"黄金股ETF永赢|黄金产业股票ETF|"
+    r"未提供.{0,30}金价|黄金矿企的?利润", re.I,
+)
+
+
+def _profile_for_data(data: dict) -> str:
+    # Derive from the CURRENT fund identity, not from cached other fund data.
+    name = str((data.get("fund") or {}).get("name") or "")
+    return sector_for_etf(name)["sector"]
+
+
+def _rules_for_profile(profile: str) -> str:
+    if profile == "黄金产业股票":
+        return _GOLD_RULES
+    if profile == "跨行业高股息":
+        return _DIVIDEND_RULES
+    if profile in {"其他行业或混合主题", "宽基市场"}:
+        return _MIXED_RULES
+    return _SECTOR_RULES
+
+
+def _section_labels_for(profile: str) -> dict:
+    labels = dict(_SECTION_LABELS)
+    if profile == "黄金产业股票":
+        labels["commodity_market"] = "黄金价格与矿企盈利传导"
+    elif profile == "跨行业高股息":
+        labels["commodity_market"] = "股息来源、现金流与分红可持续性"
+        labels["industry_cycle"] = "不同重仓行业的盈利周期与派息风险"
+        labels["valuation"] = "股息率、估值与长期股东回报"
+    elif profile in {"宽基市场", "其他行业或混合主题"}:
+        labels["commodity_market"] = "基金收益来源与持仓行业的盈利驱动"
+    return labels
+
+
+def _has_foreign_fund_material(result: dict, profile: str) -> bool:
+    if profile == "黄金产业股票":
+        return False
+    summary = str(result.get("thesis_summary") or "")
+    sections = result.get("sections") or {}
+    if isinstance(sections, dict):
+        summary += " ".join(str(value or "") for value in sections.values())
+    return bool(_UNRELATED_FUND_RULES.search(summary))
 
 
 def _text(value: Any, limit: int = 6000) -> str:
@@ -119,18 +189,35 @@ def _text(value: Any, limit: int = 6000) -> str:
 
 
 async def _write_etf_opinion(data: dict) -> dict:
-    prompt = _SYSTEM_RULES + "\n\n实际取得的ETF与披露重仓数据（所有价格均注明时间/来源）:\n" + json.dumps(
-        data, ensure_ascii=False, separators=(",", ":"), allow_nan=False
-    )
-    try:
-        parsed, _ = await call_json_ex(
-            prompt, max_tokens=5800,
-            repair_requirements="合法JSON对象；stance必须是bullish/neutral/bearish之一；"
-                                "必须包含thesis_summary、sections九个字段、risk_notes和invalidation_condition。",
-        )
-    except Exception as exc:
-        utils.logger.warning("[etf] LLM summary failed: %s", exc)
-        parsed = None
+    profile = _profile_for_data(data)
+    current = data.get("fund") or {}
+    identity = f"本次唯一研究标的：{current.get('name', '')}（{current.get('code', '')}）。研究类别：{profile}。"
+    prompt = (_SYSTEM_RULES + "\n" + identity + "\n" + _rules_for_profile(profile) +
+              "\n\n当前ETF真实数据（全部价格必须核对日期和来源）:\n" +
+              json.dumps(data, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
+    parsed = None
+    for attempt in range(2):
+        try:
+            request = prompt
+            if attempt:
+                request += ("\n上一稿错误地把其他基金的投资主题移植过来。"
+                            "请严格围绕当前基金名称及重仓，完全重写，不得照搬上一稿。")
+            parsed, _ = await call_json_ex(
+                request, max_tokens=5800,
+                repair_requirements="合法JSON对象；stance必须是bullish/neutral/bearish之一；"
+                                    "必须包含thesis_summary、sections九个字段、risk_notes和invalidation_condition。",
+            )
+            if (isinstance(parsed, dict) and
+                    _has_foreign_fund_material(parsed, profile)):
+                utils.logger.warning("[etf] rejected other-fund thesis for %s",
+                                     current.get("code", "unknown"))
+                parsed = None
+                continue
+            break
+        except Exception as exc:
+            utils.logger.warning("[etf] LLM summary failed: %s", exc)
+            parsed = None
+            break
 
     if not isinstance(parsed, dict) or parsed.get("stance") not in (
         "bullish", "bearish", "neutral"
@@ -175,6 +262,6 @@ async def generate_etf_report(spot: dict, request: ResearchRequest) -> dict:
         "as_of": data["collected_on"],
         "etf_data": data,
         "summary": summary,
-        "section_labels": _SECTION_LABELS,
+        "section_labels": _section_labels_for(_profile_for_data(data)),
         "generated_at": int(time.time()),
     })
