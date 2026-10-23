@@ -118,6 +118,22 @@ def hkma_liquidity_snapshot(payload: dict, *, as_of: date) -> dict:
             (balance/past_b[1]-1)*100, 1
         )
         out["balance_comparison_as_of"] = past_b[0].isoformat()
+    # Only call conditions "extreme" relative to a bounded, observed
+    # recent history. Percentiles of bank funding are NOT equity valuations.
+    for column, current, field in (
+        ("hibor_fixing_1m", hibor, "hibor_90d_percentile_pct"),
+        ("closing_balance", balance, "balance_90d_percentile_pct"),
+    ):
+        observations = [
+            _n(rows[d].get(column)) for d in days
+            if d >= latest-timedelta(days=130)
+        ]
+        observations = [v for v in observations if v is not None]
+        if current is not None and len(observations) >= 35:
+            out[field] = round(
+                sum(v <= current for v in observations)/len(observations)*100, 1
+            )
+            out[field.replace("percentile_pct", "samples")] = len(observations)
     return out
 
 
@@ -199,6 +215,10 @@ def assess_hk_liquidity(hkma: dict, fed: dict, cpi: dict, ppi: dict) -> dict:
         (us is not None and us <= -25),
     ]
     tcount, ecount = sum(tightening), sum(easing)
+    hpercent = _n(hkma.get("hibor_90d_percentile_pct"))
+    bpercent = _n(hkma.get("balance_90d_percentile_pct"))
+    extreme = (hpercent is not None and hpercent >= 80
+               and bpercent is not None and bpercent <= 20)
     if tcount >= 2:
         regime = "funding_pressure"
         reading = "美元与港元融资数据共同显示资金压力，港股估值可能承压；还不能确定流动性谷底。"
@@ -222,6 +242,12 @@ def assess_hk_liquidity(hkma: dict, fed: dict, cpi: dict, ppi: dict) -> dict:
     return {
         "regime": regime, "funding_assessment": reading,
         "china_inflation_assessment": earnings,
+        "recent_funding_extreme_watch": extreme,
+        "extreme_watch_assessment": (
+            "最近可比样本内，HIBOR处相对高分位且香港银行体系总结余处低分位。"
+            "这是流动性压力的观察信号，不是可预测的底部或买入指令。"
+            if extreme else ""
+        ),
         "sustained_pressure_confirmed": tcount >= 2,
         "funding_rebound_confirmed": ecount >= 2,
         "liquidity_bottom_confirmed": False,
