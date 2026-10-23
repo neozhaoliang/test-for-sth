@@ -4031,6 +4031,40 @@ function renderEtfResult(report) {
       '可到基金公司正式定期报告或基金档案核对；不使用静态示例冒充最新前十。</p>';
   }
   html+='</div></section>';
+  const hk=data.hk_liquidity||{}, hkma=hk.hkma||{}, fed=hk.fed||{};
+  if(hk.exposure==='hk_equities') {
+    const assessment=hk.assessment||{}, cpi=hk.china_cpi||{}, ppi=hk.china_ppi||{};
+    const fm=(value,suffix='',digits=2)=>{
+      const num=numericOrNull(value);
+      return num===null?'未核实':num.toFixed(digits)+suffix;
+    };
+    const card=(label,value,date,source)=>
+      '<div class="etf-metric" title="'+safe([date,source].filter(Boolean).join(' · '))+'">'+
+        '<span>'+safe(label)+'</span><strong>'+safe(value)+'</strong></div>';
+    const hkDate=hkma.as_of||'', fedDate=fed.as_of||'';
+    html+='<section class="etf-block etf-hk-liquidity" id="etf-hk-liquidity">'+
+      heading('港股：内地基本面与美元/港元流动性')+
+      '<div class="etf-metric-row">'+
+        card('1个月HIBOR',fm(hkma.hibor_1m_pct,'%'),hkDate,hkma.source)+
+        card('HIBOR近期变化',fm(hkma.hibor_1m_change_bp,' 基点',1),hkDate,hkma.source)+
+        card('香港银行体系总结余',fm(numericOrNull(hkma.aggregate_balance_hkd_million)===null?
+          null:Number(hkma.aggregate_balance_hkd_million)/100,' 亿港元',1),hkDate,hkma.source)+
+        card('总结余近期变化',fm(hkma.aggregate_balance_change_pct,'%',1),hkDate,hkma.source)+
+        card('美联储目标利率上限',fm(fed.fed_target_upper_pct,'%'),fedDate,fed.source)+
+        card('目标利率近60日变动',fm(fed.fed_target_change_60d_bp,' 基点',1),fedDate,fed.source)+
+        card('中国CPI同比',fm(cpi.yoy_pct,'%'),cpi.as_of,cpi.source)+
+        card('中国PPI同比',fm(ppi.yoy_pct,'%'),ppi.as_of,ppi.source)+
+      '</div>'+
+      '<div class="etf-prose">'+safe(assessment.funding_assessment||
+        '未取得可核实的离岸融资判断。')+'</div>'+
+      '<div class="etf-prose">'+safe(assessment.china_inflation_assessment||
+        '企业盈利仍须结合报告期核实。')+'</div>'+
+      (assessment.recent_funding_extreme_watch ?
+        '<div class="etf-prose">'+safe(assessment.extreme_watch_assessment||'')+
+        '</div>' : '')+
+      '<p class="etf-source">流动性最差点并非可直接观测的买点；'
+        +'资金见底仍需结合企业盈利、估值和后续流动性改善判断。</p></section>';
+  }
   const crowd=data.trading_crowding||{};
   if(Object.keys(crowd).length){
     const cx=(v,unit='')=>numericOrNull(v)===null?'未核实':

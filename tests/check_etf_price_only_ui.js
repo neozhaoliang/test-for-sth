@@ -189,6 +189,49 @@ for (const duplicated of [
 ]) assert(!sink.innerHTML.includes(duplicated),
   'do not emit duplicate dividend-ETF analysis or unverified payout metric: '+duplicated);
 
+// HK-exposed ETFs should display two-cycle evidence, but an A-share ETF
+// with no HK liquidity payload should never inherit these macro assumptions.
+const hkReport = {
+  ...etf,
+  stock_name:'华泰柏瑞中证港股通高股息投资ETF(QDII)',
+  etf_data: {
+    ...etf.etf_data,
+    distribution:{},
+    hk_liquidity: {
+      exposure:'hk_equities',
+      as_of:'2026-10-23',
+      hkma:{status:'observed',as_of:'2026-10-22',
+        hibor_1m_pct:4.1,hibor_1m_change_bp:110,
+        aggregate_balance_hkd_million:54125,
+        aggregate_balance_change_pct:-18.3,
+        source:'香港金融管理局'},
+      fed:{status:'observed',as_of:'2026-10-22',
+        fed_target_upper_pct:4.25,fed_target_change_60d_bp:25,
+        source:'FRED'},
+      china_cpi:{status:'observed',as_of:'2026-10-15',
+        yoy_pct:-0.1,source:'中国CPI'},
+      china_ppi:{status:'observed',as_of:'2026-10-15',
+        yoy_pct:-2.4,source:'中国PPI'},
+      assessment:{
+        funding_assessment:'港元及美元融资条件共同收紧。',
+        china_inflation_assessment:'CPI和PPI同比均为负，盈利面临压力。',
+      },
+    },
+  },
+  summary:{stance:'neutral',thesis_summary:'中国盈利及港元利率共同影响估值。',
+    sections:{},risk_notes:''},
+};
+renderers.renderEtfResult(hkReport);
+for(const expected of [
+  '港股：内地基本面与美元/港元流动性', '1个月HIBOR', '4.10%',
+  '香港银行体系总结余', '541.3 亿港元', '目标利率近60日变动',
+  '中国CPI同比','中国PPI同比','港元及美元融资条件共同收紧',
+]) assert(sink.innerHTML.includes(expected), 'Missing HK liquidity panel: '+expected);
+assert(!sink.innerHTML.includes('买股票的老木匠'));
+renderers.renderEtfResult(etf);
+assert(!sink.innerHTML.includes('港股：内地基本面与美元/港元流动性'));
+
+
 // Test both genuine discount and an observed turnover, with amounts scaled.
 etf.etf_data.distribution = {
   dividend_ttm_per_share: 0.12,
