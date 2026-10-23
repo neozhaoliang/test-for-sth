@@ -70,7 +70,10 @@ def _cash_distributions_from_cumulative(df: Any, as_of: date) -> dict:
         previous = cumulative
     cutoff = as_of - timedelta(days=365)
     trailing = sum(amount for day, amount in payments if cutoff < day <= as_of)
-    if not payments:
+    # A historical dividend does not give the ETF a meaningful current
+    # trailing payout yield. Omit the metric completely, rather than
+    # rendering 0.00% or an out-of-date historical percentage.
+    if not payments or trailing <= 0:
         return {}
     latest_day, latest_cash = payments[-1]
     return {
@@ -165,6 +168,13 @@ def _fetch_source_data(code: str, as_of: date) -> dict:
             ))
         except Exception as exc:
             utils.logger.warning("[etf] dividend history %s: %s", code, exc)
+    # Discover actual distributions from history first. A strategy label,
+    # index name, or constituent dividend yield never proves the ETF pays.
+    # Only paying funds require the relatively expensive announcement/PDF
+    # lookup for fund-level distributable profit.
+    paid_ttm = _number(result.get("dividend_ttm_per_share"))
+    if paid_ttm is None or paid_ttm <= 0:
+        return {}
     try:
         result.update(_latest_official_profit(code, as_of))
     except Exception as exc:
@@ -196,7 +206,7 @@ async def collect_etf_distributions(
     price = _number(fund.get("latest_price"))
     if price is not None and price > 0:
         dividend = _number(facts.get("dividend_ttm_per_share"))
-        if dividend is not None:
+        if dividend is not None and dividend > 0:
             facts["dividend_yield_ttm_pct"] = round(dividend / price * 100, 3)
             facts["dividend_yield_reference_price"] = price
             facts["dividend_yield_price_date"] = (
