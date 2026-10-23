@@ -437,16 +437,16 @@ async def generate_report(
         if isinstance(float_shares,(int,float)) and float_shares>0
         and isinstance(current_price,(int,float)) and current_price>0
         else None)
-    trading_crowding = assess_margin_crowding(
-        margin_signal, crowding_activity, asset_type="stock",
-        price_position_pct=((market_context or {}).get("stock") or {}).get("position_52w_pct"),
-        float_market_cap_yi=float_market_cap_yi,
-    )
-
     chip_price_context = assess_chip_price_context(
         market_context, shareholder_trend,
         as_of=str(request.as_of) if historical_mode else None,
         price_holder_series=aligned_holders,
+    )
+
+    trading_crowding = assess_margin_crowding(
+        margin_signal, crowding_activity, asset_type="stock",
+        price_position_pct=chip_price_context.get("position_52w_pct"),
+        float_market_cap_yi=float_market_cap_yi,
     )
 
     # Issuer-authored source facts: unlike investor discussion this can support
