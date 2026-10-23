@@ -41,7 +41,10 @@ _SYSTEM_RULES = """请为当前ETF写一份有判断力、短而自然的中文�
 2. 事实背后的盈利、现金分红、流动性或估值传导；
 3. 仍无法确认的假设，只在实质影响结论时简短提一次。
 
-根据真实基金的投资行业选择相关分析，不要从旧基金复制主题：
+根据真实基金的投资行业选择相关分析，不要从旧基金复制主题。
+如果有broad_market，则应优先解释基准指数年内走势、量能、估值、情绪与调样。
+该类宽基ETF不按单一产业商品周期定性，不照搬行业ETF的产品价格分析。
+其余行业ETF按以下方式研究：
 宏观利率（中国LPR/国债与美国10年TIPS实际利率）怎样改变估值或景气；
 行业产品价格/盈利和资本开支处在周期底部、扩张还是顶部；
 前十大里哪些有已核实的股价高位、PE/PB高分位、利润加速或回落；
@@ -119,6 +122,36 @@ _DIVIDEND_RULES = """
 表格已经列出全部重仓代码和权重，正文不许逐一照抄。
 """
 
+_BROAD_RULES = """
+这是A股普通宽基指数ETF，不是单一行业ETF。
+**分析顺序：**
+一、宏观政策与流动性：只使用macro_market中有日期的LPR/M2/PMI/债券利率
+与有日期来源的明确政策信息；没有政策公告证据就不能说新政策已经出台。
+说明利率、信用扩张、财政与长期资金预期怎样改变指数风险溢价，尤其区分
+上证50/沪深300的金融蓝筹结构，与创业板指/科创50的高成长、高久期特征。
+二、指数今年以来的行情：使用broad_market.benchmark_price的YTD、20/60日
+涨跌、52周位置、年内回撤、近5日与此前20日指数成交额之比；必须区分
+指数成交额与ETF二级市场成交、 ETF净申购。趋势量价背离可指向短期风险偏好，
+不得由单一成交指标断言机构出逃、政府入场或泡沫见顶。
+三、估值：优先指数自身可核实的PE与3年历史分位，绝不能将前十重仓PE
+算术平均当全指数PE；估值水平与指数上涨的关系须结合盈利广度。
+四、指数调样及高位股纳入：只对有真实指数成份纳入日期的股票判断“近期纳入”，
+进一步有纳入日前60交易日行情才可以谈“纳入前已大涨”；若仅有当前
+高股价位置或季报权重变动，不能推定指数高位纳入、也不能推定ETF买入时点。
+纳入前上涨40%以上只是观察触发器，不是“明显泡沫”的证明；
+实际估值是否过高还需盈利和PE/PB证据。注意成份股数量样本可能不完整。
+五、市场情绪与量能、融资：结合指数回撤、量能和ETF本身融资盘观察，
+而不是把单只ETF的融资余额推为全市场杠杆总额。
+只输出新增的解释和审慎决策，避免与界面已有指数指标卡、融资卡重复。
+**字段分工：**
+macro_liquidity=政策与流动性（有数据才写）；
+high_positions=指数调样与高位股风险；
+valuation=整体指数估值与回撤赔率；
+industry_cycle=市场盈利广度或风格轮动（确有新增证据才写）；
+commodity_market、earnings_cycle、holdings、fund_structure、market_price=空字符串。
+风险提示只讲正文未提到的独立风险；不要多处照抄宏观、成交额和调样数据。
+"""
+
 _SECTOR_RULES = """
 根据实际sector、key_drivers与重仓股行业判断产业价格和利润：
 例如周期性行业核对产品价格/价差、库存、供给和资本开支，
@@ -152,7 +185,9 @@ def _rules_for_profile(profile: str) -> str:
         return _GOLD_RULES
     if profile == "跨行业高股息":
         return _DIVIDEND_RULES
-    if profile in {"其他行业或混合主题", "宽基市场"}:
+    if profile == "宽基市场":
+        return _BROAD_RULES
+    if profile == "其他行业或混合主题":
         return _MIXED_RULES
     return _SECTOR_RULES
 
@@ -165,7 +200,12 @@ def _section_labels_for(profile: str) -> dict:
         labels["commodity_market"] = "股息来源、现金流与分红可持续性"
         labels["industry_cycle"] = "不同重仓行业的盈利周期与派息风险"
         labels["valuation"] = "股息率、估值与长期股东回报"
-    elif profile in {"宽基市场", "其他行业或混合主题"}:
+    elif profile == "宽基市场":
+        labels["macro_liquidity"] = "宏观政策、流动性与风险偏好"
+        labels["high_positions"] = "指数调样与高位股纳入风险"
+        labels["valuation"] = "指数估值与回撤风险"
+        labels["industry_cycle"] = "市场盈利广度与风格轮动"
+    elif profile == "其他行业或混合主题":
         labels["commodity_market"] = "基金收益来源与持仓行业的盈利驱动"
     return labels
 
@@ -239,6 +279,9 @@ def _compact_etf_sections(
         for key in ("commodity_market", "industry_cycle", "high_positions",
                     "earnings_cycle", "valuation"):
             result[key] = _strip_crowding_sentences(result[key])
+    if profile == "宽基市场":
+        for key in ("commodity_market", "earnings_cycle"):
+            result[key] = ""
     if profile == "跨行业高股息":
         # Keep the richer quantitative price/valuation and profit/payout
         # narratives; a second generic valuation or cycle explanation tends
@@ -304,9 +347,13 @@ async def _write_etf_opinion(data: dict) -> dict:
     clean_sections = _compact_etf_sections(
         sections, profile, has_crowding=bool(data.get('trading_crowding'))
     )
-    repeated_risk = (profile == "跨行业高股息" and
-                     (clean_sections["high_positions"] or
-                      clean_sections["earnings_cycle"]))
+    repeated_risk = (
+        profile == "跨行业高股息" and
+        (clean_sections["high_positions"] or clean_sections["earnings_cycle"])
+    ) or (
+        profile == "宽基市场" and
+        (clean_sections["high_positions"] or clean_sections["valuation"])
+    )
     return {
         "stance": parsed["stance"],
         "thesis_summary": _text(parsed.get("thesis_summary")),
