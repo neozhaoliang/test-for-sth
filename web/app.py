@@ -4076,10 +4076,8 @@ function renderEtfResult(report) {
     } else {
       html+='<p class="etf-source">尚无可核实的高位重仓证据；缺乏估值数据不代表没有泡沫风险。</p>';
     }
-    if (Array.isArray(risk.verification_needed)&&risk.verification_needed.length) {
-      html+='<p class="etf-source">需要核对：'+risk.verification_needed.map(safe).join('；')+'</p>';
-    }
-    html+='<p class="etf-source">'+safe(risk.limitations||'')+'</p>';
+    // Internal verification checklists and methodology limitations must not
+    // appear as investor-facing narrative or small print.
   }
   html+='</div>';
   const macro=data.macro_market||{}, observations=macro.observations||{};
