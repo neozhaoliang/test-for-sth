@@ -347,6 +347,42 @@ body, input, select, textarea, button { font-family:inherit; }
     grid-column:1/-1;
   }
 }
+#result .report-etf-card .etf-distribution-row {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+  padding:14px 0 2px;
+}
+#result .report-etf-card .etf-distribution-item {
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:12px;
+  min-width:0;
+  padding:10px 14px;
+  border-radius:11px;
+  background:#f5f8fd;
+  border:1px solid #e2eaf4;
+}
+#result .report-etf-card .etf-distribution-item span {
+  font-size:13px;
+  color:#61728d;
+}
+#result .report-etf-card .etf-distribution-item strong {
+  font-size:18px;
+  color:#203b5b;
+  white-space:nowrap;
+}
+@media(max-width:1050px) {
+  #result .report-etf-card .etf-distribution-row {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+@media(max-width:600px) {
+  #result .report-etf-card .etf-distribution-row {
+    grid-template-columns:1fr;
+  }
+}
 #result .report-etf-card + .etf-subtitle {
   margin:10px 0 18px;
   color:#73829b;
