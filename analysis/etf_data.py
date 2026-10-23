@@ -689,49 +689,49 @@ def _hk_daily_observation(df: Any, today: date, *, source: str,
 
 
 async def _hk_stock_price(code: str, today: date) -> dict:
-    """Two independently sourced HK daily feeds; conservative date checks."""
-    providers = (
-        ("东方财富港股历史行情（前复权）", "stock_hk_hist",
-         {"symbol": code, "period": "daily",
-          "start_date": (today-timedelta(days=445)).strftime("%Y%m%d"),
-          "end_date": today.strftime("%Y%m%d"), "adjust": "qfq"},
-         "日期", "收盘"),
-        ("新浪港股历史行情（前复权）", "stock_hk_daily",
-         {"symbol": code, "adjust": "qfq"}, "date", "close"),
-    )
-    failure_notes = []
-    for source, api, kwargs, date_col, close_col in providers:
-        fn = getattr(ak, api, None)
-        if not callable(fn):
-            failure_notes.append(api + ":接口未安装")
-            continue
-        try:
-            df = await asyncio.wait_for(
-                asyncio.to_thread(fn, **kwargs), timeout=12
-            )
-            outcome = _hk_daily_observation(
-                df, today, source=source,
-                date_column=date_col, close_column=close_col
-            )
-            if outcome:
-                return outcome
-            failure_notes.append(api + ":无近期有效日线")
-        except Exception as exc:
-            failure_notes.append(api + ":" + type(exc).__name__)
-            utils.logger.warning("[etf] HK holding price %s %s: %s",
-                                 code, api, exc)
-    # Two independent HTTP endpoints provide dated K-lines outside AKShare.
-    # This addresses broker-site CDN outages and stale Sina updates.
+    """Get HK prices without invoking native V8/py_mini_racer.
+
+    AKShare's stock_hk_daily() unconditionally invokes MiniRacer() to decode
+    Sina's JavaScript-compressed data. On Windows this may raise a V8 FATAL
+    (partition_address_space) and terminate the WHOLE uvicorn process;
+    try/except, async timeout and a thread semaphore cannot catch it.
+
+    Prefer plain-HTTP Tencent/Yahoo parsing; if both fail, try the Eastmoney
+    HK history endpoint, which does not need Sina's V8 decoder. Never call
+    stock_hk_daily() from the web-server process, even for fallback.
+    """
     from analysis.etf_hk_market import get_hk_web_price
+
     web_price = await get_hk_web_price(code, today)
     if web_price:
         return web_price
+
+    api = getattr(ak, "stock_hk_hist", None)
+    if callable(api):
+        try:
+            df = await asyncio.wait_for(
+                asyncio.to_thread(
+                    api, symbol=code, period="daily",
+                    start_date=(today - timedelta(days=445)).strftime("%Y%m%d"),
+                    end_date=today.strftime("%Y%m%d"), adjust="qfq",
+                ),
+                timeout=12,
+            )
+            observed = _hk_daily_observation(
+                df, today, source="东方财富港股历史行情（前复权）",
+                date_column="日期", close_column="收盘",
+            )
+            if observed:
+                return observed
+        except Exception as exc:
+            utils.logger.warning("[etf] HK price %s Eastmoney history: %s", code, exc)
+
     return {
-        "price_lookup_status": "东财/新浪/腾讯/Yahoo均未返回有效近期日线",
+        "price_lookup_status": "腾讯/Yahoo/东方财富均未返回有效近期港股日线",
         "price_lookup_sources": [
-            "stock_hk_hist", "stock_hk_daily", "Tencent HK", "Yahoo HK"
+            "Tencent HK", "Yahoo HK", "stock_hk_hist",
         ],
-        # Missing is not a numeric zero and never authorizes an inference.
+        # No fake 0% or undated reference price.
     }
 
 
@@ -1241,7 +1241,8 @@ async def collect_etf_data(spot: dict) -> dict:
 
     # F10/price calls for all ten disclosed heavy stocks. Underlying public
     # data can fail independently; do not let one issuer block the full report.
-    sem = asyncio.Semaphore(5)
+    # Avoid spikes against upstream HK data services and their rate limits.
+    sem = asyncio.Semaphore(3)
     async def enrich(holding: dict) -> dict:
         row = dict(holding)
         code = row.get("code") or ""
