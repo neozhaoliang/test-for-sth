@@ -224,3 +224,20 @@ async def get_stock_turnover_activity(stock_code: str, *, as_of: date | None = N
     except Exception as exc:
         utils.logger.warning("[crowding] stock %s turnover unavailable: %s", code, exc)
         return {"status": "unavailable", "source": "东方财富A股日行情"}
+
+
+async def get_etf_turnover_activity(code: str, *, as_of: date | None = None) -> dict:
+    """Use ETF's own historical turnover (never component turnover)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    day = as_of or datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    try:
+        df = await asyncio.wait_for(
+            asyncio.to_thread(ak.fund_etf_hist_em,
+                symbol=code.removeprefix("SH").removeprefix("SZ"), period="daily",
+                start_date=(day-timedelta(days=76)).strftime("%Y%m%d"),
+                end_date=day.strftime("%Y%m%d"), adjust=""),timeout=15)
+        return turnover_activity(df,cutoff=day,source="东方财富ETF日成交额")
+    except Exception as exc:
+        utils.logger.warning("[crowding] ETF %s turnover unavailable: %s",code,exc)
+        return {"status":"unavailable","source":"东方财富ETF日成交额"}
