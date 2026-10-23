@@ -822,6 +822,79 @@ async def _hk_stock_financial(code: str, today: date) -> dict:
         return {}
 
 
+def _hk_valuation_history(df: Any, *, today: date,
+                          metric: str) -> dict:
+    """Baidu history: current metric and percentile from dated valid points."""
+    if df is None or getattr(df, "empty", True):
+        return {}
+    frame = pd.DataFrame(df)
+    date_col = next((col for col in frame.columns
+                     if str(col).lower() in ("date", "日期", "时间", "time")), None)
+    value_col = next((col for col in frame.columns if str(col) in (
+        "value", "值", "数值", "市盈率(TTM)", "市净率", metric)), None)
+    if date_col is None or value_col is None:
+        return {}
+    frame = frame[[date_col, value_col]].copy()
+    frame.columns = ["date", "value"]
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    frame["value"] = pd.to_numeric(
+        frame["value"].astype(str).str.replace(",", "", regex=False), errors="coerce"
+    )
+    frame = frame.dropna().sort_values("date")
+    frame = frame[(frame["date"].dt.date <= today) &
+                  (frame["date"].dt.date >= today-timedelta(days=440))]
+    frame = frame[frame["value"] > 0]
+    if frame.empty:
+        return {}
+    last = frame.iloc[-1]
+    last_day = _valid_close_date(last["date"].date(), today)
+    if not last_day:
+        return {}
+    out = {"latest":round(float(last["value"]), 3),
+           "as_of":last_day.isoformat()}
+    vals = frame.tail(260)["value"].tolist()
+    if len(vals) >= 90:
+        current = float(last["value"])
+        out["history_position"] = {
+            "years":1, "observations":len(vals),
+            "percentile":round(sum(value <= current for value in vals) /
+                               len(vals) * 100, 1),
+        }
+    return out
+
+
+async def _hk_stock_valuation(code: str, today: date) -> dict:
+    fn = getattr(ak, "stock_hk_valuation_baidu", None)
+    if not callable(fn):
+        return {}
+    async def get(indicator):
+        try:
+            df = await asyncio.wait_for(
+                asyncio.to_thread(
+                    fn, symbol=code, indicator=indicator, period="近一年"
+                ), timeout=10
+            )
+            return _hk_valuation_history(df, today=today, metric=indicator)
+        except Exception as exc:
+            utils.logger.warning("[etf] HK valuation %s %s unavailable: %s",
+                                 code, indicator, exc)
+            return {}
+    pe, pb = await asyncio.gather(get("市盈率(TTM)"), get("市净率"))
+    out = {}
+    if pe:
+        out["pe_ttm"] = pe["latest"]
+        if pe.get("history_position"):
+            out["pe_history_position"] = pe["history_position"]
+    if pb:
+        out["pb"] = pb["latest"]
+        if pb.get("history_position"):
+            out["pb_history_position"] = pb["history_position"]
+    if pe or pb:
+        out["valuation_observed_on"] = (pe or pb)["as_of"]
+        out["valuation_source"] = "百度股市通港股估值历史（近一年）"
+    return out
+
+
 async def _stock_valuation(code: str) -> dict:
     """Issuer valuation and 3/5-year history, not an ETF index multiple."""
     try:
@@ -1026,12 +1099,14 @@ async def collect_etf_data(spot: dict) -> dict:
             if re.fullmatch(r"[0-9]{5}", code):
                 # Hong Kong financial indicators have their own report
                 # periods and definitions; do not use A-share F10 data.
-                price, financial = await asyncio.gather(
+                price, financial, valuation = await asyncio.gather(
                     _hk_stock_price(code, today),
                     _hk_stock_financial(code, today),
+                    _hk_stock_valuation(code, today),
                 )
                 row.update(price)
                 row.update(financial)
+                row.update(valuation)
             elif equity and re.fullmatch(r"(?:[0369]\d{5}|[48]\d{5})", code):
                 price, profit, valuation = await asyncio.gather(
                     _stock_price(code, today),
