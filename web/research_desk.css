@@ -639,6 +639,33 @@ body, input, select, textarea, button { font-family:inherit; }
   #result .report-company-identity { align-items:baseline;gap:8px;flex-wrap:wrap; }
 }
 
+/* ETF name, price, and latest disclosed holdings share one card. */
+#result .report-header-inline.report-company-card.report-etf-card {
+  padding-bottom:25px;
+}
+#result .report-etf-card .etf-top-holdings {
+  width:100%;
+  min-width:0;
+  margin-top:22px;
+  padding-top:22px;
+  border-top:1px solid #dce5f3;
+}
+#result .report-etf-card .etf-top-holdings h3 {
+  margin:0 0 12px;
+  color:#183653;
+}
+#result .report-etf-card .etf-top-holdings .etf-table-wrap {
+  margin-top:12px;
+  border-radius:10px;
+  background:#fff;
+}
+@media(max-width:600px){
+  #result .report-etf-card .etf-top-holdings {
+    margin-top:18px;
+    padding-top:18px;
+  }
+}
+
 /* Single visible TOC heading: 研究目录, without an English eyebrow or count. */
 /* Linked article-style contents panel; limited to the 840px research column. */
 #result .report-toc {

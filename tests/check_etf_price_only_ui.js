@@ -81,6 +81,15 @@ assert.equal(metricCount(sink.innerHTML), 1,
 assert(sink.innerHTML.includes('ETF现价'));
 assert(sink.innerHTML.includes('1.567 元'));
 assert(sink.innerHTML.includes('最新披露前十大重仓股'));
+const outerCardStart = sink.innerHTML.indexOf('class="report-header-inline report-company-card report-etf-card"');
+const holdingsWithinCard = sink.innerHTML.indexOf('id="etf-latest-top-ten"');
+const verdictOutsideCard = sink.innerHTML.indexOf('id="report-verdict"');
+assert(outerCardStart >= 0 && holdingsWithinCard > outerCardStart &&
+  verdictOutsideCard > holdingsWithinCard, 'ETF identity, price and holdings must precede the separate verdict');
+assert(!sink.innerHTML.slice(outerCardStart, holdingsWithinCard).includes('</section>'),
+  'ETF identity card must remain open until after top-ten holdings');
+assert(sink.innerHTML.slice(holdingsWithinCard, verdictOutsideCard).includes('</div></section>'),
+  'top-ten holdings and outer ETF card must close together before the investment verdict');
 for (const field of ['市净率 PB', 'F10 披露ROE',
   '现金流/归母净利', 'IOPV参考溢价', 'ETF一年价格区间位置']) {
   assert(!sink.innerHTML.includes(field), 'ETF headline must omit ' + field);
