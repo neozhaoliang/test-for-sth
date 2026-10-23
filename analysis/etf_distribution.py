@@ -88,7 +88,7 @@ def _parse_official_distribution(text: str) -> dict:
         r"收益分配基准日[:：]?(\d{4})年(\d{1,2})月(\d{1,2})日", compact
     )
     found = re.search(
-        r"(?:基准日基金)?可供分配利润.{0,90}?([1-9]\d[\d,]*(?:\.\d{2,4})?)",
+        r"(?:基准日基金)?可供分配利润.{0,90}?((?:[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*)(?:\.\d{2,4})?)",
         compact,
     )
     if not (basis and found):
