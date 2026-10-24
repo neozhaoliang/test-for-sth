@@ -576,6 +576,7 @@ async def generate_report(
         market_context=market_context,
         freight_signal=freight_signal,
         margin_signal=margin_signal,
+        trading_crowding=trading_crowding,
         summary=summary,
         prompt_version=_PROMPT_VERSION,
         generated_at=int(time.time()),

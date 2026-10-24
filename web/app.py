@@ -1626,6 +1626,33 @@ function renderEvidenceSection(report) {
     html += '<div class="evidence-block missing"><b>融资盘与流通盘:</b> 暂缺</div>';
   }
 
+  const congestion=report.trading_crowding||{};
+  if(Object.keys(congestion).length) {
+    const asPct=(v,suffix='%')=>(v===null||v===undefined||!Number.isFinite(Number(v)))?
+      '未取得':Number(v).toFixed(2)+suffix;
+    let bits=[];
+    bits.push('融资余额 '+asPct(congestion.margin_balance_yi,' 亿元'));
+    bits.push('近几日变化 '+asPct(congestion.margin_change_pct));
+    if(congestion.margin_to_float_market_cap_pct!==null&&
+       congestion.margin_to_float_market_cap_pct!==undefined)
+      bits.push('占流通市值 '+asPct(congestion.margin_to_float_market_cap_pct));
+    if(congestion.financing_buy_to_same_day_turnover_pct!==null&&
+       congestion.financing_buy_to_same_day_turnover_pct!==undefined)
+      bits.push('融资买入额/同日成交额 '+
+        asPct(congestion.financing_buy_to_same_day_turnover_pct));
+    bits.push('近5日成交额/此前20日 '+
+      asPct(congestion.recent5_turnover_ratio,' 倍'));
+    let details=bits.join('；')+
+      '。'+String(congestion.assessment||'当前没有足够数据判断交易是否拥挤。');
+    details+=' 观察日期：'+String(congestion.margin_date||'融资未核实')+
+      ' / '+String(congestion.trade_date||'成交未核实')+
+      '；来源：'+String(congestion.margin_source||'交易所数据')+
+      '、'+String(congestion.turnover_source||'交易行情')+
+      '。融资余额是存量，成交额不代表资金净流入。';
+    html+='<div class="evidence-block"><b>融资杠杆与交易拥挤度：</b>'+
+      escapeHtml(details)+'</div>';
+  }
+  
   const ash = report.a_share_structure;
   if (ash) {
     let ashHtml = '<div class="evidence-block"><b>A股公开资金结构 (' +

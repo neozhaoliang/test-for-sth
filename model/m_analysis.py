@@ -106,6 +106,7 @@ class AnalysisReport(BaseModel):
     commodity_signal: Optional[dict] = Field(default=None, description="与公司产品匹配的周期商品期货代理 (20/60日方向、1年位置；铜产业可含内外盘背景)")
     freight_signal: Optional[dict] = Field(default=None, description="集运运价景气度 (仅航运/港口类公司)")
     margin_signal: Optional[dict] = Field(default=None, description="融资盘与流通盘 (融资余额序列/占流通市值比例/近期增减)")
+    trading_crowding: Optional[dict] = Field(default=None, description="融资余额增减、同日融资买入额占比、成交额相对20日基准及交易拥挤风险")
     market_context: Optional[dict] = Field(default=None, description="大盘与风格: 主要指数与个股的年内/上半年/下半年涨跌幅 + 个股历史区间位置")
     rmb_signal: Optional[dict] = Field(default=None, description="人民币汇率趋势 (全部股票，用于判断汇率对海外收入的影响方向)")
     macro_rates: Optional[dict] = Field(
